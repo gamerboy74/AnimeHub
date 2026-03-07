@@ -1,0 +1,43 @@
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AnimeStream - Your Magical Gateway to Anime</title>
+    <meta name="description" content="Discover and stream your favorite anime series and movies. Experience magical stories from Studio Ghibli and modern adventures with high-quality streaming." />
+    <meta name="keywords" content="anime, streaming, Studio Ghibli, anime series, anime movies, watch anime online" />
+    
+    <!-- Fonts - Defer non-critical fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Pacifico&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+    <noscript><link href="https://fonts.googleapis.com/css2?family=Pacifico&display=swap" rel="stylesheet"></noscript>
+    
+    <!-- Performance Hints -->
+    <link rel="preconnect" href="https://img.youtube.com" crossorigin>
+    <link rel="preconnect" href="https://www.youtube.com" crossorigin>
+    <link rel="preconnect" href="https://youtube-nocookie.com" crossorigin>
+    <link rel="preconnect" href="https://player.vimeo.com" crossorigin>
+    <link rel="dns-prefetch" href="https://readdy.ai">
+    <link rel="dns-prefetch" href="https://remixicon.com">
+    
+    <!-- Inline Critical CSS for above-the-fold content -->
+    <style>
+      /* Critical CSS - minimal styles to prevent FOUC */
+      body { margin: 0; font-family: system-ui, -apple-system, sans-serif; }
+      #root { min-height: 100vh; }
+      /* Prevent layout shift */
+      img { max-width: 100%; height: auto; }
+    </style>
+    
+    <!-- Icons - Defer loading -->
+    <link href="https://cdn.jsdelivr.net/npm/remixicon@4.0.0/fonts/remixicon.css" rel="stylesheet" media="print" onload="this.media='all'">
+    <noscript><link href="https://cdn.jsdelivr.net/npm/remixicon@4.0.0/fonts/remixicon.css" rel="stylesheet"></noscript>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx" defer></script>
+  </body>
+</html>

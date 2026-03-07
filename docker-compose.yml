@@ -1,0 +1,66 @@
+services:
+  # Redis Cache (optional but recommended)
+  redis:
+    image: redis:7-alpine
+    container_name: animehub-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - animehub-network
+
+  # Express Backend Server
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: animehub-server
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - PORT=3001
+      - VITE_SUPABASE_URL=${VITE_SUPABASE_URL}
+      - VITE_SUPABASE_ANON_KEY=${VITE_SUPABASE_ANON_KEY}
+      - REDIS_URL=redis://redis:6379
+      - SCRAPER_MAX_CONCURRENCY=${SCRAPER_MAX_CONCURRENCY:-2}
+      - SCRAPER_BREAKER_THRESHOLD=${SCRAPER_BREAKER_THRESHOLD:-8}
+      - SCRAPER_BREAKER_COOLDOWN_MS=${SCRAPER_BREAKER_COOLDOWN_MS:-30000}
+      - IN_MEMORY_MAX_ENTRIES=${IN_MEMORY_MAX_ENTRIES:-1000}
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:3001/health",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    volumes:
+      - ./server:/app/server:ro
+    networks:
+      - animehub-network
+
+volumes:
+  redis_data:
+    driver: local
+
+networks:
+  animehub-network:
+    driver: bridge

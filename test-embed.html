@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mega URL Embedding Test</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+            background: #1a1a1a;
+            color: white;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #60a5fa;
+        }
+        .status {
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 8px;
+            background: #2a2a2a;
+        }
+        .success { border-left: 4px solid #10b981; }
+        .error { border-left: 4px solid #ef4444; }
+        .warning { border-left: 4px solid #f59e0b; }
+        iframe {
+            width: 100%;
+            height: 600px;
+            border: 2px solid #374151;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        .logs {
+            background: #0a0a0a;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+            margin: 20px 0;
+        }
+        .log-entry {
+            margin: 5px 0;
+            padding: 5px;
+        }
+        .log-error { color: #ef4444; }
+        .log-success { color: #10b981; }
+        .log-warning { color: #f59e0b; }
+        .log-info { color: #60a5fa; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎬 Mega URL Embedding Test</h1>
+        
+        <div id="status" class="status warning">
+            <strong>Status:</strong> Testing...
+        </div>
+
+        <div class="logs" id="logs">
+            <div class="log-entry log-info">Starting embedding test...</div>
+        </div>
+
+        <h2>Iframe Test:</h2>
+        <iframe 
+            id="testIframe" 
+            src="https://megacloud.bloggy.click/stream/s-3/145452/sub"
+            allowfullscreen
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+        ></iframe>
+    </div>
+
+    <script>
+        const iframe = document.getElementById('testIframe');
+        const statusDiv = document.getElementById('status');
+        const logsDiv = document.getElementById('logs');
+        let loadTimeout;
+
+        function addLog(message, type = 'info') {
+            const logEntry = document.createElement('div');
+            logEntry.className = `log-entry log-${type}`;
+            logEntry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logsDiv.appendChild(logEntry);
+            logsDiv.scrollTop = logsDiv.scrollHeight;
+            console.log(message);
+        }
+
+        // Set timeout for 5 seconds
+        loadTimeout = setTimeout(() => {
+            addLog('⚠️ Iframe did not trigger onLoad after 5 seconds', 'warning');
+            addLog('This usually means X-Frame-Options or CSP is blocking the embed', 'warning');
+            statusDiv.innerHTML = '<strong>Status:</strong> ❌ Embedding BLOCKED (timeout after 5s)';
+            statusDiv.className = 'status error';
+        }, 5000);
+
+        iframe.addEventListener('load', () => {
+            clearTimeout(loadTimeout);
+            addLog('✅ Iframe onLoad event fired!', 'success');
+
+            // Try to access iframe content
+            try {
+                const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+                if (iframeDoc) {
+                    addLog('✅ SUCCESS! Iframe content is accessible', 'success');
+                    addLog('🎉 Embedding works! X-Frame-Options is NOT blocking', 'success');
+                    statusDiv.innerHTML = '<strong>Status:</strong> ✅ Embedding WORKS!';
+                    statusDiv.className = 'status success';
+                } else {
+                    addLog('⚠️ Iframe loaded but content is null', 'warning');
+                }
+            } catch (error) {
+                addLog('❌ Cannot access iframe content', 'error');
+                addLog(`Error: ${error.message}`, 'error');
+                addLog('🚫 This confirms X-Frame-Options: DENY or SAMEORIGIN is blocking embedding', 'error');
+                addLog('Or CSP frame-ancestors directive is blocking it', 'error');
+                statusDiv.innerHTML = '<strong>Status:</strong> ❌ Embedding BLOCKED by X-Frame-Options/CSP';
+                statusDiv.className = 'status error';
+            }
+        });
+
+        iframe.addEventListener('error', (e) => {
+            clearTimeout(loadTimeout);
+            addLog('❌ Iframe onError event fired', 'error');
+            addLog('The URL failed to load completely', 'error');
+            statusDiv.innerHTML = '<strong>Status:</strong> ❌ URL Failed to Load';
+            statusDiv.className = 'status error';
+        });
+
+        // Also test via network to see response
+        addLog('🔍 Testing mega URL accessibility...', 'info');
+        addLog('URL: https://megacloud.bloggy.click/stream/s-3/145452/sub', 'info');
+    </script>
+</body>
+</html>

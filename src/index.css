@@ -1,0 +1,26 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Fix cursor line issues */
+* {
+  outline: none !important;
+}
+
+*:focus {
+  outline: none !important;
+}
+
+/* Remove any unwanted cursor styles */
+body {
+  cursor: default !important;
+}
+
+/* Ensure proper cursor behavior */
+button, a, [role="button"] {
+  cursor: pointer;
+}
+
+input, textarea, select {
+  cursor: text;
+}
