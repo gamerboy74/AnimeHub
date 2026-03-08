@@ -3,7 +3,8 @@ services:
     name: animehub-api
     runtime: docker
     plan: free
-    dockerfilePath: Dockerfile.render
+    rootDir: server
+    dockerfilePath: ./Dockerfile
     envVars:
       - key: NODE_ENV
         value: production

@@ -22,15 +22,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Copy server package files and install
-COPY server/package*.json ./
+# Copy package files and install
+COPY package*.json ./
 RUN npm install
 
 # Install Playwright Chromium browser
 RUN npx playwright install chromium
 
 # Copy server application files
-COPY server/ ./
+COPY . ./
 
 EXPOSE 10000
 
