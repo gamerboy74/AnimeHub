@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: animehub-api
+    runtime: docker
+    plan: free
+    dockerfilePath: Dockerfile.render
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: VITE_SUPABASE_URL
+        sync: false
+      - key: VITE_SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false
