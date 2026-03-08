@@ -1,0 +1,23 @@
+{
+  "name": "animehub-server",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node index.js",
+    "install-playwright": "npx playwright install chromium --with-deps"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.57.4",
+    "axios": "^1.13.0",
+    "cheerio": "^1.1.2",
+    "compression": "^1.8.1",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "helmet": "^8.1.0",
+    "morgan": "^1.10.1",
+    "playwright-extra": "^4.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  }
+}

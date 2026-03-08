@@ -130,7 +130,8 @@ export const AnimeScraperComponent: React.FC = () => {
     }
 
     try {
-      const response = await fetch(`http://localhost:3001/api/anime/${animeId}/episodes`);
+      const API_BASE = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+      const response = await fetch(`${API_BASE}/api/anime/${animeId}/episodes`);
       if (response.ok) {
         const contentType = response.headers.get('content-type');
         if (contentType && contentType.includes('application/json')) {
@@ -440,7 +441,8 @@ export const AnimeScraperComponent: React.FC = () => {
     if (!selectedAnime) return;
     
     try {
-      const response = await fetch('http://localhost:3001/api/add-scraped-episode', {
+      const API_BASE = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+      const response = await fetch(`${API_BASE}/api/add-scraped-episode`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
