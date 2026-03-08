@@ -48,6 +48,7 @@ export class VideoService {
         lowerUrl.includes('bloggy.click') ||     // megacloud.bloggy.click
         lowerUrl.includes('bysesayeveum.com') ||  // 9anime alternate embed host
         lowerUrl.includes('f75s.com') ||           // bysesayeveum embeddable frame host
+        lowerUrl.includes('vidmoly.') ||          // vidmoly embed host (.biz, .net)
         lowerUrl.match(/\/e\/[a-z0-9]+$/i)) {     // Generic /e/<id> embed pattern
       return 'iframe';
     }

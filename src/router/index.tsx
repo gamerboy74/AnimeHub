@@ -1,27 +1,21 @@
 import { useEffect, useMemo } from 'react';
 import { useLocation, useRoutes } from 'react-router-dom';
 import routes from './config';
-import serviceWorkerManager, { backgroundPrefetch } from '../utils/cache/serviceWorker';
+import { backgroundPrefetch } from '../utils/cache/serviceWorker';
 import { updateDocumentTitle, updateMetaTags } from './utils/documentTitle';
 import { navigationAnalytics } from './analytics';
 import { NavigationTransition } from './components/NavigationTransition';
-import { log } from '../utils/logging';
 
 export function AppRoutes() {
   const element = useRoutes(routes);
   const location = useLocation();
 
-  // Register SW once on initial mount
-  useEffect(() => {
-    serviceWorkerManager.register();
-  }, []);
+  // Service Worker is registered in main.tsx (production only)
 
   // Update document title and meta tags on route change
   useEffect(() => {
-    const params = location.pathname.match(/\/[^/]+/g)?.reduce((acc, segment, index, arr) => {
-      // Extract dynamic params (simplified - would need route matching for full support)
-      return acc;
-    }, {} as Record<string, string>) || {};
+    const params: Record<string, string> = {};
+
 
     updateDocumentTitle(location.pathname, params, location.state as Record<string, unknown>);
     updateMetaTags(location.pathname, params, location.state as Record<string, unknown>);

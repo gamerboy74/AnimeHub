@@ -13,7 +13,7 @@ export default function Footer() {
             <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
               <div>
                 <h3 className="text-xl font-bold mb-4" style={{ fontFamily: '"Pacifico", serif' }}>
-                  AnimeStream
+                  AnimeHub
                 </h3>
                 <p className="text-teal-200 leading-relaxed">
                   Your magical gateway to the world of anime. Discover, watch, and fall in love with stories that inspire.
@@ -77,28 +77,28 @@ export default function Footer() {
                 <h4 className="font-semibold mb-4">Connect</h4>
                 <nav className="flex space-x-4" aria-label="Social media links">
                   <a
-                    href="https://twitter.com/animestream"
+                    href="#"
                     className="text-teal-200 hover:text-white transition-colors duration-200"
                     aria-label="Twitter"
                   >
                     <i className="ri-twitter-fill text-xl" aria-hidden="true" />
                   </a>
                   <a
-                    href="https://facebook.com/animestream"
+                    href="#"
                     className="text-teal-200 hover:text-white transition-colors duration-200"
                     aria-label="Facebook"
                   >
                     <i className="ri-facebook-fill text-xl" aria-hidden="true" />
                   </a>
                   <a
-                    href="https://instagram.com/animestream"
+                    href="#"
                     className="text-teal-200 hover:text-white transition-colors duration-200"
                     aria-label="Instagram"
                   >
                     <i className="ri-instagram-fill text-xl" aria-hidden="true" />
                   </a>
                   <a
-                    href="https://discord.gg/animestream"
+                    href="#"
                     className="text-teal-200 hover:text-white transition-colors duration-200"
                     aria-label="Discord"
                   >
@@ -109,7 +109,7 @@ export default function Footer() {
             </div>
             <div className="border-t border-teal-700 mt-12 pt-8 text-center text-teal-200">
               <p>
-                &copy; 2025 AnimeStream. All rights reserved. |{' '}
+                &copy; 2025 AnimeHub. All rights reserved. |{' '}
                 <a href="https://readdy.ai/?origin=logo" className="hover:text-white transition-colors duration-200">
                   Powered by Readdy
                 </a>

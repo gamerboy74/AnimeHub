@@ -52,6 +52,18 @@ export class AnimeService {
       // Use the optimized search function for better performance
       if (filters?.search || filters?.genre || filters?.year || filters?.status) {
         // Run both queries in parallel to reduce time (batch call)
+        // Build count query with standard Supabase filter chaining
+        let countQuery = supabase
+          .from('anime')
+          .select('*', { count: 'exact', head: true })
+        
+        if (filters?.genre) countQuery = countQuery.contains('genres', [filters.genre])
+        if (filters?.year) countQuery = countQuery.eq('year', filters.year)
+        if (filters?.status) countQuery = countQuery.eq('status', filters.status)
+        if (filters?.search) {
+          countQuery = countQuery.or(`title.ilike.%${filters.search}%,description.ilike.%${filters.search}%`)
+        }
+
         const [searchResult, countResult] = await Promise.all([
           supabase.rpc('search_anime_optimized', {
             search_term: filters?.search || '',
@@ -63,17 +75,7 @@ export class AnimeService {
             limit_count: limit,
             offset_count: (page - 1) * limit
           }),
-          supabase
-            .from('anime')
-            .select('*', { count: 'exact', head: true })
-            .modify((query) => {
-              if (filters?.genre) query.contains('genres', [filters.genre])
-              if (filters?.year) query.eq('year', filters.year)
-              if (filters?.status) query.eq('status', filters.status)
-              if (filters?.search) {
-                query.or(`title.ilike.%${filters.search}%,description.ilike.%${filters.search}%`)
-              }
-            })
+          countQuery
         ])
 
         if (searchResult.error) {
@@ -335,12 +337,26 @@ export class AnimeService {
         try {
           const episodeIds = sortedEpisodes.map((e: any) => e.id)
           
-          const [progressResult, favoritesResult, watchlistResult] = await Promise.all([
-            episodeIds.length > 0 ? supabase
-              .from('user_progress')
-              .select('*')
-              .eq('user_id', userId)
-              .in('episode_id', episodeIds) : Promise.resolve({ data: [] }),
+          // Batch episode IDs to avoid URL length limits for anime with many episodes
+          const BATCH_SIZE = 50
+          const progressPromises: Promise<{ data: any[] | null }>[] = []
+          for (let i = 0; i < episodeIds.length; i += BATCH_SIZE) {
+            const batch = episodeIds.slice(i, i + BATCH_SIZE)
+            progressPromises.push(
+              supabase
+                .from('user_progress')
+                .select('*')
+                .eq('user_id', userId)
+                .in('episode_id', batch)
+            )
+          }
+
+          const [progressResults, favoritesResult, watchlistResult] = await Promise.all([
+            episodeIds.length > 0
+              ? Promise.all(progressPromises).then(results =>
+                  results.flatMap(r => r.data || [])
+                )
+              : Promise.resolve([]),
             
             supabase
               .from('user_favorites')
@@ -357,7 +373,7 @@ export class AnimeService {
               .maybeSingle()
           ])
 
-          result.user_progress = progressResult.data || []
+          result.user_progress = progressResults
           result.is_favorited = !!favoritesResult.data
           result.is_in_watchlist = !!watchlistResult.data
         } catch (userError) {

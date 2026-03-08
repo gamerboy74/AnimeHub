@@ -5,6 +5,7 @@ import DashboardStats from './components/DashboardStats';
 import RecentActivity from './components/RecentActivity';
 import QuickActions from './components/QuickActions';
 import SystemHealth from './components/SystemHealth';
+import EpisodeScheduler from './components/EpisodeScheduler';
 import { SparkleLoadingSpinner } from '../../components/base/LoadingSpinner';
 import { useAdminStats, useRecentActivity, useSystemHealth } from '../../hooks/admin';
 import { sessionManager } from '../../utils/session/manager';
@@ -180,6 +181,7 @@ export default function AdminDashboard() {
             >
               <QuickActions onAction={handleQuickAction} />
               <SystemHealth health={health} />
+              <EpisodeScheduler />
             </motion.div>
           </div>
 

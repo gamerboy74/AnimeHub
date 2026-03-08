@@ -1,6 +1,7 @@
 import { supabase, isSupabaseConfigured } from '../../lib/database/supabase'
 import { UserService } from '../../services/user'
 import type { Tables } from '../../lib/database/supabase'
+import type { Subscription } from '@supabase/supabase-js'
 
 type User = Tables<'users'>
 
@@ -23,7 +24,9 @@ class SessionManager {
   }
   
   private listeners: Set<(state: SessionState) => void> = new Set()
+  private authChangeListeners: Set<(user: User | null) => void> = new Set()
   private refreshTimeout: NodeJS.Timeout | null = null
+  private authSubscription: Subscription | null = null
   // private readonly REFRESH_INTERVAL = 5 * 60 * 1000 // 5 minutes - disabled
   private readonly SESSION_TIMEOUT = 30 * 60 * 1000 // 30 minutes
 
@@ -96,6 +99,43 @@ class SessionManager {
       this.state.isInitialized = true
       this.state.lastChecked = Date.now()
       this.notifyListeners()
+    }
+
+    // Listen for Supabase auth state changes (login, logout, token refresh, OAuth callback)
+    if (isSupabaseConfigured) {
+      const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
+        console.log('SessionManager: Auth state changed:', event)
+        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+          if (session?.user) {
+            try {
+              const userProfile = await UserService.getCurrentUser()
+              const previousUser = this.state.user
+              this.state.user = userProfile
+              this.state.lastChecked = Date.now()
+              this.state.loading = false
+              this.state.error = null
+              this.state.isInitialized = true
+              this.storeSession()
+              this.notifyListeners()
+              // Always notify auth change listeners on SIGNED_IN
+              // (the previous ID check raced with refreshSession and skipped notification)
+              this.notifyAuthChangeListeners(userProfile)
+            } catch (error) {
+              console.error('SessionManager: Failed to fetch user profile on auth change:', error)
+            }
+          }
+        } else if (event === 'SIGNED_OUT') {
+          this.state.user = null
+          this.state.lastChecked = Date.now()
+          this.state.loading = false
+          this.state.error = null
+          this.clearStoredSession()
+          this.clearUserData()
+          this.notifyListeners()
+          this.notifyAuthChangeListeners(null)
+        }
+      })
+      this.authSubscription = data.subscription
     }
   }
 
@@ -190,6 +230,20 @@ class SessionManager {
     }
   }
 
+  private clearUserData() {
+    try {
+      localStorage.removeItem('watchlist')
+      localStorage.removeItem('favorites')
+      localStorage.removeItem('watchProgress')
+    } catch (error) {
+      console.warn('Failed to clear user data:', error)
+    }
+  }
+
+  private notifyAuthChangeListeners(user: User | null) {
+    this.authChangeListeners.forEach(listener => listener(user))
+  }
+
   private notifyListeners() {
     // Only log when loading state changes to reduce noise
     if (this.state.loading === false) {
@@ -224,13 +278,12 @@ class SessionManager {
       if (error) throw error
 
       await this.refreshSession()
-      // this.startRefreshTimer() // Disabled to prevent loading issues
+      this.notifyAuthChangeListeners(this.state.user)
     } catch (error) {
       this.state.error = error instanceof Error ? error.message : 'Sign in failed'
-      throw error
-    } finally {
       this.state.loading = false
       this.notifyListeners()
+      throw error
     }
   }
 
@@ -253,21 +306,18 @@ class SessionManager {
       if (error) throw error
 
       await this.refreshSession()
-      // this.startRefreshTimer() // Disabled to prevent loading issues
+      this.notifyAuthChangeListeners(this.state.user)
     } catch (error) {
       this.state.error = error instanceof Error ? error.message : 'Sign up failed'
-      throw error
-    } finally {
       this.state.loading = false
       this.notifyListeners()
+      throw error
     }
   }
 
   async signInWithGoogle() {
     try {
-      this.state.loading = true
       this.state.error = null
-      this.notifyListeners()
 
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
@@ -277,20 +327,17 @@ class SessionManager {
       })
 
       if (error) throw error
+      // Browser redirects away — onAuthStateChange handles the return
     } catch (error) {
       this.state.error = error instanceof Error ? error.message : 'Google sign in failed'
-      throw error
-    } finally {
-      this.state.loading = false
       this.notifyListeners()
+      throw error
     }
   }
 
   async signInWithGitHub() {
     try {
-      this.state.loading = true
       this.state.error = null
-      this.notifyListeners()
 
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'github',
@@ -300,12 +347,11 @@ class SessionManager {
       })
 
       if (error) throw error
+      // Browser redirects away — onAuthStateChange handles the return
     } catch (error) {
       this.state.error = error instanceof Error ? error.message : 'GitHub sign in failed'
-      throw error
-    } finally {
-      this.state.loading = false
       this.notifyListeners()
+      throw error
     }
   }
 
@@ -321,17 +367,21 @@ class SessionManager {
       this.state.user = null
       this.state.lastChecked = Date.now()
       this.clearStoredSession()
+      this.clearUserData()
       
       if (this.refreshTimeout) {
         clearTimeout(this.refreshTimeout)
         this.refreshTimeout = null
       }
-    } catch (error) {
-      this.state.error = error instanceof Error ? error.message : 'Sign out failed'
-      throw error
-    } finally {
+
       this.state.loading = false
       this.notifyListeners()
+      this.notifyAuthChangeListeners(null)
+    } catch (error) {
+      this.state.error = error instanceof Error ? error.message : 'Sign out failed'
+      this.state.loading = false
+      this.notifyListeners()
+      throw error
     }
   }
 
@@ -383,6 +433,13 @@ class SessionManager {
 
 // Export singleton instance
 export const sessionManager = SessionManager.getInstance()
+
+// Subscribe to auth user changes (login/logout/user switch)
+// Returns unsubscribe function
+export function onAuthUserChanged(listener: (user: User | null) => void): () => void {
+  sessionManager['authChangeListeners'].add(listener)
+  return () => { sessionManager['authChangeListeners'].delete(listener) }
+}
 
 // Export types
 export type { SessionState }

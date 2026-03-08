@@ -52,10 +52,10 @@ export const useSubscriptionType = () => {
   return useMemo(() => user?.subscription_type || 'free', [user?.subscription_type]);
 };
 
-// Hook to check if user is admin
+// Hook to check if user is admin (uses role field from users table)
 export const useIsAdmin = () => {
   const { user } = useAuthContext();
-  return useMemo(() => user?.subscription_type === 'admin', [user?.subscription_type]);
+  return useMemo(() => user?.role === 'admin', [user?.role]);
 };
 
 // Hook to check if user is premium

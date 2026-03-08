@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useTransition, Suspense } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import Navbar from '../../components/feature/Navbar';
 import AnimeCard from '../../components/feature/AnimeCard';
@@ -13,6 +13,7 @@ import SeasonTabs from '../../components/feature/SeasonTabs';
 import { useWatchlist } from '../../hooks/user/watchlist';
 import { useFavorites } from '../../hooks/user/favorites';
 import { generatePlayerUrl } from '../../utils/media/player';
+import { getProxiedImageUrl, getDirectImageUrl } from '../../utils/media/imageProxy';
 import ErrorBoundary from '../../components/common/ErrorBoundary';
 import { SectionError, ContentError } from '../../components/common/ErrorFallbacks';
 import Footer from '../../components/feature/Footer';
@@ -40,7 +41,10 @@ interface Anime {
 export default function AnimeDetailPage() {
   const { id } = useParams<{ id: string }>();
   const user = useCurrentUser();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [selectedEpisode, setSelectedEpisode] = useState(1);
+  const [selectedRange, setSelectedRange] = useState(0); // 0 = first range (1-100)
   const [showToast, setShowToast] = useState<string | null>(null);
   const [watchlistStatus, setWatchlistStatus] = useState(false); // Replaced useOptimistic
   const [favoriteStatus, setFavoriteStatus] = useState(false); // Replaced useOptimistic
@@ -149,35 +153,15 @@ export default function AnimeDetailPage() {
       (async () => {
         try {
           if (!user) {
-            const savedWatchlist = JSON.parse(localStorage.getItem('watchlist') || '[]');
-            if (wasInWatchlist) {
-              const updatedWatchlist = savedWatchlist.filter((item: any) => item.id !== anime.id);
-              localStorage.setItem('watchlist', JSON.stringify(updatedWatchlist));
-              showToastMessage('Removed from watchlist');
-            } else {
-              const animeData = {
-                id: anime.id,
-                title: anime.title,
-                image: anime.poster_url,
-                rating: anime.rating,
-                year: anime.year,
-                episodes: anime.total_episodes,
-                genres: anime.genres,
-                status: anime.status,
-                description: anime.description,
-                addedAt: new Date().toISOString(),
-              };
-              localStorage.setItem('watchlist', JSON.stringify([...savedWatchlist, animeData]));
-              showToastMessage('Added to watchlist (local storage)');
-            }
+            navigate(`/login?redirect=${encodeURIComponent(location.pathname + location.search)}`);
+            return;
+          }
+          if (wasInWatchlist) {
+            await removeFromWatchlist(anime.id);
+            showToastMessage('Removed from watchlist');
           } else {
-            if (wasInWatchlist) {
-              await removeFromWatchlist(anime.id);
-              showToastMessage('Removed from watchlist');
-            } else {
-              await addToWatchlist(anime.id);
-              showToastMessage('Added to watchlist');
-            }
+            await addToWatchlist(anime.id);
+            showToastMessage('Added to watchlist');
           }
         } catch (error) {
           console.error('Error updating watchlist:', error);
@@ -200,35 +184,15 @@ export default function AnimeDetailPage() {
       (async () => {
         try {
           if (!user) {
-            const savedFavorites = JSON.parse(localStorage.getItem('favorites') || '[]');
-            if (wasFavorite) {
-              const updatedFavorites = savedFavorites.filter((item: any) => item.id !== anime.id);
-              localStorage.setItem('favorites', JSON.stringify(updatedFavorites));
-              showToastMessage('Removed from favorites');
-            } else {
-              const animeData = {
-                id: anime.id,
-                title: anime.title,
-                image: anime.poster_url,
-                rating: anime.rating,
-                year: anime.year,
-                episodes: anime.total_episodes,
-                genres: anime.genres,
-                status: anime.status,
-                description: anime.description,
-                addedAt: new Date().toISOString(),
-              };
-              localStorage.setItem('favorites', JSON.stringify([...savedFavorites, animeData]));
-              showToastMessage('Added to favorites (local storage)');
-            }
+            navigate(`/login?redirect=${encodeURIComponent(location.pathname + location.search)}`);
+            return;
+          }
+          if (wasFavorite) {
+            await removeFromFavorites(anime.id);
+            showToastMessage('Removed from favorites');
           } else {
-            if (wasFavorite) {
-              await removeFromFavorites(anime.id);
-              showToastMessage('Removed from favorites');
-            } else {
-              await addToFavorites(anime.id);
-              showToastMessage('Added to favorites');
-            }
+            await addToFavorites(anime.id);
+            showToastMessage('Added to favorites');
           }
         } catch (error) {
           console.error('Error updating favorites:', error);
@@ -271,6 +235,27 @@ export default function AnimeDetailPage() {
       }))
     );
   }, [anime]);
+
+  // Episode range chunks for large anime (100 episodes per range)
+  const EPISODES_PER_RANGE = 100;
+  const episodeRanges = useMemo(() => {
+    if (episodes.length <= EPISODES_PER_RANGE) return null; // No range selector needed
+    const ranges: { start: number; end: number }[] = [];
+    for (let i = 0; i < episodes.length; i += EPISODES_PER_RANGE) {
+      ranges.push({
+        start: i + 1,
+        end: Math.min(i + EPISODES_PER_RANGE, episodes.length),
+      });
+    }
+    return ranges;
+  }, [episodes]);
+
+  // Filter episodes by selected range
+  const visibleEpisodes = useMemo(() => {
+    if (!episodeRanges) return episodes;
+    const start = selectedRange * EPISODES_PER_RANGE;
+    return episodes.slice(start, start + EPISODES_PER_RANGE);
+  }, [episodes, episodeRanges, selectedRange]);
 
   // Loading state
   if (animeLoading) {
@@ -316,13 +301,13 @@ export default function AnimeDetailPage() {
         {/* Background Image */}
         <div className="absolute inset-0 h-96 md:h-[500px] lg:h-[600px]">
           <img
-            src={
+            src={getProxiedImageUrl(
               (anime.banner_url && typeof anime.banner_url === 'string' && anime.banner_url.trim())
                 ? anime.banner_url
                 : (anime.poster_url && typeof anime.poster_url === 'string' && anime.poster_url.trim())
                   ? anime.poster_url
                   : '/assets/images/default-anime-banner.jpg'
-            }
+            )}
             alt={`${anime.title} banner`}
             className="w-full h-full object-cover"
             width={1920}
@@ -331,12 +316,10 @@ export default function AnimeDetailPage() {
             fetchPriority="auto"
             onError={(e) => {
               const target = e.currentTarget as HTMLImageElement;
-              // If already tried default banner, hide the image
-              if (target.src.includes('default-anime-banner.jpg')) {
-                target.style.display = 'none';
-              } else {
-                // Fallback to default banner
-                target.src = '/assets/images/default-anime-banner.jpg';
+              // If the proxied URL failed, try the direct CDN URL
+              const directUrl = getDirectImageUrl(target.src);
+              if (directUrl && target.src !== directUrl) {
+                target.src = directUrl;
               }
             }}
           />
@@ -367,8 +350,8 @@ export default function AnimeDetailPage() {
                   >
                     <div className="w-64 h-96 mx-auto lg:mx-0 rounded-2xl overflow-hidden shadow-2xl">
                       <img
-                        src={anime.poster_url && typeof anime.poster_url === 'string' && anime.poster_url.trim() ? anime.poster_url : '/assets/images/default-anime-poster.jpg'}
-                        srcSet={anime.poster_url && typeof anime.poster_url === 'string' && anime.poster_url.trim() ? `${anime.poster_url}?w=200 200w, ${anime.poster_url}?w=300 300w, ${anime.poster_url}?w=450 450w, ${anime.poster_url}?w=600 600w` : undefined}
+                        src={getProxiedImageUrl(anime.poster_url && typeof anime.poster_url === 'string' && anime.poster_url.trim() ? anime.poster_url : '/assets/images/default-anime-poster.jpg')}
+                        srcSet={anime.poster_url && typeof anime.poster_url === 'string' && anime.poster_url.trim() ? `${getProxiedImageUrl(`${anime.poster_url}?w=200`)} 200w, ${getProxiedImageUrl(`${anime.poster_url}?w=300`)} 300w, ${getProxiedImageUrl(`${anime.poster_url}?w=450`)} 450w, ${getProxiedImageUrl(`${anime.poster_url}?w=600`)} 600w` : undefined}
                         sizes="(max-width: 640px) 200px, 300px"
                         alt={`${anime.title} poster`}
                         className="w-full h-full object-cover"
@@ -378,11 +361,13 @@ export default function AnimeDetailPage() {
                         decoding="async"
                         onError={(e) => {
                           const target = e.currentTarget as HTMLImageElement;
-                          // If already tried local fallback, use readdy.ai as last resort
-                          if (target.src.includes('default-anime-poster.jpg')) {
-                            target.src = 'https://readdy.ai/api/search-image?query=Anime%20poster&width=300&height=450&seq=anime-poster-fallback&orientation=portrait';
-                          } else {
-                            target.src = '/assets/images/default-anime-poster.jpg';
+                          // Prevent infinite retry loop
+                          if (target.dataset.fallback) return;
+                          target.dataset.fallback = '1';
+                          // Try direct CDN URL if proxy failed
+                          if (anime.poster_url && typeof anime.poster_url === 'string' && anime.poster_url.trim()) {
+                            target.srcset = '';
+                            target.src = anime.poster_url;
                           }
                         }}
                       />
@@ -645,13 +630,33 @@ export default function AnimeDetailPage() {
               <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl p-8 border border-white/50">
                 {/* Season Tabs */}
                 <SeasonTabs seasons={seasons} currentAnimeId={anime.id} />
+
+                {/* Episode Range Selector */}
+                {episodeRanges && (
+                  <div className="flex flex-wrap gap-2 mb-6">
+                    {episodeRanges.map((range, index) => (
+                      <button
+                        key={index}
+                        onClick={() => setSelectedRange(index)}
+                        className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-200 ${
+                          selectedRange === index
+                            ? 'bg-teal-500 text-white shadow-md'
+                            : 'bg-teal-50 text-teal-700 hover:bg-teal-100 border border-teal-200'
+                        }`}
+                      >
+                        {range.start} - {range.end}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
                 <div
                   className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"
                   style={{ contentVisibility: 'auto', containIntrinsicSize: '1000px' }}
                   role="list"
                   aria-label="Episode list"
                 >
-                  {episodes.map((episode: any) => {
+                  {visibleEpisodes.map((episode: any) => {
                     const episodeNumber = episode.episode_number || episode.number;
                     const episodeTitle = episode.title || `Episode ${episodeNumber}`;
                     const episodeDuration = episode.duration;

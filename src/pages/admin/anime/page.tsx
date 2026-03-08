@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { useQueryClient } from '@tanstack/react-query';
 import { AdminService } from '../../../services/admin';
-import { AnimeService } from '../../../services/anime';
+import { invalidateAnimeCaches } from '../../../utils/cache/invalidateAnimeCaches';
 import AddAnimeModal from '../../../components/admin/AddAnimeModal';
 import AddEpisodeModal from '../../../components/admin/AddEpisodeModal';
 import ConfirmationDialog from '../../../components/admin/ConfirmationDialog';
@@ -173,17 +173,7 @@ This action cannot be undone.`,
           await AdminService.deleteAnime(animeId);
           
           // Invalidate React Query cache for all anime-related queries
-          await Promise.all([
-            queryClient.invalidateQueries({ queryKey: ['anime', 'featured'] }),
-            queryClient.invalidateQueries({ queryKey: ['anime', 'trending'] }),
-            queryClient.invalidateQueries({ queryKey: ['anime', 'popular'] }),
-            queryClient.invalidateQueries({ queryKey: ['anime', 'recent'] }),
-            queryClient.invalidateQueries({ queryKey: ['anime', 'list'] }),
-            queryClient.invalidateQueries({ queryKey: ['anime', 'byId', animeId] }),
-          ]);
-          
-          // Clear local service cache
-          AnimeService.clearCache();
+          await invalidateAnimeCaches(queryClient, animeId);
           
           await fetchAnime(currentPage);
           
@@ -229,16 +219,7 @@ This action cannot be undone.`,
             await AdminService.bulkDeleteAnime(selectedIds);
             
             // Invalidate React Query cache for all anime-related queries
-            await Promise.all([
-              queryClient.invalidateQueries({ queryKey: ['anime', 'featured'] }),
-              queryClient.invalidateQueries({ queryKey: ['anime', 'trending'] }),
-              queryClient.invalidateQueries({ queryKey: ['anime', 'popular'] }),
-              queryClient.invalidateQueries({ queryKey: ['anime', 'recent'] }),
-              queryClient.invalidateQueries({ queryKey: ['anime', 'list'] }),
-            ]);
-            
-            // Clear local service cache
-            AnimeService.clearCache();
+            await invalidateAnimeCaches(queryClient);
             
             setSuccessMessage(`${selectedIds.length} anime deleted successfully!`);
             await fetchAnime(currentPage);
@@ -251,14 +232,7 @@ This action cannot be undone.`,
       } else {
         await AdminService.bulkUpdateAnimeStatus(selectedIds, action);
         // Invalidate caches after status change
-        await Promise.all([
-          queryClient.invalidateQueries({ queryKey: ['anime', 'featured'] }),
-          queryClient.invalidateQueries({ queryKey: ['anime', 'trending'] }),
-          queryClient.invalidateQueries({ queryKey: ['anime', 'popular'] }),
-          queryClient.invalidateQueries({ queryKey: ['anime', 'recent'] }),
-          queryClient.invalidateQueries({ queryKey: ['anime', 'list'] }),
-        ]);
-        AnimeService.clearCache();
+        await invalidateAnimeCaches(queryClient);
         setSuccessMessage(`${selectedIds.length} anime status updated to ${action}!`);
       }
 
@@ -283,14 +257,7 @@ This action cannot be undone.`,
   const handleAnimeCreated = async (_newAnime?: any) => {
     setShowAddAnimeModal(false);
     // Invalidate all anime query caches so home/browse pages update
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['anime', 'featured'] }),
-      queryClient.invalidateQueries({ queryKey: ['anime', 'trending'] }),
-      queryClient.invalidateQueries({ queryKey: ['anime', 'popular'] }),
-      queryClient.invalidateQueries({ queryKey: ['anime', 'recent'] }),
-      queryClient.invalidateQueries({ queryKey: ['anime', 'list'] }),
-    ]);
-    AnimeService.clearCache();
+    await invalidateAnimeCaches(queryClient);
     // Force refresh - go to page 1 since new anime will be there (sorted by created_at desc)
     await fetchAnime(1);
     setCurrentPage(1);
@@ -300,14 +267,7 @@ This action cannot be undone.`,
 
   const handleAnimeImported = async () => {
     // Invalidate React Query cache for all anime-related queries
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['anime', 'featured'] }),
-      queryClient.invalidateQueries({ queryKey: ['anime', 'trending'] }),
-      queryClient.invalidateQueries({ queryKey: ['anime', 'popular'] }),
-      queryClient.invalidateQueries({ queryKey: ['anime', 'recent'] }),
-      queryClient.invalidateQueries({ queryKey: ['anime', 'list'] }),
-    ]);
-    AnimeService.clearCache();
+    await invalidateAnimeCaches(queryClient);
     // Refresh the current page
     await fetchAnime(currentPage);
     setSuccessMessage('Anime imported successfully! List refreshed.');
@@ -319,12 +279,7 @@ This action cannot be undone.`,
     setSelectedAnimeForEpisode(null);
     
     // Invalidate TQ caches for episode-related data
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['anime', 'list'] }),
-      queryClient.invalidateQueries({ queryKey: ['anime', 'recent'] }),
-      selectedAnimeForModal && queryClient.invalidateQueries({ queryKey: ['anime', 'byId', selectedAnimeForModal.id] }),
-    ]);
-    AnimeService.clearCache();
+    await invalidateAnimeCaches(queryClient, selectedAnimeForModal?.id);
     
     // Refresh anime list to update episode counts
     await fetchAnime(currentPage);
@@ -732,7 +687,7 @@ This action cannot be undone.`,
               <div>
                 <p className="text-sm font-medium text-slate-500 mb-1">Ongoing</p>
                 <p className="text-3xl font-bold text-amber-600">
-                  {anime.filter(a => a.status === 'pending').length}
+                  {anime.filter(a => a.status === 'ongoing').length}
                 </p>
               </div>
               <div className="w-12 h-12 bg-amber-100 rounded-xl flex items-center justify-center">
@@ -1689,10 +1644,7 @@ This action cannot be undone.`,
               setEpisodesCache({ ...episodesCache });
             }
             // Invalidate TQ caches so other pages see new episodes
-            queryClient.invalidateQueries({ queryKey: ['anime', 'byId', selectedAnimeForScraping.id] });
-            queryClient.invalidateQueries({ queryKey: ['anime', 'recent'] });
-            queryClient.invalidateQueries({ queryKey: ['anime', 'list'] });
-            AnimeService.clearCache();
+            invalidateAnimeCaches(queryClient, selectedAnimeForScraping.id);
           }}
         />
       )}

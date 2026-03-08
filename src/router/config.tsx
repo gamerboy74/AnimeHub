@@ -14,6 +14,7 @@ const ProfilePage = lazy(() => import('../pages/profile/page'));
 const SearchPage = lazy(() => import('../pages/search/page'));
 const SettingsPage = lazy(() => import('../pages/settings/page'));
 const FavoritesPage = lazy(() => import('../pages/favorites/page'));
+const LoginPage = lazy(() => import('../pages/login/page'));
 const NotFoundPage = lazy(() => import('../pages/errors/NotFound'));
 
 // Admin Pages
@@ -85,6 +86,10 @@ const routes: RouteObject[] = [
         </ProtectedRoute>
       </RouteWrapper>
     )
+  },
+  {
+    path: '/login',
+    element: <RouteWrapper path="/login"><LoginPage /></RouteWrapper>
   },
   // Admin Routes
   {

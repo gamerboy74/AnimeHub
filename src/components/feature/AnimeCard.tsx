@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
+import { getProxiedImageUrl } from '../../utils/media/imageProxy';
 
 // Interfaces for type safety
+import { useCurrentUser } from '../../hooks/auth/selectors';
 interface Anime {
   _id: string;
   title: string;
@@ -57,6 +59,9 @@ const AnimeCard = React.memo(function AnimeCard(props: AnimeCardProps) {
   const [showMoreInfo, setShowMoreInfo] = useState(false);
 
   const fallbackImage = '/path/to/fallback-image.jpg'; // Replace with actual fallback image path
+  const user = useCurrentUser();
+  const navigate = useNavigate();
+  const location = useLocation();
 
   // Load saved states from localStorage with error handling
   useEffect(() => {
@@ -99,6 +104,11 @@ const AnimeCard = React.memo(function AnimeCard(props: AnimeCardProps) {
     ) => {
       e.preventDefault();
       e.stopPropagation();
+
+      if (!user) {
+        navigate(`/login?redirect=${encodeURIComponent(location.pathname + location.search)}`);
+        return;
+      }
 
       try {
         const key = type;
@@ -195,8 +205,8 @@ const AnimeCard = React.memo(function AnimeCard(props: AnimeCardProps) {
           {/* Image Container */}
           <div className="relative aspect-[3/4] overflow-hidden">
             <img
-              src={props.cover || fallbackImage}
-              srcSet={props.cover ? `${props.cover}?w=150 150w, ${props.cover}?w=300 300w, ${props.cover}?w=600 600w, ${props.cover}?w=900 900w` : undefined}
+              src={getProxiedImageUrl(props.cover) || fallbackImage}
+              srcSet={props.cover ? `${getProxiedImageUrl(`${props.cover}?w=150`)} 150w, ${getProxiedImageUrl(`${props.cover}?w=300`)} 300w, ${getProxiedImageUrl(`${props.cover}?w=600`)} 600w, ${getProxiedImageUrl(`${props.cover}?w=900`)} 900w` : undefined}
               sizes="(max-width: 640px) 45vw, (max-width: 1024px) 30vw, 20vw"
               alt={props.title}
               className="w-full h-full object-cover object-top transition-transform duration-300 group-hover:scale-110"
@@ -347,10 +357,9 @@ const AnimeCard = React.memo(function AnimeCard(props: AnimeCardProps) {
               className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto"
               onClick={(e) => e.stopPropagation()}
             >
-              {/* Header */}
               <div className="relative">
                 <img
-                  src={props.cover || fallbackImage}
+                  src={getProxiedImageUrl(props.cover) || fallbackImage}
                   alt={props.title}
                   className="w-full h-48 object-cover object-top rounded-t-2xl"
                   width={800}

@@ -81,11 +81,11 @@ export class AdminService {
 
       const { data: profile } = await supabase
         .from('users')
-        .select('role, is_admin')
+        .select('role')
         .eq('id', user.id)
         .single()
 
-      return !!(profile?.is_admin || profile?.role === 'admin')
+      return profile?.role === 'admin'
     } catch (error) {
       console.error('Error checking admin status:', error)
       return false
@@ -643,11 +643,14 @@ export class AdminService {
       // Calculate additional stats for each anime
       const enrichedAnime = await Promise.all(anime?.map(async (item) => {
         // Get unique viewers count (users who have watched any episode of this anime)
-        const { data: viewers } = await supabase
-          .from('user_progress')
-          .select('user_id')
-          .in('episode_id', item.episodes?.map((ep: any) => ep.id) || [])
-          .not('user_id', 'is', null)
+        const episodeIds = item.episodes?.map((ep: any) => ep.id) || [];
+        const { data: viewers } = episodeIds.length > 0
+          ? await supabase
+            .from('user_progress')
+            .select('user_id')
+            .in('episode_id', episodeIds)
+            .not('user_id', 'is', null)
+          : { data: [] };
 
         const uniqueViewers = new Set(viewers?.map((v: any) => v.user_id) || []).size
 
@@ -1048,10 +1051,13 @@ export class AdminService {
         .order('created_at', { ascending: false })
 
       // Get unique viewers count (users who have watched any episode of this anime)
-      const { data: viewers } = await supabase
-        .from('user_progress')
-        .select('user_id, episode_id, progress_seconds, is_completed, last_watched')
-        .in('episode_id', episodes?.map(ep => ep.id) || [])
+      const episodeIds = episodes?.map(ep => ep.id) || [];
+      const { data: viewers } = episodeIds.length > 0
+        ? await supabase
+          .from('user_progress')
+          .select('user_id, episode_id, progress_seconds, is_completed, last_watched')
+          .in('episode_id', episodeIds)
+        : { data: [] };
 
         // Get content reports for this anime
         let reports = null;

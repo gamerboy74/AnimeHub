@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { AdminService, type AdminStats, type UserManagement, type SystemHealth } from '../../services/admin'
+import { onAuthUserChanged } from '../../utils/session/manager'
 
 // Global cache to prevent refetching on every mount
 const adminCache = {
@@ -17,6 +18,13 @@ const adminCache = {
 
 const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes
 const ADMIN_CACHE_DURATION = 10 * 60 * 1000 // 10 minutes for admin status
+
+// Module-level: always invalidate admin cache on auth change,
+// even if no useAdmin() hook is currently mounted.
+onAuthUserChanged(() => {
+  adminCache.adminStatus = null
+  adminCache.lastFetch.adminStatus = 0
+})
 
 export function useAdmin() {
   const [isAdmin, setIsAdmin] = useState<boolean>(adminCache.adminStatus || false)
@@ -55,6 +63,14 @@ export function useAdmin() {
 
   useEffect(() => {
     checkAdminStatus()
+
+    // Invalidate admin cache when the auth user changes
+    const unsub = onAuthUserChanged(() => {
+      adminCache.adminStatus = null
+      adminCache.lastFetch.adminStatus = 0
+      checkAdminStatus(true)
+    })
+    return unsub
   }, []) // Remove checkAdminStatus dependency to prevent re-running
 
   return {

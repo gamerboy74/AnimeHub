@@ -9,7 +9,7 @@ export const queryClient = new QueryClient({
       retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000), // Exponential backoff
       refetchOnWindowFocus: false, // Prevent refetch on tab focus
       refetchOnReconnect: true,
-      refetchOnMount: false, // Use cached data if available
+      refetchOnMount: true, // Refetch on component mount to get fresh data
       networkMode: 'online', // Only retry when online
     },
     mutations: {

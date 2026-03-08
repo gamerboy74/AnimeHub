@@ -255,6 +255,23 @@ export class AnimeImporterService {
                 edges {
                   id
                   role
+                  voiceActors(language: JAPANESE) {
+                    id
+                    name {
+                      full
+                      native
+                    }
+                  }
+                  voiceActorRoles {
+                    voiceActor {
+                      id
+                      name {
+                        full
+                        native
+                      }
+                      language
+                    }
+                  }
                   node {
                     id
                     name {
@@ -439,11 +456,10 @@ export class AnimeImporterService {
           const episodeResult = await this.autoCreateEpisodeStubs(data.id, (animeData as any).mal_id, animeData.title || '')
           console.log(`📺 Episode stubs: ${episodeResult.created} created, ${episodeResult.skipped} skipped`)
 
-          // If Jikan returned zero episodes, delete the anime
+          // If Jikan returned zero episodes, we used to delete the anime here.
+          // However, we should keep it because it might just not be aired yet or Jikan is missing data.
           if (episodeResult.total === 0) {
-            console.log(`🗑️ No episodes found for "${animeData.title}" — deleting anime`)
-            await supabase.from('anime').delete().eq('id', data.id)
-            return null
+            console.log(`⚠️ No episode stubs found for "${animeData.title}" on Jikan, but keeping the anime record.`)
           }
 
           // Auto-scrape stream URLs in the background (unless caller will do it)
@@ -485,72 +501,121 @@ export class AnimeImporterService {
     malId: number,
     animeTitle: string,
   ): Promise<{ created: number; skipped: number; total: number }> {
-    const JIKAN_EPISODES_URL = `${this.JIKAN_BASE_URL}/anime/${malId}/episodes`
     let created = 0
     let skipped = 0
     let total = 0
-    let page = 1
-    let hasNextPage = true
 
-    while (hasNextPage) {
-      // Jikan rate limit: ~3 req/s — be conservative
-      if (page > 1) await new Promise(r => setTimeout(r, 400))
+    // ── Step 1: Figure out how many episodes we need ─────────────
+    let expectedTotal = 0
 
-      const resp = await fetch(`${JIKAN_EPISODES_URL}?page=${page}`)
-      if (!resp.ok) {
-        console.warn(`Jikan episodes API returned ${resp.status} for MAL ${malId} page ${page}`)
-        break
-      }
+    // Check DB first
+    const { data: animeRow } = await supabase
+      .from('anime')
+      .select('total_episodes')
+      .eq('id', animeId)
+      .single()
+    expectedTotal = animeRow?.total_episodes || 0
 
-      const json = await resp.json()
-      const episodes: Array<{
-        mal_id: number
-        title: string
-        title_japanese?: string
-        title_romanji?: string
-        aired?: string
-        filler?: boolean
-        recap?: boolean
-      }> = json.data || []
+    // If DB doesn't know, ask Jikan
+    if (expectedTotal === 0) {
+      try {
+        const infoResp = await fetch(`${this.JIKAN_BASE_URL}/anime/${malId}`)
+        if (infoResp.ok) {
+          const infoJson = await infoResp.json()
+          expectedTotal = infoJson.data?.episodes || 0
+          if (expectedTotal > 0) {
+            await supabase.from('anime').update({ total_episodes: expectedTotal }).eq('id', animeId)
+            console.log(`📺 ${animeTitle}: set total_episodes=${expectedTotal} from Jikan`)
+          }
+        }
+      } catch { /* ignore */ }
+    }
 
-      if (episodes.length === 0) break
+    if (expectedTotal <= 0) {
+      console.warn(`📺 ${animeTitle}: total_episodes is unknown, cannot create stubs`)
+      return { created: 0, skipped: 0, total: 0 }
+    }
 
-      // Build rows to upsert
-      const rows = episodes.map(ep => ({
+    // ── Step 2: Find missing episode numbers ─────────────────────
+    // Fetch ALL existing episode numbers (handle Supabase 1000-row limit)
+    const existingSet = new Set<number>()
+    let from = 0
+    const PAGE_SIZE = 1000
+    while (true) {
+      const { data: batch } = await supabase
+        .from('episodes')
+        .select('episode_number')
+        .eq('anime_id', animeId)
+        .range(from, from + PAGE_SIZE - 1)
+      if (!batch || batch.length === 0) break
+      batch.forEach(e => existingSet.add(e.episode_number))
+      if (batch.length < PAGE_SIZE) break
+      from += PAGE_SIZE
+    }
+
+    const missingNums: number[] = []
+    for (let n = 1; n <= expectedTotal; n++) {
+      if (!existingSet.has(n)) missingNums.push(n)
+    }
+
+    if (missingNums.length === 0) {
+      console.log(`📺 ${animeTitle}: all ${expectedTotal} episodes already exist`)
+      return { created: 0, skipped: expectedTotal, total: expectedTotal }
+    }
+
+    // ── Step 3: Create synthetic stubs for ALL missing episodes ──
+    console.log(`📺 ${animeTitle}: creating ${missingNums.length} episode stubs (${existingSet.size} already exist, ${expectedTotal} total)`)
+
+    for (let i = 0; i < missingNums.length; i += 100) {
+      const batch = missingNums.slice(i, i + 100).map(n => ({
         anime_id: animeId,
-        episode_number: ep.mal_id, // Jikan uses mal_id as episode number within the anime
-        title: ep.title || `Episode ${ep.mal_id}`,
-        description: [
-          ep.filler ? '[Filler]' : null,
-          ep.recap ? '[Recap]' : null,
-        ].filter(Boolean).join(' ') || null,
-        air_date: ep.aired ? ep.aired.split('T')[0] : null,
-        video_url: null,          // No video yet — will be filled by scraper
+        episode_number: n,
+        title: `Episode ${n}`,
+        description: null,
+        air_date: null,
+        video_url: null,
         thumbnail_url: null,
         duration: null,
         is_premium: false,
         created_at: new Date().toISOString(),
       }))
 
-      // Upsert — skip conflicts so existing episodes (with video_url) are untouched
-      const { error, count } = await supabase
+      const { error: batchErr } = await supabase
         .from('episodes')
-        .upsert(rows, {
-          onConflict: 'anime_id,episode_number',
-          ignoreDuplicates: true,   // Don't overwrite existing rows
-        })
+        .upsert(batch, { onConflict: 'anime_id,episode_number', ignoreDuplicates: true })
 
-      if (error) {
-        console.warn(`Episode upsert error (page ${page}):`, error.message)
-      }
-
-      total += episodes.length
-      created += count ?? episodes.length
-      skipped += (episodes.length - (count ?? episodes.length))
-
-      hasNextPage = json.pagination?.has_next_page === true
-      page++
+      if (batchErr) console.warn(`Stub batch error:`, batchErr.message)
     }
+
+    created = missingNums.length
+    total = expectedTotal
+    skipped = existingSet.size
+    console.log(`✅ ${animeTitle}: created ${created} stubs (episodes ${missingNums[0]}-${missingNums[missingNums.length - 1]})`)
+
+    // ── Step 4 (optional): Enrich titles from Jikan ──────────────
+    // Only try first page — if it works, update stub titles
+    try {
+      await new Promise(r => setTimeout(r, 1500))
+      const resp = await fetch(`${this.JIKAN_BASE_URL}/anime/${malId}/episodes?page=1`)
+      if (resp.ok) {
+        const json = await resp.json()
+        const episodes = json.data || []
+        for (const ep of episodes) {
+          if (ep.title && ep.title !== `Episode ${ep.mal_id}`) {
+            await supabase
+              .from('episodes')
+              .update({
+                title: ep.title,
+                air_date: ep.aired ? ep.aired.split('T')[0] : null,
+              })
+              .eq('anime_id', animeId)
+              .eq('episode_number', ep.mal_id)
+              .is('video_url', null) // Only update stubs, not scraped episodes
+          }
+        }
+        console.log(`📺 ${animeTitle}: enriched titles for first ${episodes.length} episodes`)
+      }
+    } catch { /* Jikan enrichment is optional */ }
 
     return { created, skipped, total }
   }
@@ -581,7 +646,7 @@ export class AnimeImporterService {
    * Fires in the background (non-blocking) so the import can finish immediately.
    * The backend server handles the actual Playwright scraping.
    */
-  private static triggerBatchScrape(animeId: string, title: string, episodeCount: number): void {
+  static triggerBatchScrape(animeId: string, title: string, episodeCount: number): void {
     const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001'
     const episodes = Array.from({ length: episodeCount }, (_, i) => i + 1)
 
@@ -999,6 +1064,23 @@ export class AnimeImporterService {
                 edges {
                   id
                   role
+                  voiceActors(language: JAPANESE) {
+                    id
+                    name {
+                      full
+                      native
+                    }
+                  }
+                  voiceActorRoles {
+                    voiceActor {
+                      id
+                      name {
+                        full
+                        native
+                      }
+                      language
+                    }
+                  }
                   node {
                     id
                     name {
@@ -1133,6 +1215,23 @@ export class AnimeImporterService {
                 edges {
                   id
                   role
+                  voiceActors(language: JAPANESE) {
+                    id
+                    name {
+                      full
+                      native
+                    }
+                  }
+                  voiceActorRoles {
+                    voiceActor {
+                      id
+                      name {
+                        full
+                        native
+                      }
+                      language
+                    }
+                  }
                   node {
                     id
                     name {
@@ -1454,6 +1553,20 @@ export class AnimeImporterService {
       let successCount = 0
       let errorCount = 0
 
+      // Fetch existing characters to detect name-format duplicates
+      const { data: existingChars } = await supabase
+        .from('anime_characters')
+        .select('id, name, role')
+        .eq('anime_id', animeId)
+
+      const normalizeName = (name: string) => {
+        return name.toLowerCase().replace(/[.,\-'"""'']/g, '').split(/[\s,]+/).filter(w => w.length > 1).sort().join(' ')
+      }
+      const existingByNorm = new Map<string, { id: string; name: string }>()
+      for (const ec of existingChars || []) {
+        existingByNorm.set(normalizeName(ec.name), { id: ec.id, name: ec.name })
+      }
+
       for (const entry of filtered) {
         try {
           const japaneseVA = entry.voice_actors?.find(va => va.language === 'Japanese')
@@ -1470,16 +1583,47 @@ export class AnimeImporterService {
             voice_actor_japanese: japaneseVA?.person?.name || null,
           }
 
-          const { error } = await supabase
-            .from('anime_characters')
-            .upsert(characterData, { onConflict: 'anime_id,name', ignoreDuplicates: true })
+          // Check for fuzzy duplicate (e.g. AniList already inserted "Monkey D. Luffy", Jikan has "Luffy, Monkey D.")
+          const normalizedNew = normalizeName(characterData.name)
+          const existingMatch = existingByNorm.get(normalizedNew)
 
-          if (error) {
-            console.error(`Error importing Jikan character "${entry.character.name}":`, error)
-            errorCount++
-          } else {
+          if (existingMatch && existingMatch.name !== characterData.name) {
+            // Existing char has better name — just update voice actors if missing
+            const { error } = await supabase
+              .from('anime_characters')
+              .update({
+                voice_actor: characterData.voice_actor,
+                voice_actor_japanese: characterData.voice_actor_japanese,
+                image_url: characterData.image_url,
+              })
+              .eq('id', existingMatch.id)
+              .is('voice_actor', null) // Only update if voice_actor is currently null
+
+            if (error) {
+              // Try without the .is() filter
+              await supabase
+                .from('anime_characters')
+                .update({
+                  voice_actor: characterData.voice_actor,
+                  voice_actor_japanese: characterData.voice_actor_japanese,
+                })
+                .eq('id', existingMatch.id)
+            }
             successCount++
-            console.log(`✅ Imported character: ${entry.character.name} (${characterData.role})`)
+            console.log(`🔄 Merged Jikan data into existing character "${existingMatch.name}"`)
+          } else {
+            const { error } = await supabase
+              .from('anime_characters')
+              .upsert(characterData, { onConflict: 'anime_id,name', ignoreDuplicates: false })
+
+            if (error) {
+              console.error(`Error importing Jikan character "${entry.character.name}":`, error)
+              errorCount++
+            } else {
+              successCount++
+              existingByNorm.set(normalizedNew, { id: '', name: characterData.name })
+              console.log(`✅ Imported character: ${entry.character.name} (${characterData.role})`)
+            }
           }
         } catch (err) {
           console.error(`Error processing Jikan character:`, err)
@@ -1530,35 +1674,105 @@ export class AnimeImporterService {
       
       console.log(`Filtering to ${mainCharacters.length} characters (MAIN or SUPPORTING)`)
       
+      // Fetch existing characters for this anime to detect duplicates with different name formats
+      const { data: existingChars } = await supabase
+        .from('anime_characters')
+        .select('id, name, role')
+        .eq('anime_id', animeId)
+
+      // Helper: normalize name for fuzzy matching (handles "Luffy, Monkey D." vs "Monkey D. Luffy")
+      const normalizeName = (name: string) => {
+        return name
+          .toLowerCase()
+          .replace(/[.,\-'"""'']/g, '')  // strip punctuation
+          .split(/[\s,]+/)               // split into words
+          .filter(w => w.length > 1)     // drop single chars
+          .sort()                        // sort alphabetically
+          .join(' ')
+      }
+
+      // Build lookup of existing characters by normalized name
+      const existingByNorm = new Map<string, { id: string; name: string }>()
+      for (const ec of existingChars || []) {
+        existingByNorm.set(normalizeName(ec.name), { id: ec.id, name: ec.name })
+      }
+
       for (const character of mainCharacters) {
         try {
           console.log('Processing character:', character.node.name?.full, 'Role:', character.role)
           
+          // Extract voice actors from AniList data
+          const japaneseVA = character.voiceActors?.[0] // Already filtered to JAPANESE in query
+          // Find English VA from voiceActorRoles
+          const englishVARole = character.voiceActorRoles?.find(
+            (r: any) => r.voiceActor?.language === 'ENGLISH'
+          )
+          const englishVA = englishVARole?.voiceActor
+
+          // name.alternative is an array of aliases — join for storage, use full as romaji
+          const altNames = Array.isArray(character.node.name?.alternative)
+            ? character.node.name.alternative.filter(Boolean).join(', ')
+            : character.node.name?.alternative || null
+
           const characterData = {
             anime_id: animeId,
             name: character.node.name?.full || character.node.name?.native,
             name_japanese: character.node.name?.native,
-            name_romaji: character.node.name?.alternative,
-            role: character.role?.toLowerCase() || 'supporting', // Convert to lowercase to match schema
+            name_romaji: altNames,
+            role: character.role?.toLowerCase() || 'supporting',
             image_url: character.node.image?.large || character.node.image?.medium,
-            description: character.node.description
+            description: character.node.description,
+            voice_actor: englishVA?.name?.full || japaneseVA?.name?.full || null,
+            voice_actor_japanese: japaneseVA?.name?.native || japaneseVA?.name?.full || null
           }
           
           console.log('Character data to insert:', characterData)
 
-          const { error } = await supabase
-            .from('anime_characters')
-            .upsert(characterData, { 
-              onConflict: 'anime_id,name',
-              ignoreDuplicates: true 
-            })
+          // Check if a character with a different name format already exists (e.g. Jikan "Luffy, Monkey D." vs AniList "Monkey D. Luffy")
+          const normalizedNew = normalizeName(characterData.name)
+          const existingMatch = existingByNorm.get(normalizedNew)
 
-          if (error) {
-            console.error(`Error importing character for anime ${animeId}:`, error)
-            errorCount++
+          if (existingMatch && existingMatch.name !== characterData.name) {
+            // Update the existing row with the better data instead of creating a duplicate
+            console.log(`🔄 Updating existing character "${existingMatch.name}" → "${characterData.name}"`)
+            const { error } = await supabase
+              .from('anime_characters')
+              .update({
+                name: characterData.name,
+                name_japanese: characterData.name_japanese,
+                name_romaji: characterData.name_romaji,
+                image_url: characterData.image_url,
+                description: characterData.description,
+                voice_actor: characterData.voice_actor,
+                voice_actor_japanese: characterData.voice_actor_japanese,
+              })
+              .eq('id', existingMatch.id)
+
+            if (error) {
+              console.error(`Error updating character "${existingMatch.name}":`, error)
+              errorCount++
+            } else {
+              successCount++
+              // Update the lookup so future checks use the new name
+              existingByNorm.delete(normalizedNew)
+              existingByNorm.set(normalizedNew, { id: existingMatch.id, name: characterData.name })
+            }
           } else {
-            successCount++
-            console.log(`✅ Imported character: ${characterData.name} (${characterData.role})`)
+            // Normal upsert (no fuzzy duplicate found)
+            const { error } = await supabase
+              .from('anime_characters')
+              .upsert(characterData, { 
+                onConflict: 'anime_id,name',
+                ignoreDuplicates: false 
+              })
+
+            if (error) {
+              console.error(`Error importing character for anime ${animeId}:`, error)
+              errorCount++
+            } else {
+              successCount++
+              console.log(`✅ Imported character: ${characterData.name} (${characterData.role})`)
+            }
           }
         } catch (error) {
           console.error(`Error processing character for anime ${animeId}:`, error)
@@ -1824,11 +2038,10 @@ export class AnimeImporterService {
             const episodeResult = await this.autoCreateEpisodeStubs(animeId, malId, animeData.title || '')
             console.log(`📺 Episode stubs: ${episodeResult.created} created, ${episodeResult.skipped} skipped`)
 
-            // If Jikan returned zero episodes, delete the anime
+            // If Jikan returned zero episodes, we used to delete the anime here.
+            // However, we should keep it because it might just not be aired yet or Jikan is missing data.
             if (episodeResult.total === 0) {
-              console.log(`🗑️ No episodes found for "${animeData.title}" — deleting anime`)
-              await supabase.from('anime').delete().eq('id', animeId)
-              return { success: false }
+              console.log(`⚠️ No episode stubs found for "${animeData.title}" on Jikan, but keeping the anime record.`)
             }
 
             // Auto-scrape stream URLs in the background (unless caller will do it)
