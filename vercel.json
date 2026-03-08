@@ -1,11 +1,8 @@
 {
+  "outputDirectory": "out",
   "rewrites": [
     {
-      "source": "/api/(.*)",
-      "destination": "https://localhost:3001/api/$1"
-    },
-    {
-      "source": "/(.*)",
+      "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
   ],
