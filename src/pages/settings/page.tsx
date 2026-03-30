@@ -256,7 +256,7 @@ export default function SettingsPage() {
           <label className="relative inline-flex items-center cursor-pointer">
             <input
               type="checkbox"
-              checked={settings[setting.key as keyof typeof settings]}
+              checked={Boolean(settings[setting.key as keyof typeof settings])}
               onChange={(e) => handleSettingChange(setting.key, e.target.checked)}
               className="sr-only peer"
             />
@@ -267,7 +267,7 @@ export default function SettingsPage() {
       case 'select':
         return (
           <select
-            value={settings[setting.key as keyof typeof settings]}
+            value={String(settings[setting.key as keyof typeof settings])}
             onChange={(e) => handleSettingChange(setting.key, e.target.value)}
             className="px-3 py-2 bg-white border border-teal-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent pr-8"
           >
@@ -286,7 +286,7 @@ export default function SettingsPage() {
               type="range"
               min={setting.min}
               max={setting.max}
-              value={settings[setting.key as keyof typeof settings]}
+              value={Number(settings[setting.key as keyof typeof settings])}
               onChange={(e) => handleSettingChange(setting.key, parseInt(e.target.value))}
               className="flex-1 h-2 bg-teal-200 rounded-lg appearance-none cursor-pointer slider"
             />
@@ -313,7 +313,7 @@ export default function SettingsPage() {
           className="mb-8"
         >
           <h1 className="text-3xl font-bold text-teal-800 mb-2">Settings</h1>
-          <p className="text-teal-600">Customize your AnimeStream experience</p>
+          <p className="text-teal-600">Customize your AnimeHub experience</p>
         </motion.div>
 
         {/* Settings Sections */}

@@ -6,15 +6,13 @@ import Button from '../base/Button';
 import NotificationCenter from './NotificationCenter';
 import SearchBar from '../search/SearchBar';
 import { useCurrentUser, useSignOut } from '../../hooks/auth/selectors';
-import LoginModal from '../auth/LoginModal';
-import SignUpModal from '../auth/SignUpModal';
+
 import { prefetchOnHover } from '../../router/helpers/prefetch';
 
 export default function Navbar() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
-  const [showLogin, setShowLogin] = useState(false);
-  const [showSignUp, setShowSignUp] = useState(false);
+
   const user = useCurrentUser();
   const signOut = useSignOut();
   const navigate = useNavigate();
@@ -79,7 +77,7 @@ export default function Navbar() {
               <i className="ri-play-fill text-white"></i>
             </div>
             <span className="text-xl font-bold text-teal-800 font-pacifico">
-              AnimeStream
+              AnimeHub
             </span>
           </Link>
 
@@ -201,13 +199,13 @@ export default function Navbar() {
                 {/* Login/Signup Buttons */}
                 <Button
                   variant="ghost"
-                  onClick={() => setShowLogin(true)}
+                  onClick={() => navigate('/login')}
                   className="text-teal-700 hover:text-teal-800"
                 >
                   Login
                 </Button>
                 <Button
-                  onClick={() => setShowSignUp(true)}
+                  onClick={() => navigate('/login?signup=true')}
                   className="bg-teal-600 hover:bg-teal-700 text-white"
                 >
                   Sign Up
@@ -296,23 +294,7 @@ export default function Navbar() {
         )}
       </AnimatePresence>
 
-      {/* Auth Modals */}
-      <LoginModal
-        isOpen={showLogin}
-        onClose={() => setShowLogin(false)}
-        onSwitchToSignUp={() => {
-          setShowLogin(false);
-          setShowSignUp(true);
-        }}
-      />
-      <SignUpModal
-        isOpen={showSignUp}
-        onClose={() => setShowSignUp(false)}
-        onSwitchToLogin={() => {
-          setShowSignUp(false);
-          setShowLogin(true);
-        }}
-      />
+
     </motion.nav>
   );
 }

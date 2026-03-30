@@ -380,6 +380,7 @@ export default function SmartVideoPlayer({
     let sourceUrl = source.url;
     let isByseEmbed = false;
     let isMegaEmbed = false;
+    let isVidmolyEmbed = false;
     if (sourceUrl.includes('bysesayeveum.com/e/')) {
       const videoId = sourceUrl.split('/e/')[1]?.split(/[?#]/)[0];
       if (videoId) {
@@ -401,8 +402,18 @@ export default function SmartVideoPlayer({
       }
     }
 
+    // For vidmoly URLs, route through our clean ad-free vidmoly embed proxy
+    if (!isByseEmbed && !isMegaEmbed && sourceUrl.match(/vidmoly\.(biz|net)/)) {
+      const vidmolyMatch = sourceUrl.match(/vidmoly\.(?:biz|net)\/embed-([a-zA-Z0-9]+)/);
+      if (vidmolyMatch) {
+        sourceUrl = `/api/vidmoly-embed/${vidmolyMatch[1]}`;
+        isVidmolyEmbed = true;
+        console.log('🛡️ Routing vidmoly through clean embed:', sourceUrl);
+      }
+    }
+
     // For our own embed URLs (relative paths), append start time as query param
-    const embedUrl = (isByseEmbed || isMegaEmbed)
+    const embedUrl = (isByseEmbed || isMegaEmbed || isVidmolyEmbed)
       ? (startTime > 0 ? `${sourceUrl}?start=${Math.floor(startTime)}` : sourceUrl)
       : VideoService.getIframeEmbedUrl(sourceUrl, {
           autoplay: autoPlay,

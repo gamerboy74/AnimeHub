@@ -32,7 +32,7 @@ export default function PlayerPage() {
   const { anime, loading: animeLoading } = useAnimeById(animeId || '', user?.id);
   
   // Memoize genres to prevent infinite loops
-  const memoizedGenres = useMemo(() => anime?.genres || [], [anime?.genres?.join(',')]);
+  const memoizedGenres = useMemo(() => anime?.genres || [], [JSON.stringify(anime?.genres)]);
   
   const { anime: similarAnime, loading: similarLoading } = useSimilarAnime(
     animeId || '', 
@@ -473,7 +473,7 @@ export default function PlayerPage() {
                       <i className="ri-star-fill text-yellow-500"></i>
                       <span className="font-semibold">{anime.rating || 'N/A'}</span>
                     </span>
-                    <span className="font-medium">{anime.release_year}</span>
+                    <span className="font-medium">{anime.year}</span>
                     <span className="font-medium">{anime.total_episodes || anime.episodes?.length || 0} episodes</span>
                   </div>
                   <p className="text-teal-700 leading-relaxed text-sm sm:text-lg">

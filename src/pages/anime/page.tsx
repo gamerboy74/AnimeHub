@@ -1,21 +1,25 @@
 
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import Navbar from '../../components/feature/Navbar';
 import AnimeCard from '../../components/feature/AnimeCard';
 import Input from '../../components/base/Input';
 import Button from '../../components/base/Button';
 import { useAnime, useGenres } from '../../hooks/useAnime';
+import ErrorBoundary from '../../components/common/ErrorBoundary';
+import { SectionError } from '../../components/common/ErrorFallbacks';
 import Footer from '../../components/feature/Footer';
 
 export default function AnimePage() {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedGenre, setSelectedGenre] = useState('');
-  const [sortBy, setSortBy] = useState('title');
+  const [searchParams] = useSearchParams();
+  const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || searchParams.get('q') || '');
+  const [selectedGenre, setSelectedGenre] = useState(searchParams.get('genre') || '');
+  const [sortBy, setSortBy] = useState(searchParams.get('sort') || 'title');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 12;
 
-  const { genres, loading: genresLoading } = useGenres();
+  const { genres } = useGenres();
   const { anime, loading: animeLoading, totalPages, total, error: animeError } = useAnime({
     page: currentPage,
     limit: itemsPerPage,
@@ -166,6 +170,7 @@ export default function AnimePage() {
           )}
 
           {/* Anime Grid */}
+          <ErrorBoundary fallback={<SectionError title="Loading Error" message="Something went wrong loading anime. Please try refreshing the page." />}>
           <motion.section
             variants={containerVariants}
             initial="hidden"
@@ -212,6 +217,7 @@ export default function AnimePage() {
               </motion.div>
             )}
           </motion.section>
+          </ErrorBoundary>
 
           {/* Pagination */}
           {totalPages > 1 && (

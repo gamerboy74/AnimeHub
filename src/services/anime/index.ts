@@ -52,6 +52,18 @@ export class AnimeService {
       // Use the optimized search function for better performance
       if (filters?.search || filters?.genre || filters?.year || filters?.status) {
         // Run both queries in parallel to reduce time (batch call)
+        // Build count query with standard Supabase filter chaining
+        let countQuery = supabase
+          .from('anime')
+          .select('*', { count: 'exact', head: true })
+        
+        if (filters?.genre) countQuery = countQuery.contains('genres', [filters.genre])
+        if (filters?.year) countQuery = countQuery.eq('year', filters.year)
+        if (filters?.status) countQuery = countQuery.eq('status', filters.status)
+        if (filters?.search) {
+          countQuery = countQuery.or(`title.ilike.%${filters.search}%,description.ilike.%${filters.search}%`)
+        }
+
         const [searchResult, countResult] = await Promise.all([
           supabase.rpc('search_anime_optimized', {
             search_term: filters?.search || '',
@@ -63,17 +75,7 @@ export class AnimeService {
             limit_count: limit,
             offset_count: (page - 1) * limit
           }),
-          supabase
-            .from('anime')
-            .select('*', { count: 'exact', head: true })
-            .modify((query) => {
-              if (filters?.genre) query.contains('genres', [filters.genre])
-              if (filters?.year) query.eq('year', filters.year)
-              if (filters?.status) query.eq('status', filters.status)
-              if (filters?.search) {
-                query.or(`title.ilike.%${filters.search}%,description.ilike.%${filters.search}%`)
-              }
-            })
+          countQuery
         ])
 
         if (searchResult.error) {

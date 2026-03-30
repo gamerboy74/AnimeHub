@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // Interfaces for type safety
+import { useCurrentUser } from '../../hooks/auth/selectors';
 interface Anime {
   _id: string;
   title: string;
@@ -57,6 +58,9 @@ const AnimeCard = React.memo(function AnimeCard(props: AnimeCardProps) {
   const [showMoreInfo, setShowMoreInfo] = useState(false);
 
   const fallbackImage = '/path/to/fallback-image.jpg'; // Replace with actual fallback image path
+  const user = useCurrentUser();
+  const navigate = useNavigate();
+  const location = useLocation();
 
   // Load saved states from localStorage with error handling
   useEffect(() => {
@@ -99,6 +103,11 @@ const AnimeCard = React.memo(function AnimeCard(props: AnimeCardProps) {
     ) => {
       e.preventDefault();
       e.stopPropagation();
+
+      if (!user) {
+        navigate(`/login?redirect=${encodeURIComponent(location.pathname + location.search)}`);
+        return;
+      }
 
       try {
         const key = type;

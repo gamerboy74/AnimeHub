@@ -53,13 +53,7 @@ const useDelayedLoading = (isLoading: boolean, delay: number = 800) => {
   return showSpinner;
 };
 
-// Configuration for footer links
-const SOCIAL_LINKS = {
-  facebook: 'https://facebook.com/animestream',
-  twitter: 'https://twitter.com/animestream',
-  instagram: 'https://instagram.com/animestream',
-  discord: 'https://discord.gg/animestream',
-};
+
 
 /* -------------------------------------------------------------------------- */
 /*                             Primary Home Page                              */
@@ -138,19 +132,19 @@ export default function Home() {
 
   // Memoized mapped data
   const featuredSlides = useMemo(
-    () => featuredAnime.map((anime) => mapAnime(anime, 'hero') as HeroSlide),
+    () => featuredAnime.map((anime: Anime) => mapAnime(anime, 'hero') as HeroSlide),
     [featuredAnime, mapAnime]
   );
   const trendingCards = useMemo(
-    () => trendingAnime.map((anime) => mapAnime(anime, 'card')),
+    () => trendingAnime.map((anime: Anime) => mapAnime(anime, 'card')),
     [trendingAnime, mapAnime]
   );
   const popularCards = useMemo(
-    () => popularAnime.map((anime) => mapAnime(anime, 'card')),
+    () => popularAnime.map((anime: Anime) => mapAnime(anime, 'card')),
     [popularAnime, mapAnime]
   );
   const recentCards = useMemo(
-    () => recentAnime.map((anime) => mapAnime(anime, 'card')),
+    () => recentAnime.map((anime: Anime) => mapAnime(anime, 'card')),
     [recentAnime, mapAnime]
   );
 
@@ -194,8 +188,9 @@ export default function Home() {
       link.href = featuredSlides[0].image;
       link.fetchPriority = 'high';
       document.head.appendChild(link);
-      return () => document.head.removeChild(link);
+      return () => { document.head.removeChild(link); };
     }
+    return undefined;
   }, [featuredSlides]);
 
   // Optimized anime section component (memoized)
@@ -210,7 +205,7 @@ export default function Home() {
     title: string;
     showBadge?: 'trending' | 'new';
   }) {
-    const renderItem = useCallback((anime: any, index: number) => {
+    const renderItem = useCallback((anime: any, _index: number) => {
       if (showSpinner) {
         return (
           <div className="bg-white/80 rounded-xl shadow-md overflow-hidden border border-white/20 flex items-center justify-center h-full" style={{ aspectRatio: '3/4' }}>
@@ -416,7 +411,7 @@ export default function Home() {
                   const progressPct = item.episodeDuration && item.episodeDuration > 0
                     ? Math.min(100, Math.round((item.progressSeconds / item.episodeDuration) * 100))
                     : null;
-                  const mapped = mapAnime(item, 'card');
+                  const mapped = mapAnime(item, 'card') as React.ComponentProps<typeof AnimeCard>;
                   return (
                     <div key={item.id} className="relative">
                       <AnimeCard {...mapped} />

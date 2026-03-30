@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useTransition, Suspense } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import Navbar from '../../components/feature/Navbar';
 import AnimeCard from '../../components/feature/AnimeCard';
@@ -40,6 +40,8 @@ interface Anime {
 export default function AnimeDetailPage() {
   const { id } = useParams<{ id: string }>();
   const user = useCurrentUser();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [selectedEpisode, setSelectedEpisode] = useState(1);
   const [showToast, setShowToast] = useState<string | null>(null);
   const [watchlistStatus, setWatchlistStatus] = useState(false); // Replaced useOptimistic
@@ -149,35 +151,15 @@ export default function AnimeDetailPage() {
       (async () => {
         try {
           if (!user) {
-            const savedWatchlist = JSON.parse(localStorage.getItem('watchlist') || '[]');
-            if (wasInWatchlist) {
-              const updatedWatchlist = savedWatchlist.filter((item: any) => item.id !== anime.id);
-              localStorage.setItem('watchlist', JSON.stringify(updatedWatchlist));
-              showToastMessage('Removed from watchlist');
-            } else {
-              const animeData = {
-                id: anime.id,
-                title: anime.title,
-                image: anime.poster_url,
-                rating: anime.rating,
-                year: anime.year,
-                episodes: anime.total_episodes,
-                genres: anime.genres,
-                status: anime.status,
-                description: anime.description,
-                addedAt: new Date().toISOString(),
-              };
-              localStorage.setItem('watchlist', JSON.stringify([...savedWatchlist, animeData]));
-              showToastMessage('Added to watchlist (local storage)');
-            }
+            navigate(`/login?redirect=${encodeURIComponent(location.pathname + location.search)}`);
+            return;
+          }
+          if (wasInWatchlist) {
+            await removeFromWatchlist(anime.id);
+            showToastMessage('Removed from watchlist');
           } else {
-            if (wasInWatchlist) {
-              await removeFromWatchlist(anime.id);
-              showToastMessage('Removed from watchlist');
-            } else {
-              await addToWatchlist(anime.id);
-              showToastMessage('Added to watchlist');
-            }
+            await addToWatchlist(anime.id);
+            showToastMessage('Added to watchlist');
           }
         } catch (error) {
           console.error('Error updating watchlist:', error);
@@ -200,35 +182,15 @@ export default function AnimeDetailPage() {
       (async () => {
         try {
           if (!user) {
-            const savedFavorites = JSON.parse(localStorage.getItem('favorites') || '[]');
-            if (wasFavorite) {
-              const updatedFavorites = savedFavorites.filter((item: any) => item.id !== anime.id);
-              localStorage.setItem('favorites', JSON.stringify(updatedFavorites));
-              showToastMessage('Removed from favorites');
-            } else {
-              const animeData = {
-                id: anime.id,
-                title: anime.title,
-                image: anime.poster_url,
-                rating: anime.rating,
-                year: anime.year,
-                episodes: anime.total_episodes,
-                genres: anime.genres,
-                status: anime.status,
-                description: anime.description,
-                addedAt: new Date().toISOString(),
-              };
-              localStorage.setItem('favorites', JSON.stringify([...savedFavorites, animeData]));
-              showToastMessage('Added to favorites (local storage)');
-            }
+            navigate(`/login?redirect=${encodeURIComponent(location.pathname + location.search)}`);
+            return;
+          }
+          if (wasFavorite) {
+            await removeFromFavorites(anime.id);
+            showToastMessage('Removed from favorites');
           } else {
-            if (wasFavorite) {
-              await removeFromFavorites(anime.id);
-              showToastMessage('Removed from favorites');
-            } else {
-              await addToFavorites(anime.id);
-              showToastMessage('Added to favorites');
-            }
+            await addToFavorites(anime.id);
+            showToastMessage('Added to favorites');
           }
         } catch (error) {
           console.error('Error updating favorites:', error);

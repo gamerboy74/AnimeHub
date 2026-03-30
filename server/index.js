@@ -815,7 +815,7 @@ class NineAnimeScraperService {
             const pageTitle = this.extractPageTitle(testResponse.data);
             const similarity = this.titleSimilarity(animeTitle, pageTitle);
             
-            if (similarity >= 0.6) {
+            if (similarity >= 0.75) {
               console.log(`✅ Direct URL verified (similarity: ${similarity.toFixed(2)}): ${directUrl}`);
               // Save the verified slug to DB for future use
               await this.saveVerifiedSlug(dbAnimeId, slug);
@@ -1205,8 +1205,14 @@ class NineAnimeScraperService {
     // Exact match
     if (a === b) return 1.0;
 
-    // Contains check (one is substring of the other)
-    if (a.includes(b) || b.includes(a)) return 0.85;
+    // Contains check — but penalise large length differences
+    // "one piece" ⊂ "one piece the movie" should NOT score 0.85
+    if (a.includes(b) || b.includes(a)) {
+      const ratio = Math.min(a.length, b.length) / Math.max(a.length, b.length);
+      // Only give high score if the strings are similar in length (ratio > 0.8)
+      // Otherwise scale down: e.g. 9/19 = 0.47 → score ~0.55
+      return ratio >= 0.8 ? 0.9 : 0.4 + ratio * 0.5;
+    }
 
     // Jaccard similarity on words
     const wordsA = new Set(a.split(" ").filter((w) => w.length > 1));
@@ -1408,6 +1414,52 @@ class NineAnimeScraperService {
       return null;
     } catch (e) {
       console.log("⚠️ bysesayeveum HLS extraction failed:", e.message);
+      return null;
+    }
+  }
+
+  /**
+   * Extract HLS stream URL from a vidmoly embed page.
+   * Vidmoly uses JWPlayer with a plain m3u8 URL in the sources array.
+   */
+  static async extractVidmolyHLS(vidmolyUrl) {
+    try {
+      const idMatch = vidmolyUrl.match(/vidmoly\.(?:biz|net)\/embed-([a-zA-Z0-9]+)/);
+      if (!idMatch) return null;
+      const videoId = idMatch[1];
+      // Always use .biz (net redirects to biz)
+      const embedUrl = `https://vidmoly.biz/embed-${videoId}.html`;
+      console.log("🔍 Extracting HLS from vidmoly:", embedUrl);
+
+      const resp = await axios.get(embedUrl, {
+        headers: {
+          "User-Agent": this.USER_AGENT,
+          Referer: "https://9anime.org.lv/",
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        },
+        timeout: 15000,
+        maxRedirects: 5,
+      });
+
+      const html = resp.data;
+      // JWPlayer setup: sources: [{ file: 'https://...master.m3u8?...' }]
+      const m3u8Match = html.match(/sources\s*:\s*\[\s*\{\s*file\s*:\s*['"]([^'"]*\.m3u8[^'"]*)['"]/);
+      if (m3u8Match && m3u8Match[1]) {
+        console.log("✅ Extracted vidmoly HLS:", m3u8Match[1].substring(0, 80) + "...");
+        return m3u8Match[1];
+      }
+
+      // Fallback: any m3u8 URL in the page
+      const fallback = html.match(/https?:\/\/[^"'\s]*\.m3u8[^"'\s]*/);
+      if (fallback) {
+        console.log("✅ Extracted vidmoly HLS (fallback):", fallback[0].substring(0, 80) + "...");
+        return fallback[0];
+      }
+
+      console.log("⚠️ No m3u8 URL found in vidmoly page");
+      return null;
+    } catch (e) {
+      console.log("⚠️ vidmoly HLS extraction failed:", e.message);
       return null;
     }
   }
@@ -1738,14 +1790,16 @@ class NineAnimeScraperService {
             const iframe = await page.$(selector);
             if (iframe) {
               const src = await iframe.getAttribute("src");
-              if (src && src.includes("https")) {
-                streamUrl = src;
+              // Normalize protocol-relative URLs (//vidmoly.net/...) to https
+              const normalizedSrc = src && src.startsWith('//') ? 'https:' + src : src;
+              if (normalizedSrc && (normalizedSrc.includes("https") || normalizedSrc.includes("http"))) {
+                streamUrl = normalizedSrc;
                 console.log("✅ Found 9anime iframe:", streamUrl);
 
-                // If Mega is already on the main page, use it directly (no further navigation)
-                if (src.match(/mega(play|cloud|backup|cdn|stream)/i)) {
+                // If Mega or vidmoly is already on the main page, use it directly (no further navigation)
+                if (streamUrl.match(/mega(play|cloud|backup|cdn|stream)/i) || streamUrl.match(/vidmoly\.(biz|net)/i)) {
                   console.log(
-                    "🎯 Using Mega URL directly from main page:",
+                    "🎯 Using video URL directly from main page:",
                     src
                   );
                   break;
@@ -1778,18 +1832,20 @@ class NineAnimeScraperService {
                     const gogoHtml = gogoResponse.data;
                     console.log("📄 Gogoanime HTML length:", gogoHtml.length);
 
-                    // Multiple patterns to find megaplay URL
+                    // Multiple patterns to find megaplay or vidmoly URL
                     const patterns = [
-                      // Standard iframe src
-                      /<iframe[^>]*src=["']([^"']*megaplay[^"']*)["']/gi,
+                      // Standard iframe src (mega or vidmoly)
+                      /<iframe[^>]*src=["']([^"']*(?:megaplay|vidmoly)[^"']*)["']/gi,
                       // data-src attribute
-                      /<iframe[^>]*data-src=["']([^"']*megaplay[^"']*)["']/gi,
+                      /<iframe[^>]*data-src=["']([^"']*(?:megaplay|vidmoly)[^"']*)["']/gi,
                       // JavaScript variable assignments
-                      /src\s*[=:]\s*["']([^"']*megaplay[^"']*)["']/gi,
+                      /src\s*[=:]\s*["']([^"']*(?:megaplay|vidmoly)[^"']*)["']/gi,
                       // URL in quotes anywhere
-                      /["']([^"']*megaplay\.buzz[^"']*)["']/gi,
+                      /["']([^"']*(?:megaplay\.buzz|vidmoly\.(?:biz|net))[^"']*)["']/gi,
                       // Broader pattern for any mega-related URL
                       /https?:\/\/[^"'\s]*megaplay[^"'\s]*/gi,
+                      // Vidmoly embed pattern (with or without protocol)
+                      /(?:https?:)?\/\/vidmoly\.(?:biz|net)\/embed-[^"'\s]*/gi,
                     ];
 
                     for (const pattern of patterns) {
@@ -1800,27 +1856,29 @@ class NineAnimeScraperService {
                           pattern.toString().substring(0, 50)
                         );
                         for (const match of matches) {
-                          const url = match[1] || match[0];
+                          let url = match[1] || match[0];
+                          // Normalize protocol-relative URLs
+                          if (url && url.startsWith('//')) url = 'https:' + url;
                           if (
                             url &&
                             url.startsWith("http") &&
-                            url.match(/mega(play|cloud|backup|cdn|stream)/i)
+                            (url.match(/mega(play|cloud|backup|cdn|stream)/i) || url.match(/vidmoly\.(biz|net)/i))
                           ) {
                             streamUrl = url.replace(/["']/g, "").trim();
-                            console.log("✅ Found MEGA URL:", streamUrl);
+                            console.log("✅ Found video URL:", streamUrl);
                             break;
                           }
                         }
                         if (
                           streamUrl &&
-                          streamUrl.match(/mega(play|cloud|backup|cdn|stream)/i)
+                          (streamUrl.match(/mega(play|cloud|backup|cdn|stream)/i) || streamUrl.match(/vidmoly\.(biz|net)/i))
                         )
                           break;
                       }
                     }
 
                     // Additional fallback: Look for any video player iframe
-                    if (!streamUrl || !streamUrl.includes("megaplay")) {
+                    if (!streamUrl || !(streamUrl.includes("megaplay") || streamUrl.includes("vidmoly."))) {
                       const anyIframeMatch = gogoHtml.match(
                         /<iframe[^>]*src=["']([^"']*(?:player|embed|stream)[^"']*)["']/i
                       );
@@ -1842,7 +1900,7 @@ class NineAnimeScraperService {
                   // Method 2: Try using Playwright to navigate to gogoanime page
                   if (
                     !streamUrl ||
-                    !streamUrl.match(/mega(play|cloud|backup|cdn|stream)/i)
+                    !(streamUrl.match(/mega(play|cloud|backup|cdn|stream)/i) || streamUrl.match(/vidmoly\.(biz|net)/i))
                   ) {
                     try {
                       console.log(
@@ -2037,9 +2095,9 @@ class NineAnimeScraperService {
         }
       }
 
-      // Method 3b: If we found a gogoanime URL from page content, extract the megaplay source
-      if (streamUrl && (streamUrl.includes("gogoanime.me.uk") || streamUrl.includes("gogoanime")) && !streamUrl.match(/mega(play|cloud|backup|cdn|stream)/i)) {
-        console.log("🔍 Page content returned gogoanime URL, extracting megaplay source...");
+      // Method 3b: If we found a gogoanime URL from page content, extract the megaplay/vidmoly source
+      if (streamUrl && (streamUrl.includes("gogoanime.me.uk") || streamUrl.includes("gogoanime")) && !streamUrl.match(/mega(play|cloud|backup|cdn|stream)/i) && !streamUrl.match(/vidmoly\.(biz|net)/i)) {
+        console.log("🔍 Page content returned gogoanime URL, extracting video source...");
         try {
           const gogoResponse = await axios.get(streamUrl, {
             headers: {
@@ -2056,11 +2114,12 @@ class NineAnimeScraperService {
           console.log("📄 Gogoanime HTML length:", gogoHtml.length);
 
           const megaPatterns = [
-            /<iframe[^>]*src=["']([^"']*megaplay[^"']*)["']/gi,
-            /<iframe[^>]*data-src=["']([^"']*megaplay[^"']*)["']/gi,
-            /src\s*[=:]\s*["']([^"']*megaplay[^"']*)["']/gi,
-            /["']([^"']*megaplay\.buzz[^"']*)["']/gi,
+            /<iframe[^>]*src=["']([^"']*(?:megaplay|vidmoly)[^"']*)["']/gi,
+            /<iframe[^>]*data-src=["']([^"']*(?:megaplay|vidmoly)[^"']*)["']/gi,
+            /src\s*[=:]\s*["']([^"']*(?:megaplay|vidmoly)[^"']*)["']/gi,
+            /["']([^"']*(?:megaplay\.buzz|vidmoly\.(?:biz|net))[^"']*)["']/gi,
             /https?:\/\/[^"'\s]*megaplay[^"'\s]*/gi,
+            /(?:https?:)?\/\/vidmoly\.(?:biz|net)\/embed-[^"'\s]*/gi,
           ];
 
           for (const pattern of megaPatterns) {
@@ -2068,14 +2127,16 @@ class NineAnimeScraperService {
             if (matches.length > 0) {
               console.log(`🔍 Found ${matches.length} matches with pattern:`, pattern.toString().substring(0, 50));
               for (const match of matches) {
-                const url = match[1] || match[0];
-                if (url && url.startsWith("http") && url.match(/mega(play|cloud|backup|cdn|stream)/i)) {
+                let url = match[1] || match[0];
+                // Normalize protocol-relative URLs
+                if (url && url.startsWith('//')) url = 'https:' + url;
+                if (url && url.startsWith("http") && (url.match(/mega(play|cloud|backup|cdn|stream)/i) || url.match(/vidmoly\.(biz|net)/i))) {
                   streamUrl = url.replace(/["']/g, "").trim();
-                  console.log("✅ Found MEGA URL from gogoanime fallback:", streamUrl);
+                  console.log("✅ Found video URL from gogoanime fallback:", streamUrl);
                   break;
                 }
               }
-              if (streamUrl && streamUrl.match(/mega(play|cloud|backup|cdn|stream)/i)) break;
+              if (streamUrl && (streamUrl.match(/mega(play|cloud|backup|cdn|stream)/i) || streamUrl.match(/vidmoly\.(biz|net)/i))) break;
             }
           }
         } catch (fetchErr) {
@@ -2154,6 +2215,34 @@ class NineAnimeScraperService {
         episodeData.videoUrl
       );
 
+      // Check if a stub already exists (from Jikan import) — if so, only update video_url
+      const { data: existing } = await supabase
+        .from("episodes")
+        .select("id, title, description, thumbnail_url")
+        .eq("anime_id", episodeData.animeId)
+        .eq("episode_number", episodeData.episodeNumber)
+        .maybeSingle();
+
+      if (existing) {
+        // Stub exists — only update video_url and duration, preserve title/description/thumbnail
+        console.log(`💾 Updating existing episode stub (keeping title: "${existing.title}")`);
+        const { error } = await supabase
+          .from("episodes")
+          .update({
+            video_url: episodeData.videoUrl,
+            duration: episodeData.duration,
+          })
+          .eq("id", existing.id);
+
+        if (error) {
+          console.error("❌ DB Error:", error.message);
+          return { success: false, error: error.message };
+        }
+        console.log("🎉 Stream saved to Supabase with URL:", episodeData.videoUrl);
+        return { success: true };
+      }
+
+      // No existing stub — insert full record
       const dataToSave = {
         anime_id: episodeData.animeId,
         episode_number: episodeData.episodeNumber,
@@ -2166,7 +2255,7 @@ class NineAnimeScraperService {
       };
 
       console.log(
-        "💾 DEBUG: Data being upserted:",
+        "💾 DEBUG: Inserting new episode:",
         JSON.stringify(dataToSave, null, 2)
       );
 
@@ -2288,6 +2377,129 @@ app.get("/api/resolve-stream", async (req, res) => {
     console.error("❌ resolve-stream error:", e.message);
     return res.status(500).json({ success: false, error: e.message });
   }
+});
+
+// Resolve vidmoly embed URL → fresh HLS stream (called by vidmoly embed page at playback time)
+app.get("/api/resolve-vidmoly-stream", async (req, res) => {
+  try {
+    const { url } = req.query;
+    if (!url || !url.match(/vidmoly\.(biz|net)/)) {
+      return res.status(400).json({ error: "Invalid vidmoly URL" });
+    }
+    console.log("🔄 Resolving vidmoly stream for:", url);
+    const hlsUrl = await NineAnimeScraperService.extractVidmolyHLS(url);
+    if (hlsUrl) {
+      return res.json({ success: true, hlsUrl });
+    }
+    return res.status(502).json({ success: false, error: "Could not extract HLS from vidmoly" });
+  } catch (e) {
+    console.error("❌ resolve-vidmoly-stream error:", e.message);
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// Clean ad-free vidmoly embed page — extracts HLS and plays via hls.js (no ads)
+app.get("/api/vidmoly-embed/:id", async (req, res) => {
+  const videoId = req.params.id;
+  const startTime = parseInt(req.query.start) || 0;
+  const vidmolyUrl = `https://vidmoly.biz/embed-${videoId}.html`;
+  console.log("🎬 Serving clean vidmoly embed for:", videoId, "start:", startTime);
+
+  res.removeHeader("X-Frame-Options");
+  res.removeHeader("Content-Security-Policy");
+  res.setHeader("Content-Security-Policy", "default-src 'self' https://cdn.jsdelivr.net; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; connect-src 'self' https://*.vmwesa.online https://*; media-src * blob:; worker-src blob:; img-src *");
+  res.removeHeader("Cross-Origin-Opener-Policy");
+
+  res.setHeader("Content-Type", "text/html");
+  res.send(`<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Video Player</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;height:100%;background:#000;overflow:hidden}
+  video{width:100%;height:100%;object-fit:contain;background:#000}
+  #loader{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#000;z-index:10}
+  .spinner{width:48px;height:48px;border:3px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  #error{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:#000;color:#ef4444;font-family:system-ui;text-align:center;padding:20px;z-index:10}
+  #error h3{font-size:16px;margin-bottom:8px}
+  #error p{font-size:13px;color:#999}
+  #error button{margin-top:12px;padding:8px 20px;background:#3b82f6;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px}
+  #error button:hover{background:#2563eb}
+</style>
+</head><body>
+<div id="loader"><div class="spinner"></div></div>
+<div id="error"><div><h3>Failed to load video</h3><p id="errMsg"></p><button onclick="loadVideo()">Retry</button></div></div>
+<video id="player" controls autoplay playsinline></video>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+<script>
+const video = document.getElementById('player');
+const loader = document.getElementById('loader');
+const errorEl = document.getElementById('error');
+const errMsg = document.getElementById('errMsg');
+const VIDMOLY_URL = ${JSON.stringify(vidmolyUrl)};
+
+async function loadVideo() {
+  loader.style.display = 'flex';
+  errorEl.style.display = 'none';
+  try {
+    const r = await fetch('/api/resolve-vidmoly-stream?url=' + encodeURIComponent(VIDMOLY_URL));
+    const data = await r.json();
+    if (!data.success || !data.hlsUrl) throw new Error(data.error || 'No stream URL returned');
+    const hlsUrl = data.hlsUrl;
+    console.log('✅ Got HLS:', hlsUrl.substring(0, 80));
+    if (Hls.isSupported()) {
+      const hls = new Hls({ enableWorker: true, lowLatencyMode: false, maxBufferLength: 30 });
+      hls.loadSource(hlsUrl);
+      hls.attachMedia(video);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => { loader.style.display = 'none'; var st = ${startTime}; if (st > 0) video.currentTime = st; video.play().catch(()=>{}); });
+      hls.on(Hls.Events.ERROR, (e, d) => {
+        if (d.fatal) {
+          console.error('HLS fatal error:', d);
+          if (d.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
+          else { showError('Playback error: ' + d.details); hls.destroy(); }
+        }
+      });
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = hlsUrl;
+      video.addEventListener('loadedmetadata', () => { loader.style.display = 'none'; var st = ${startTime}; if (st > 0) video.currentTime = st; video.play().catch(()=>{}); });
+    } else {
+      showError('HLS not supported in this browser');
+    }
+  } catch (err) {
+    console.error('❌', err);
+    showError(err.message);
+  }
+}
+function showError(msg) { loader.style.display = 'none'; errorEl.style.display = 'flex'; errMsg.textContent = msg; }
+
+video.addEventListener('timeupdate', () => {
+  if (window.parent && window.parent !== window) {
+    window.parent.postMessage({
+      type: 'videojs',
+      event: 'timeupdate',
+      currentTime: video.currentTime,
+      duration: video.duration || 0,
+      paused: video.paused
+    }, '*');
+  }
+});
+video.addEventListener('ended', () => {
+  if (window.parent && window.parent !== window) {
+    window.parent.postMessage({
+      type: 'videojs',
+      event: 'ended',
+      currentTime: video.duration || 0,
+      duration: video.duration || 0,
+      paused: true
+    }, '*');
+  }
+});
+
+loadVideo();
+</script>
+</body></html>`);
 });
 
 // Clean ad-free video embed page — resolves bysesayeveum HLS and plays via hls.js
@@ -4062,6 +4274,277 @@ function formatDuration(ms) {
   return `${seconds}s`;
 }
 
+/* =========================================================================
+ *  Episode Scheduler — automatically checks for new episodes of ongoing anime
+ * ========================================================================= */
+class EpisodeScheduler {
+  constructor() {
+    // Configuration from env (trim whitespace — .env has leading spaces)
+    const t = (k, d) => (process.env[k] || '').trim() || d;
+    this.enabled = t('SCHEDULER_ENABLED', 'true') === 'true';
+    this.checkIntervalMs = parseInt(t('SCHEDULER_EPISODE_CHECK_INTERVAL_HOURS', '6')) * 60 * 60 * 1000;
+    this.maxConcurrent = parseInt(t('SCHEDULER_MAX_CONCURRENT_JOBS', '2'));
+    this.rateLimit = parseInt(t('SCHEDULER_RATE_LIMIT_EPISODES_PER_HOUR', '30'));
+    this.minRating = parseFloat(t('SCHEDULER_MIN_ANIME_RATING', '0'));
+
+    // State
+    this.timer = null;
+    this.initialTimeout = null;
+    this.running = false;
+    this.lastRun = null;
+    this.lastResults = null;
+    this.scrapedThisHour = 0;
+    this.rateLimitReset = Date.now() + 60 * 60 * 1000;
+  }
+
+  start() {
+    if (!this.enabled) {
+      console.log('⏸️  Episode scheduler disabled (SCHEDULER_ENABLED != true)');
+      return;
+    }
+    console.log(`⏰ Episode scheduler started — checking every ${this.checkIntervalMs / 3600000}h`);
+    // First run after 30s (let the server boot fully)
+    this.initialTimeout = setTimeout(() => this.run(), 30 * 1000);
+    this.timer = setInterval(() => this.run(), this.checkIntervalMs);
+  }
+
+  stop() {
+    if (this.initialTimeout) { clearTimeout(this.initialTimeout); this.initialTimeout = null; }
+    if (this.timer) { clearInterval(this.timer); this.timer = null; }
+  }
+
+  async run() {
+    if (!this.enabled) {
+      console.log('⏸️ Scheduler: disabled, skipping run');
+      return { skipped: true };
+    }
+    if (this.running) {
+      console.log('⏳ Scheduler: previous run still active, skipping');
+      return { skipped: true };
+    }
+    this.running = true;
+    const started = Date.now();
+    console.log('🔄 Scheduler: checking anime for new episodes…');
+
+    const results = { checked: 0, found: 0, failed: 0, skipped: 0, details: [] };
+
+    try {
+      // 1. Get all anime that might need episodes:
+      //    - ongoing (always check for new eps)
+      //    - any status with total_episodes > 0 (may have missing episodes)
+      const { data: allAnime, error } = await supabase
+        .from('anime')
+        .select('id, title, title_english, status, total_episodes, rating, nine_anime_slug')
+        .order('rating', { ascending: false });
+
+      if (error) throw error;
+      if (!allAnime || allAnime.length === 0) {
+        console.log('📭 Scheduler: no anime found');
+        this.running = false;
+        this.lastRun = new Date().toISOString();
+        this.lastResults = results;
+        return results;
+      }
+
+      console.log(`📋 Scheduler: ${allAnime.length} anime in database`);
+
+      // 2. For each anime, find the highest episode number already in DB
+      const animeIds = allAnime.map(a => a.id);
+      const { data: maxEps } = await supabase
+        .from('episodes')
+        .select('anime_id, episode_number')
+        .in('anime_id', animeIds)
+        .order('episode_number', { ascending: false });
+
+      // Build map: anime_id → highest episode number
+      const maxEpMap = new Map();
+      // Also count episodes per anime
+      const epCountMap = new Map();
+      for (const ep of (maxEps || [])) {
+        if (!maxEpMap.has(ep.anime_id) || ep.episode_number > maxEpMap.get(ep.anime_id)) {
+          maxEpMap.set(ep.anime_id, ep.episode_number);
+        }
+        epCountMap.set(ep.anime_id, (epCountMap.get(ep.anime_id) || 0) + 1);
+      }
+
+      // 3. Filter to anime that actually need episodes:
+      //    a) ongoing — always check for next ep
+      //    b) any anime with 0 episodes — needs initial scrape
+      //    c) anime where episodes in DB < total_episodes — has gaps
+      const needsEpisodes = allAnime.filter(a => {
+        const epCount = epCountMap.get(a.id) || 0;
+        if (a.status === 'ongoing') return true;
+        if (epCount === 0) return true;
+        if (a.total_episodes && epCount < a.total_episodes) return true;
+        return false;
+      });
+
+      // Sort: ongoing first, then by how many episodes are missing (most missing first)
+      needsEpisodes.sort((a, b) => {
+        const aOngoing = a.status === 'ongoing' ? 0 : 1;
+        const bOngoing = b.status === 'ongoing' ? 0 : 1;
+        if (aOngoing !== bOngoing) return aOngoing - bOngoing;
+        // Then by missing episodes (most missing first)
+        const aMissing = (a.total_episodes || 0) - (epCountMap.get(a.id) || 0);
+        const bMissing = (b.total_episodes || 0) - (epCountMap.get(b.id) || 0);
+        return bMissing - aMissing;
+      });
+
+      console.log(`📋 Scheduler: ${needsEpisodes.length} anime need episodes (${needsEpisodes.filter(a => a.status === 'ongoing').length} ongoing, ${needsEpisodes.filter(a => (epCountMap.get(a.id) || 0) === 0).length} with 0 eps)`);
+
+      // 4. Process anime in batches with concurrency limit
+      const queue = needsEpisodes.map(anime => ({
+        ...anime,
+        nextEp: (maxEpMap.get(anime.id) || 0) + 1,
+      }));
+
+      // Process one anime at a time (catch-up loop handles multiple eps per anime)
+      for (const anime of queue) {
+        // Rate limit check
+        if (Date.now() > this.rateLimitReset) {
+          this.scrapedThisHour = 0;
+          this.rateLimitReset = Date.now() + 60 * 60 * 1000;
+        }
+        if (this.scrapedThisHour >= this.rateLimit) {
+          console.log(`⚠️  Scheduler: rate limit hit (${this.rateLimit}/hr), stopping batch`);
+          results.skipped += queue.length - queue.indexOf(anime);
+          break;
+        }
+
+        await this.checkAndScrape(anime, results);
+
+        // Small delay between anime to be gentle on 9anime
+        await new Promise(r => setTimeout(r, 3000));
+      }
+    } catch (err) {
+      console.error('❌ Scheduler error:', err.message);
+    }
+
+    this.running = false;
+    this.lastRun = new Date().toISOString();
+    this.lastResults = results;
+    const elapsed = formatDuration(Date.now() - started);
+    console.log(`✅ Scheduler done in ${elapsed}: checked=${results.checked} found=${results.found} failed=${results.failed} skipped=${results.skipped}`);
+    return results;
+  }
+
+  async checkAndScrape(anime, results) {
+    const animeTitle = anime.title_english || anime.title;
+    results.checked++;
+
+    // Fetch episodes that already have a video_url (skip stubs from Jikan import)
+    const { data: existingEps } = await supabase
+      .from('episodes')
+      .select('episode_number, video_url')
+      .eq('anime_id', anime.id);
+    const scrapedSet = new Set(
+      (existingEps || []).filter(e => e.video_url).map(e => e.episode_number)
+    );
+
+    // Start from the lowest episode number that doesn't have a video URL yet
+    let ep = 1;
+    while (scrapedSet.has(ep)) ep++;
+
+    if (scrapedSet.size > 0) {
+      const totalStubs = (existingEps || []).length;
+      console.log(`  📦 "${animeTitle}" has ${scrapedSet.size}/${totalStubs} episodes with video, starting from EP ${ep}`);
+    }
+
+    // Catch-up loop: keep scraping sequentially until one fails or we hit the rate limit
+    while (true) {
+      if (this.scrapedThisHour >= this.rateLimit) break;
+
+      try {
+        console.log(`  🔍 Checking "${animeTitle}" EP ${ep}…`);
+        const result = await NineAnimeScraperService.scrapeAndSaveEpisode(
+          animeTitle,
+          anime.id,
+          ep,
+          { timeout: 45000, retries: 2 }
+        );
+
+        if (result.success) {
+          this.scrapedThisHour++;
+          results.found++;
+          results.details.push({ anime: animeTitle, episode: ep, status: 'found' });
+          console.log(`  ✅ Found EP ${ep} for "${animeTitle}"`);
+
+          // Update total_episodes in anime table if we found a new high
+          const newTotal = Math.max(anime.total_episodes || 0, ep);
+          if (newTotal > (anime.total_episodes || 0)) {
+            await supabase
+              .from('anime')
+              .update({ total_episodes: newTotal, updated_at: new Date().toISOString() })
+              .eq('id', anime.id);
+          }
+
+          // Try next episode (catch-up), skip any already scraped
+          ep++;
+          while (scrapedSet.has(ep)) ep++;
+          // Small delay between consecutive scrapes for the same anime
+          await new Promise(r => setTimeout(r, 3000));
+        } else {
+          // No more episodes available — stop catch-up
+          if (scrapedSet.size === 0 && ep === 1) {
+            results.details.push({ anime: animeTitle, episode: ep, status: 'not_available' });
+          }
+          break;
+        }
+      } catch (err) {
+        results.failed++;
+        results.details.push({ anime: animeTitle, episode: ep, status: 'error', error: err.message });
+        console.warn(`  ⚠️  Failed "${animeTitle}" EP ${ep}: ${err.message}`);
+        break;
+      }
+    }
+  }
+
+  getStatus() {
+    return {
+      enabled: this.enabled,
+      running: this.running,
+      lastRun: this.lastRun,
+      nextRun: this.timer ? new Date(Date.now() + this.checkIntervalMs).toISOString() : null,
+      checkIntervalHours: this.checkIntervalMs / 3600000,
+      maxConcurrent: this.maxConcurrent,
+      rateLimit: this.rateLimit,
+      scrapedThisHour: this.scrapedThisHour,
+      lastResults: this.lastResults,
+    };
+  }
+}
+
+const episodeScheduler = new EpisodeScheduler();
+
+// ─── Scheduler API endpoints ───────────────────────────────────────────
+app.get('/api/scheduler/status', (req, res) => {
+  res.json({ success: true, ...episodeScheduler.getStatus() });
+});
+
+app.post('/api/scheduler/run', async (req, res) => {
+  if (episodeScheduler.running) {
+    return res.status(409).json({ success: false, error: 'Scheduler is already running' });
+  }
+  // Run in background, return immediately
+  episodeScheduler.run().catch(err => console.error('Manual scheduler run error:', err));
+  res.json({ success: true, message: 'Scheduler run started' });
+});
+
+app.post('/api/scheduler/toggle', (req, res) => {
+  const { enabled } = req.body;
+  if (typeof enabled !== 'boolean') {
+    return res.status(400).json({ success: false, error: 'enabled must be boolean' });
+  }
+  if (enabled && !episodeScheduler.timer) {
+    episodeScheduler.enabled = true;
+    episodeScheduler.start();
+  } else if (!enabled) {
+    episodeScheduler.enabled = false;
+    episodeScheduler.stop();
+  }
+  res.json({ success: true, enabled: episodeScheduler.enabled });
+});
+
 // Error handling middleware (must be after all routes)
 app.use(errorHandler);
 
@@ -4079,6 +4562,13 @@ app.listen(PORT, () => {
   console.log(`   POST /api/start-large-scrape`);
   console.log(`   POST /api/scrape-chunk`);
   console.log(`   GET  /api/scraping-progress/:animeId`);
+  console.log(`⏰ Scheduler endpoints:`);
+  console.log(`   GET  /api/scheduler/status`);
+  console.log(`   POST /api/scheduler/run`);
+  console.log(`   POST /api/scheduler/toggle`);
+
+  // Start the episode scheduler
+  episodeScheduler.start();
 });
 
 export default app;

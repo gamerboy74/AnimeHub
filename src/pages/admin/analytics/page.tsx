@@ -11,8 +11,8 @@ export default function AdminAnalytics() {
   const [stats, setStats] = useState({
     totalUsers: 0,
     totalAnime: 0,
-    totalViews: 0,
-    activeSessions: 0
+    totalEpisodes: 0,
+    activeUsers: 0
   });
 
   useEffect(() => {
@@ -30,8 +30,8 @@ export default function AdminAnalytics() {
         setStats({
           totalUsers: adminStats.totalUsers,
           totalAnime: adminStats.totalAnime,
-          totalViews: adminStats.totalEpisodes, // Using episodes as proxy for views
-          activeSessions: adminStats.activeUsers
+          totalEpisodes: adminStats.totalEpisodes,
+          activeUsers: adminStats.activeUsers
         });
       } catch (err) {
         console.error('Failed to fetch analytics:', err);
@@ -137,7 +137,7 @@ export default function AdminAnalytics() {
                 </div>
                 <div className="flex items-center space-x-2">
                   <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                  <span className="text-sm text-green-600 font-medium">+12% from last month</span>
+                  <span className="text-sm text-green-600 font-medium">All time</span>
                 </div>
               </motion.div>
 
@@ -158,7 +158,7 @@ export default function AdminAnalytics() {
                 </div>
                 <div className="flex items-center space-x-2">
                   <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-                  <span className="text-sm text-blue-600 font-medium">+5 new this week</span>
+                  <span className="text-sm text-blue-600 font-medium">All time</span>
                 </div>
               </motion.div>
 
@@ -173,13 +173,13 @@ export default function AdminAnalytics() {
                     <i className="ri-eye-line text-white text-xl"></i>
                   </div>
                   <div className="text-right">
-                    <p className="text-2xl font-bold text-slate-800">{stats.totalViews.toLocaleString()}</p>
-                    <p className="text-sm text-slate-600">Total Views</p>
+                    <p className="text-2xl font-bold text-slate-800">{stats.totalEpisodes.toLocaleString()}</p>
+                    <p className="text-sm text-slate-600">Total Episodes</p>
                   </div>
                 </div>
                 <div className="flex items-center space-x-2">
                   <div className="w-2 h-2 bg-purple-500 rounded-full"></div>
-                  <span className="text-sm text-purple-600 font-medium">+23% this month</span>
+                  <span className="text-sm text-purple-600 font-medium">All time</span>
                 </div>
               </motion.div>
 
@@ -194,13 +194,13 @@ export default function AdminAnalytics() {
                     <i className="ri-user-heart-line text-white text-xl"></i>
                   </div>
                   <div className="text-right">
-                    <p className="text-2xl font-bold text-slate-800">{stats.activeSessions.toLocaleString()}</p>
+                    <p className="text-2xl font-bold text-slate-800">{stats.activeUsers.toLocaleString()}</p>
                     <p className="text-sm text-slate-600">Active Users</p>
                   </div>
                 </div>
                 <div className="flex items-center space-x-2">
                   <div className="w-2 h-2 bg-orange-500 rounded-full"></div>
-                  <span className="text-sm text-orange-600 font-medium">Online now</span>
+                  <span className="text-sm text-orange-600 font-medium">Current</span>
                 </div>
               </motion.div>
             </div>
@@ -349,7 +349,7 @@ export default function AdminAnalytics() {
                   className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg p-6 border border-white/20"
                 >
                   <div className="flex items-center justify-between mb-6">
-                    <h2 className="text-xl font-semibold text-slate-800">Device Usage</h2>
+                    <h2 className="text-xl font-semibold text-slate-800">Device Usage <span className="text-sm font-normal text-slate-400">(Estimated)</span></h2>
                     <div className="w-8 h-8 bg-gradient-to-r from-orange-400 to-orange-600 rounded-lg flex items-center justify-center">
                       <i className="ri-smartphone-line text-white text-sm"></i>
                     </div>

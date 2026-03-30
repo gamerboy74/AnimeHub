@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo } from 'react'
+import React, { createContext, useContext, useCallback, useEffect, useMemo } from 'react'
 import type { ReactNode } from 'react'
 import { sessionManager } from '../../utils/session/manager'
 import type { SessionState } from '../../utils/session/manager'
@@ -9,6 +9,7 @@ type User = Tables<'users'>
 interface AuthContextType {
   user: User | null
   loading: boolean
+  isInitialized: boolean
   error: string | null
   signUp: (email: string, password: string, username?: string) => Promise<void>
   signIn: (email: string, password: string) => Promise<void>
@@ -43,45 +44,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return unsubscribe
   }, [])
 
-  const signUp = async (email: string, password: string, username?: string) => {
+  const signUp = useCallback(async (email: string, password: string, username?: string) => {
     await sessionManager.signUp(email, password, username)
-  }
+  }, [])
 
-  const signIn = async (email: string, password: string) => {
+  const signIn = useCallback(async (email: string, password: string) => {
     await sessionManager.signIn(email, password)
-  }
+  }, [])
 
-  const signInWithGoogle = async () => {
+  const signInWithGoogle = useCallback(async () => {
     await sessionManager.signInWithGoogle()
-  }
+  }, [])
 
-  const signInWithGitHub = async () => {
+  const signInWithGitHub = useCallback(async () => {
     await sessionManager.signInWithGitHub()
-  }
+  }, [])
 
-  const signOut = async () => {
+  const signOut = useCallback(async () => {
     await sessionManager.signOut()
-  }
+  }, [])
 
-  const resetPassword = async (email: string) => {
+  const resetPassword = useCallback(async (email: string) => {
     await sessionManager.resetPassword(email)
-  }
+  }, [])
 
-  const updatePassword = async (newPassword: string) => {
+  const updatePassword = useCallback(async (newPassword: string) => {
     await sessionManager.updatePassword(newPassword)
-  }
+  }, [])
 
-  const refreshSession = async () => {
+  const refreshSession = useCallback(async () => {
     await sessionManager.forceRefresh()
-  }
+  }, [])
 
-  const isSessionValid = () => {
+  const isSessionValid = useCallback(() => {
     return sessionManager.isSessionValid()
-  }
+  }, [])
 
   const contextValue: AuthContextType = useMemo(() => ({
     user: state.user,
     loading: state.loading,
+    isInitialized: state.isInitialized,
     error: state.error,
     signUp,
     signIn,
@@ -95,6 +97,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }), [
     state.user,
     state.loading,
+    state.isInitialized,
     state.error,
     signUp,
     signIn,
