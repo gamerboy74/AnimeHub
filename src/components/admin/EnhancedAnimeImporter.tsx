@@ -6,7 +6,6 @@ import Button from '../base/Button'
 import Input from '../base/Input'
 import { SparkleLoadingSpinner } from '../base/LoadingSpinner'
 import Card from '../base/Card'
-import { TrailerDebugger } from './TrailerDebugger'
 import { supabase } from '../../lib/database/supabase'
 
 interface ImportResult {
@@ -611,7 +610,7 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
                 { id: 'search', label: 'Search Anime', icon: 'ri-search-line' },
                 { id: 'trending', label: 'Trending', icon: 'ri-fire-line' },
                 { id: 'seasonal', label: 'Seasonal', icon: 'ri-leaf-line' },
-                { id: 'debug', label: 'Debug', icon: 'ri-bug-line' }
+                { id: 'debug', label: 'Tools', icon: 'ri-tools-line' }
               ].map((tab) => (
                 <button
                   key={tab.id}
@@ -752,150 +751,500 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
               {activeTab === 'debug' && (
                 <motion.div
                   key="debug"
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 20 }}
-                  className="space-y-6"
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -12 }}
+                  transition={{ duration: 0.2 }}
+                  className="space-y-5"
                 >
-                  <TrailerDebugger />
-                  
-                  {/* Characters Debug Section */}
-                  <Card className="p-6">
-                    <h3 className="text-xl font-bold text-slate-800 mb-4 flex items-center">
-                      <i className="ri-group-line text-purple-500 mr-2"></i> Characters Debug
-                    </h3>
-                    <p className="text-slate-600 mb-4">
-                      Test character import and check database status.
-                    </p>
-                    
-                    {/* Message Display */}
-                    {message && (
-                      <div className={`p-4 rounded-xl mb-4 ${
-                        message.includes('Error') || message.includes('error')
-                          ? 'bg-red-50 border border-red-200 text-red-700' 
-                          : 'bg-green-50 border border-green-200 text-green-700'
-                      }`}>
-                        <p className="font-medium">{message}</p>
+                  {/* Status Banner */}
+                  {message && (
+                    <div className={`flex items-start gap-3 p-4 rounded-xl text-sm font-medium border ${
+                      message.includes('❌') || message.includes('Error') || message.includes('error')
+                        ? 'bg-red-50 border-red-200 text-red-700'
+                        : message.includes('⏳') || message.includes('🔍') || message.includes('📺') || message.includes('🎭')
+                          ? 'bg-blue-50 border-blue-200 text-blue-700'
+                          : 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                    }`}>
+                      <p className="whitespace-pre-wrap leading-relaxed">{message}</p>
+                      <button onClick={() => setMessage(null)} className="ml-auto shrink-0 opacity-60 hover:opacity-100 transition-opacity">
+                        <i className="ri-close-line text-lg"></i>
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Tool Cards Grid */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+                    {/* ── Characters: Backfill ──────────────── */}
+                    <div className="group relative bg-white rounded-2xl border border-slate-200 hover:border-amber-300 hover:shadow-md transition-all duration-200 p-5">
+                      <div className="flex items-center gap-3 mb-2">
+                        <span className="flex items-center justify-center w-9 h-9 rounded-xl bg-amber-100 text-amber-600"><i className="ri-magic-line text-lg"></i></span>
+                        <h4 className="font-semibold text-slate-800">Backfill Characters</h4>
                       </div>
-                    )}
-                    
-                    <div className="flex gap-4">
+                      <p className="text-slate-500 text-sm mb-4 leading-relaxed">Re-fetch missing voice actors & descriptions from AniList for all anime. Skips anime already complete.</p>
                       <Button
                         onClick={async () => {
                           try {
-                            const { data, error } = await supabase
-                              .from('anime_characters')
-                              .select('*')
-                              .limit(5)
-                            
-                            if (error) {
-                              console.error('Error checking characters table:', error)
-                              setMessage(`Characters table error: ${error.message}`)
-                            } else {
-                              console.log('Characters table data:', data)
-                              setMessage(`Characters table OK. Found ${data?.length || 0} characters.`)
-                            }
-                          } catch (err) {
-                            console.error('Error:', err)
-                            setMessage(`Error: ${err}`)
-                          }
-                        }}
-                        className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white px-4 py-2 rounded-xl font-semibold transition-all duration-300"
-                      >
-                        <i className="ri-search-line mr-1"></i> Check Characters Table
-                      </Button>
-                      
-                      <Button
-                        onClick={async () => {
-                          try {
-                            const { data, error } = await supabase
+                            setMessage('🔍 Fetching anime list from database...')
+
+                            // Get all anime from DB
+                            const { data: animeList, error: listError } = await supabase
                               .from('anime')
-                              .select('id, title')
-                              .limit(1)
-                            
-                            if (error) {
-                              console.error('Error checking anime table:', error)
-                              setMessage(`Anime table error: ${error.message}`)
-                            } else if (data && data.length > 0) {
-                              const animeId = data[0].id
-                              const { data: characters, error: charError } = await supabase
-                                .from('anime_characters')
-                                .select('*')
-                                .eq('anime_id', animeId)
-                              
-                              if (charError) {
-                                console.error('Error fetching characters:', charError)
-                                setMessage(`Error fetching characters: ${charError.message}`)
-                              } else {
-                                console.log(`Characters for ${data[0].title}:`, characters)
-                                setMessage(`Found ${characters?.length || 0} characters for "${data[0].title}"`)
-                              }
-                            } else {
-                              setMessage('No anime found in database')
+                              .select('id, title, mal_id')
+                              .order('title')
+
+                            if (listError || !animeList?.length) {
+                              setMessage(listError ? `Error: ${listError.message}` : 'No anime found in database')
+                              return
                             }
-                          } catch (err) {
-                            console.error('Error:', err)
-                            setMessage(`Error: ${err}`)
-                          }
-                        }}
-                        className="bg-gradient-to-r from-green-500 to-teal-500 hover:from-green-600 hover:to-teal-600 text-white px-4 py-2 rounded-xl font-semibold transition-all duration-300"
-                      >
-                        <i className="ri-user-line mr-1"></i> Check Sample Characters
-                      </Button>
-                      
-                      <Button
-                        onClick={async () => {
-                          try {
-                            setMessage('Testing AniList character fetch...')
-                            
-                            // Test AniList API directly
-                            const testQuery = `
-                              query {
-                                Media(search: "Attack on Titan", type: ANIME) {
-                                  id
-                                  title { romaji english native }
-                                  characters(sort: [ROLE, RELEVANCE], perPage: 50) {
-                                    edges {
+
+                            let totalSuccess = 0
+                            let totalErrors = 0
+                            let totalSkipped = 0
+                            const failedTitles: string[] = []
+                            const total = animeList.length
+
+                            for (let i = 0; i < total; i++) {
+                              const anime = animeList[i]
+
+                              // Skip anime that already have characters with voice actors
+                              const { data: existingChars } = await supabase
+                                .from('anime_characters')
+                                .select('id, voice_actor, description')
+                                .eq('anime_id', anime.id)
+                                .limit(10)
+
+                              if (existingChars && existingChars.length > 0) {
+                                const hasVoiceActors = existingChars.some(c => c.voice_actor)
+                                const hasDescriptions = existingChars.some(c => c.description)
+                                if (hasVoiceActors && hasDescriptions) {
+                                  totalSkipped++
+                                  continue
+                                }
+                              }
+
+                              setMessage(`🎭 [${i + 1}/${total}] Fetching characters for "${anime.title}"... (${totalSkipped} already complete)`)
+
+                              try {
+                                // Search AniList by title to find matching anime
+                                const searchQuery = `
+                                  query ($search: String) {
+                                    Media(search: $search, type: ANIME) {
                                       id
-                                      role
-                                      node {
-                                        id
-                                        name { full native alternative }
-                                        image { large medium }
-                                        description
+                                      characters(sort: [ROLE, RELEVANCE], perPage: 25) {
+                                        edges {
+                                          id
+                                          role
+                                          voiceActors(language: JAPANESE) {
+                                            id
+                                            name { full native }
+                                          }
+                                          voiceActorRoles {
+                                            voiceActor {
+                                              id
+                                              name { full native }
+                                              language
+                                            }
+                                          }
+                                          node {
+                                            id
+                                            name { full native alternative }
+                                            image { large medium }
+                                            description
+                                          }
+                                        }
                                       }
                                     }
                                   }
+                                `
+
+                                // Helper: fetch with retry on rate limit / CORS block
+                                const fetchAniList = async (body: string, attempt = 1): Promise<any> => {
+                                  try {
+                                    const r = await fetch('https://graphql.anilist.co', {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body
+                                    })
+                                    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+                                    return await r.json()
+                                  } catch (err) {
+                                    if (attempt >= 3) throw err
+                                    const wait = attempt === 1 ? 30000 : 60000
+                                    setMessage(`⏳ [${i + 1}/${total}] Rate limited on "${anime.title}", waiting ${wait / 1000}s (attempt ${attempt}/3)...`)
+                                    await new Promise(r => setTimeout(r, wait))
+                                    return fetchAniList(body, attempt + 1)
+                                  }
                                 }
+
+                                const reqBody = JSON.stringify({ query: searchQuery, variables: { search: anime.title } })
+                                const data = await fetchAniList(reqBody)
+
+                                const media = data.data?.Media
+                                if (!media?.characters?.edges?.length) {
+                                  totalSkipped++
+                                  await new Promise(r => setTimeout(r, 3000))
+                                  continue
+                                }
+
+                                const result = await AnimeImporterService.importAnimeCharacters(anime.id, media)
+                                totalSuccess += result.success
+                                totalErrors += result.errors
+                              } catch (err) {
+                                console.error(`Failed to backfill characters for "${anime.title}":`, err)
+                                totalErrors++
+                                failedTitles.push(anime.title)
                               }
-                            `
-                            
-                            const response = await fetch('https://graphql.anilist.co', {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ query: testQuery })
-                            })
-                            
-                            const data = await response.json()
-                            console.log('AniList test response:', data)
-                            
-                            if (data.data?.Media?.characters?.edges) {
-                              const characters = data.data.Media.characters.edges
-                              setMessage(`✅ AniList API working! Found ${characters.length} characters for "Attack on Titan"`)
-                            } else {
-                              setMessage('❌ No characters found in AniList response')
+
+                              // AniList rate limit: ~90 req/min — wait 3s between requests
+                              await new Promise(r => setTimeout(r, 3000))
                             }
+
+                            setMessage(`✅ Character backfill complete! ${totalSuccess} characters updated across ${total} anime. ${totalSkipped > 0 ? `${totalSkipped} skipped (no data). ` : ''}${totalErrors > 0 ? `${totalErrors} errors. ` : ''}${failedTitles.length > 0 ? `\nFailed: ${failedTitles.join(', ')}` : ''}`)
                           } catch (err) {
-                            console.error('AniList test error:', err)
-                            setMessage(`❌ AniList API test failed: ${err}`)
+                            console.error('Backfill error:', err)
+                            setMessage(`❌ Backfill failed: ${err instanceof Error ? err.message : err}`)
                           }
                         }}
-                        className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white px-4 py-2 rounded-xl font-semibold transition-all duration-300"
+                        disabled={isImporting}
+                        className="w-full bg-amber-500 hover:bg-amber-600 text-white py-2.5 rounded-xl font-medium text-sm transition-colors disabled:opacity-50"
                       >
-                        <i className="ri-flask-line mr-1"></i> Test AniList API
+                        {isImporting ? 'Running...' : 'Run Backfill'}
                       </Button>
                     </div>
-                  </Card>
+
+                    {/* ── Characters: Remove Duplicates ─────── */}
+                    <div className="group relative bg-white rounded-2xl border border-slate-200 hover:border-rose-300 hover:shadow-md transition-all duration-200 p-5">
+                      <div className="flex items-center gap-3 mb-2">
+                        <span className="flex items-center justify-center w-9 h-9 rounded-xl bg-rose-100 text-rose-600"><i className="ri-delete-bin-line text-lg"></i></span>
+                        <h4 className="font-semibold text-slate-800">Remove Duplicates</h4>
+                      </div>
+                      <p className="text-slate-500 text-sm mb-4 leading-relaxed">Scan all characters for name duplicates within the same anime and remove the entry with less data.</p>
+                      <Button
+                        onClick={async () => {
+                          try {
+                            setMessage('🔍 Scanning for duplicate characters...')
+
+                            // Get all characters grouped by anime
+                            const { data: allChars, error: fetchErr } = await supabase
+                              .from('anime_characters')
+                              .select('id, anime_id, name, role, description, voice_actor')
+                              .order('anime_id')
+
+                            if (fetchErr || !allChars) {
+                              setMessage(`Error: ${fetchErr?.message || 'No characters found'}`)
+                              return
+                            }
+
+                            // Normalize name for comparison
+                            const normalizeName = (name: string) =>
+                              name.toLowerCase().replace(/[.,\-'"""'']/g, '').split(/[\s,]+/).filter((w: string) => w.length > 1).sort().join(' ')
+
+                            // Group by anime_id
+                            const byAnime = new Map<string, typeof allChars>()
+                            for (const c of allChars) {
+                              const list = byAnime.get(c.anime_id) || []
+                              list.push(c)
+                              byAnime.set(c.anime_id, list)
+                            }
+
+                            let totalRemoved = 0
+                            const idsToDelete: string[] = []
+
+                            for (const [, chars] of byAnime) {
+                              // Find duplicates by normalized name
+                              const seen = new Map<string, typeof allChars[0]>()
+                              for (const c of chars) {
+                                const norm = normalizeName(c.name)
+                                const existing = seen.get(norm)
+                                if (existing) {
+                                  // Keep the one with more data (description or voice_actor)
+                                  const existingScore = (existing.description ? 1 : 0) + (existing.voice_actor ? 1 : 0)
+                                  const currentScore = (c.description ? 1 : 0) + (c.voice_actor ? 1 : 0)
+                                  if (currentScore > existingScore) {
+                                    idsToDelete.push(existing.id)
+                                    seen.set(norm, c)
+                                  } else {
+                                    idsToDelete.push(c.id)
+                                  }
+                                  totalRemoved++
+                                } else {
+                                  seen.set(norm, c)
+                                }
+                              }
+                            }
+
+                            if (idsToDelete.length === 0) {
+                              setMessage('✅ No duplicate characters found!')
+                              return
+                            }
+
+                            setMessage(`🗑️ Removing ${idsToDelete.length} duplicate characters...`)
+
+                            // Delete in batches of 50
+                            for (let i = 0; i < idsToDelete.length; i += 50) {
+                              const batch = idsToDelete.slice(i, i + 50)
+                              await supabase.from('anime_characters').delete().in('id', batch)
+                            }
+
+                            setMessage(`✅ Removed ${totalRemoved} duplicate characters! Kept the ones with more details.`)
+                          } catch (err) {
+                            setMessage(`❌ Error: ${err instanceof Error ? err.message : err}`)
+                          }
+                        }}
+                        disabled={isImporting}
+                        className="w-full bg-rose-500 hover:bg-rose-600 text-white py-2.5 rounded-xl font-medium text-sm transition-colors disabled:opacity-50"
+                      >
+                        {isImporting ? 'Scanning...' : 'Scan & Clean'}
+                      </Button>
+                    </div>
+
+                    {/* ── Episodes: Backfill All ────────────── */}
+                    <div className="group relative bg-white rounded-2xl border border-slate-200 hover:border-blue-300 hover:shadow-md transition-all duration-200 p-5">
+                      <div className="flex items-center gap-3 mb-2">
+                        <span className="flex items-center justify-center w-9 h-9 rounded-xl bg-blue-100 text-blue-600"><i className="ri-play-list-add-line text-lg"></i></span>
+                        <h4 className="font-semibold text-slate-800">Backfill Episodes</h4>
+                      </div>
+                      <p className="text-slate-500 text-sm mb-4 leading-relaxed">Create missing episode stubs from Jikan for all anime. Skips anime that already have all episodes.</p>
+                      <Button
+                        onClick={async () => {
+                          try {
+                            setMessage('🔍 Fetching anime list...')
+
+                            const { data: animeList, error: listError } = await supabase
+                              .from('anime')
+                              .select('id, title, mal_id, total_episodes')
+                              .not('mal_id', 'is', null)
+                              .order('title')
+
+                            if (listError || !animeList?.length) {
+                              setMessage(listError ? `Error: ${listError.message}` : 'No anime with MAL IDs found')
+                              return
+                            }
+
+                            let totalCreated = 0
+                            let totalSkipped = 0
+                            let totalFixed = 0
+                            const total = animeList.length
+
+                            for (let i = 0; i < total; i++) {
+                              const anime = animeList[i]
+                              setMessage(`📺 [${i + 1}/${total}] Checking episodes for "${anime.title}"...`)
+
+                              try {
+                                // Check how many episodes exist in DB
+                                const { count } = await supabase
+                                  .from('episodes')
+                                  .select('id', { count: 'exact', head: true })
+                                  .eq('anime_id', anime.id)
+
+                                const expectedEps = anime.total_episodes || 0
+                                const existingEps = count || 0
+
+                                // Skip if we already have all episodes
+                                if (expectedEps > 0 && existingEps >= expectedEps) {
+                                  totalSkipped++
+                                  continue
+                                }
+
+                                // Fetch and create stubs from Jikan
+                                const result = await AnimeImporterService.fetchEpisodesForExistingAnime(anime.id)
+                                totalCreated += result.created
+                                if (result.created > 0) {
+                                  totalFixed++
+                                  // Trigger scraping for episodes missing video_url
+                                  const { data: unscroped } = await supabase
+                                    .from('episodes')
+                                    .select('episode_number')
+                                    .eq('anime_id', anime.id)
+                                    .is('video_url', null)
+                                  if (unscroped?.length) {
+                                    const nums = unscroped.map(e => e.episode_number)
+                                    HiAnimeScraperService.batchScrapeEpisodes(anime.title, anime.id, nums).catch(() => {})
+                                  }
+                                  console.log(`📺 ${anime.title}: created ${result.created} stubs, triggered scrape`)
+                                }
+                              } catch (err) {
+                                console.warn(`⚠️ Failed for "${anime.title}":`, err)
+                              }
+
+                              // Jikan rate limit
+                              await new Promise(r => setTimeout(r, 500))
+                            }
+
+                            setMessage(`✅ Episode backfill complete! ${totalCreated} stubs created for ${totalFixed} anime. ${totalSkipped} already complete. Scraping triggered for new episodes.`)
+                          } catch (err) {
+                            setMessage(`❌ Error: ${err instanceof Error ? err.message : err}`)
+                          }
+                        }}
+                        disabled={isImporting}
+                        className="w-full bg-blue-500 hover:bg-blue-600 text-white py-2.5 rounded-xl font-medium text-sm transition-colors disabled:opacity-50"
+                      >
+                        {isImporting ? 'Running...' : 'Run Backfill'}
+                      </Button>
+                    </div>
+
+                    {/* ── Episodes: Fix Gaps ────────────────── */}
+                    <div className="group relative bg-white rounded-2xl border border-slate-200 hover:border-teal-300 hover:shadow-md transition-all duration-200 p-5">
+                      <div className="flex items-center gap-3 mb-2">
+                        <span className="flex items-center justify-center w-9 h-9 rounded-xl bg-teal-100 text-teal-600"><i className="ri-error-warning-line text-lg"></i></span>
+                        <h4 className="font-semibold text-slate-800">Fix Episode Gaps</h4>
+                      </div>
+                      <p className="text-slate-500 text-sm mb-4 leading-relaxed">Only targets anime where episodes are missing compared to total. Faster than full backfill.</p>
+                      <Button
+                        onClick={async () => {
+                          try {
+                            setMessage('🔍 Scanning for anime with missing episodes...')
+
+                            const { data: animeList, error: listError } = await supabase
+                              .from('anime')
+                              .select('id, title, mal_id, total_episodes')
+                              .not('mal_id', 'is', null)
+                              .gt('total_episodes', 0)
+                              .order('title')
+
+                            if (listError || !animeList?.length) {
+                              setMessage(listError ? `Error: ${listError.message}` : 'No anime found')
+                              return
+                            }
+
+                            const gapped: { title: string; expected: number; actual: number }[] = []
+                            let totalCreated = 0
+
+                            for (const anime of animeList) {
+                              const { count } = await supabase
+                                .from('episodes')
+                                .select('id', { count: 'exact', head: true })
+                                .eq('anime_id', anime.id)
+
+                              const expected = anime.total_episodes || 0
+                              const actual = count || 0
+
+                              if (actual < expected) {
+                                gapped.push({ title: anime.title, expected, actual })
+                                setMessage(`📺 Fixing "${anime.title}" (${actual}/${expected} episodes)...`)
+
+                                try {
+                                  const result = await AnimeImporterService.fetchEpisodesForExistingAnime(anime.id)
+                                  totalCreated += result.created
+                                  // Trigger scraping for episodes missing video_url
+                                  if (result.created > 0) {
+                                    const { data: unscroped } = await supabase
+                                      .from('episodes')
+                                      .select('episode_number')
+                                      .eq('anime_id', anime.id)
+                                      .is('video_url', null)
+                                    if (unscroped?.length) {
+                                      const nums = unscroped.map(e => e.episode_number)
+                                      HiAnimeScraperService.batchScrapeEpisodes(anime.title, anime.id, nums).catch(() => {})
+                                    }
+                                  }
+                                } catch (err) {
+                                  console.warn(`Failed for "${anime.title}":`, err)
+                                }
+
+                                await new Promise(r => setTimeout(r, 500))
+                              }
+                            }
+
+                            if (gapped.length === 0) {
+                              setMessage('✅ All anime have complete episode stubs!')
+                            } else {
+                              const details = gapped.map(g => `${g.title} (${g.actual}→${g.expected})`).join(', ')
+                              setMessage(`✅ Fixed ${gapped.length} anime with gaps. ${totalCreated} stubs created. Scraping triggered.\n${details}`)
+                            }
+                          } catch (err) {
+                            setMessage(`❌ Error: ${err instanceof Error ? err.message : err}`)
+                          }
+                        }}
+                        disabled={isImporting}
+                        className="w-full bg-teal-500 hover:bg-teal-600 text-white py-2.5 rounded-xl font-medium text-sm transition-colors disabled:opacity-50"
+                      >
+                        {isImporting ? 'Scanning...' : 'Fix Gaps'}
+                      </Button>
+                    </div>
+
+                    {/* ── Scrape Missing Videos ──────────────── */}
+                    <div className="group relative bg-white rounded-2xl border border-slate-200 hover:border-purple-300 hover:shadow-md transition-all duration-200 p-5 md:col-span-2">
+                      <div className="flex items-center gap-3 mb-2">
+                        <span className="flex items-center justify-center w-9 h-9 rounded-xl bg-purple-100 text-purple-600"><i className="ri-movie-line text-lg"></i></span>
+                        <h4 className="font-semibold text-slate-800">Scrape Missing Videos</h4>
+                      </div>
+                      <p className="text-slate-500 text-sm mb-4 leading-relaxed">Find all episodes with no video URL and trigger the scraper to fill them in. Requires the backend server to be running.</p>
+                      <Button
+                        onClick={async () => {
+                          try {
+                            setMessage('🔍 Finding episodes without video URLs...')
+
+                            // Get all episodes with null video_url, grouped by anime
+                            const { data: episodes, error } = await supabase
+                              .from('episodes')
+                              .select('anime_id, episode_number')
+                              .is('video_url', null)
+                              .order('anime_id')
+                              .order('episode_number')
+
+                            if (error) {
+                              setMessage(`❌ Error: ${error.message}`)
+                              return
+                            }
+
+                            if (!episodes?.length) {
+                              setMessage('✅ All episodes already have video URLs!')
+                              return
+                            }
+
+                            // Group by anime_id
+                            const byAnime = new Map<string, number[]>()
+                            for (const ep of episodes) {
+                              const list = byAnime.get(ep.anime_id) || []
+                              list.push(ep.episode_number)
+                              byAnime.set(ep.anime_id, list)
+                            }
+
+                            // Get anime titles
+                            const animeIds = [...byAnime.keys()]
+                            const { data: animeList } = await supabase
+                              .from('anime')
+                              .select('id, title')
+                              .in('id', animeIds)
+
+                            const titleMap = new Map(animeList?.map(a => [a.id, a.title]) || [])
+
+                            let totalQueued = 0
+                            let idx = 0
+                            const total = byAnime.size
+
+                            for (const [animeId, epNums] of byAnime) {
+                              idx++
+                              const title = titleMap.get(animeId) || 'Unknown'
+                              setMessage(`🎬 [${idx}/${total}] Queuing scrape for "${title}" (${epNums.length} episodes)...`)
+
+                              try {
+                                await HiAnimeScraperService.batchScrapeEpisodes(title, animeId, epNums)
+                                totalQueued += epNums.length
+                              } catch (err) {
+                                console.warn(`⚠️ Scrape failed for "${title}":`, err)
+                              }
+
+                              // Small delay between anime to avoid overwhelming the server
+                              await new Promise(r => setTimeout(r, 1000))
+                            }
+
+                            setMessage(`✅ Scraping complete! Processed ${totalQueued} episodes across ${total} anime.`)
+                          } catch (err) {
+                            setMessage(`❌ Error: ${err instanceof Error ? err.message : err}`)
+                          }
+                        }}
+                        disabled={isImporting}
+                        className="w-full bg-purple-500 hover:bg-purple-600 text-white py-2.5 rounded-xl font-medium text-sm transition-colors disabled:opacity-50"
+                      >
+                        {isImporting ? 'Scraping...' : 'Scrape All Missing'}
+                      </Button>
+                    </div>
+
+                  </div>{/* end grid */}
                 </motion.div>
               )}
             </AnimatePresence>

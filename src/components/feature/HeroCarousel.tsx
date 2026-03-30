@@ -2,13 +2,16 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import Button from '../base/Button';
+import { getProxiedImageUrl, getDirectImageUrl } from '../../utils/media/imageProxy';
+import { fetchAnilistBanner } from '../../utils/media/anilist';
 
 // Interface for HeroSlide
 interface HeroSlide {
   id: string;
   title: string;
   description: string;
-  image: string;
+  banner_url?: string | null;
+  poster_url?: string | null;
   genres: string[];
   rating: number;
 }
@@ -47,16 +50,31 @@ const HeroCarousel = React.memo(function HeroCarousel({ slides, loading = false 
   const [currentSlide, setCurrentSlide] = useState(0);
   const [isAutoPlaying, setIsAutoPlaying] = useState(true);
   const [isVisible, setIsVisible] = useState(true);
+  const [fetchedBanners, setFetchedBanners] = useState<Record<string, string>>({});
   const fallbackImage = '/assets/images/default-anime-banner.jpg'; // Replace with actual path
 
   // Filter valid slides
   const validSlides = useMemo(
     () =>
       slides.filter(
-        (slide) => slide.id && slide.title && slide.image && slide.description && slide.rating >= 0
+        (slide) => slide.id && slide.title && (slide.banner_url || slide.poster_url) && slide.description && slide.rating >= 0
       ),
     [slides]
   );
+
+  // Fetch missing banners dynamically
+  useEffect(() => {
+    validSlides.forEach(slide => {
+      // If we don't have a database banner, but we haven't fetched an AniList one yet
+      if (!slide.banner_url && !fetchedBanners[slide.title]) {
+        fetchAnilistBanner(slide.title).then(url => {
+          if (url) {
+            setFetchedBanners(prev => ({ ...prev, [slide.title]: url }));
+          }
+        });
+      }
+    });
+  }, [validSlides, fetchedBanners]);
 
   // Handle visibility for auto-play
   useEffect(() => {
@@ -135,6 +153,12 @@ const HeroCarousel = React.memo(function HeroCarousel({ slides, loading = false 
   }
 
   const currentSlideData = validSlides[currentSlide];
+  
+  // Calculate which image to show for this slide
+  const displayImage = currentSlideData.banner_url 
+    || fetchedBanners[currentSlideData.title] 
+    || currentSlideData.poster_url 
+    || fallbackImage;
 
   return (
     <div
@@ -156,8 +180,8 @@ const HeroCarousel = React.memo(function HeroCarousel({ slides, loading = false 
           style={{ willChange: 'opacity' }}
         >
           <img
-            src={currentSlideData.image || fallbackImage}
-            srcSet={currentSlideData.image ? `${currentSlideData.image}?w=640 640w, ${currentSlideData.image}?w=960 960w, ${currentSlideData.image}?w=1280 1280w, ${currentSlideData.image}?w=1920 1920w` : undefined}
+            src={getProxiedImageUrl(displayImage) || displayImage}
+            srcSet={displayImage !== fallbackImage ? `${getProxiedImageUrl(`${displayImage}?w=640`)} 640w, ${getProxiedImageUrl(`${displayImage}?w=960`)} 960w, ${getProxiedImageUrl(`${displayImage}?w=1280`)} 1280w, ${getProxiedImageUrl(`${displayImage}?w=1920`)} 1920w` : undefined}
             sizes="(max-width: 640px) 100vw, (max-width: 1024px) 100vw, 1920px"
             alt={currentSlideData.title}
             className="w-full h-full object-cover object-top"
@@ -167,7 +191,15 @@ const HeroCarousel = React.memo(function HeroCarousel({ slides, loading = false 
             height={500}
             decoding={currentSlide === 0 ? 'sync' : 'async'}
             style={{ aspectRatio: '1920/500', objectFit: 'cover' }}
-            onError={(e) => (e.currentTarget.src = fallbackImage)}
+            onError={(e) => {
+              const target = e.currentTarget;
+              // If the proxied URL failed, try the direct CDN URL
+              const directUrl = getDirectImageUrl(target.src);
+              if (directUrl && target.src !== directUrl) {
+                target.srcset = '';
+                target.src = directUrl;
+              }
+            }}
           />
           <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/30 to-transparent" />
         </motion.div>

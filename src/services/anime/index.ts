@@ -337,12 +337,26 @@ export class AnimeService {
         try {
           const episodeIds = sortedEpisodes.map((e: any) => e.id)
           
-          const [progressResult, favoritesResult, watchlistResult] = await Promise.all([
-            episodeIds.length > 0 ? supabase
-              .from('user_progress')
-              .select('*')
-              .eq('user_id', userId)
-              .in('episode_id', episodeIds) : Promise.resolve({ data: [] }),
+          // Batch episode IDs to avoid URL length limits for anime with many episodes
+          const BATCH_SIZE = 50
+          const progressPromises: Promise<{ data: any[] | null }>[] = []
+          for (let i = 0; i < episodeIds.length; i += BATCH_SIZE) {
+            const batch = episodeIds.slice(i, i + BATCH_SIZE)
+            progressPromises.push(
+              supabase
+                .from('user_progress')
+                .select('*')
+                .eq('user_id', userId)
+                .in('episode_id', batch)
+            )
+          }
+
+          const [progressResults, favoritesResult, watchlistResult] = await Promise.all([
+            episodeIds.length > 0
+              ? Promise.all(progressPromises).then(results =>
+                  results.flatMap(r => r.data || [])
+                )
+              : Promise.resolve([]),
             
             supabase
               .from('user_favorites')
@@ -359,7 +373,7 @@ export class AnimeService {
               .maybeSingle()
           ])
 
-          result.user_progress = progressResult.data || []
+          result.user_progress = progressResults
           result.is_favorited = !!favoritesResult.data
           result.is_in_watchlist = !!watchlistResult.data
         } catch (userError) {

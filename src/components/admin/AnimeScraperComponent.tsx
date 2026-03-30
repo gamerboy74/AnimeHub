@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { HiAnimeScraperService } from '../../services/scrapers/hianime';
 import { AdminAnimeService } from '../../services/admin/anime';
 import { AnimeService } from '../../services/anime';
+import { AnimeImporterService } from '../../services/anime/importer';
 import Button from '../../components/base/Button';
 import Input from '../../components/base/Input';
 import { SparkleLoadingSpinner } from '../../components/base/LoadingSpinner';
@@ -129,7 +130,8 @@ export const AnimeScraperComponent: React.FC = () => {
     }
 
     try {
-      const response = await fetch(`http://localhost:3001/api/anime/${animeId}/episodes`);
+      const API_BASE = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+      const response = await fetch(`${API_BASE}/api/anime/${animeId}/episodes`);
       if (response.ok) {
         const contentType = response.headers.get('content-type');
         if (contentType && contentType.includes('application/json')) {
@@ -203,6 +205,13 @@ export const AnimeScraperComponent: React.FC = () => {
     setSuccess(null);
     setBatchResult(null);
 
+    // Auto-create episode stubs if they don't exist yet
+    try {
+      await AnimeImporterService.fetchEpisodesForExistingAnime(selectedAnime.id);
+    } catch (stubErr) {
+      console.warn('⚠️ Episode stub creation skipped:', stubErr);
+    }
+
     try {
       const result = await HiAnimeScraperService.batchScrapeEpisodes(
         selectedAnime.title,
@@ -265,6 +274,16 @@ export const AnimeScraperComponent: React.FC = () => {
     // Generate episode numbers array
     const totalEpisodes = selectedAnime.total_episodes || 13;
     const episodeNumbers = Array.from({ length: totalEpisodes }, (_, i) => i + 1);
+
+    // Auto-create episode stubs if they don't exist yet
+    try {
+      setProgressMessages(prev => [...prev, '📺 Ensuring episode stubs exist in database...']);
+      const stubResult = await AnimeImporterService.fetchEpisodesForExistingAnime(selectedAnime.id);
+      setProgressMessages(prev => [...prev, `📺 Episode stubs: ${stubResult.created} created, ${stubResult.skipped} already existed`]);
+    } catch (stubErr) {
+      console.warn('⚠️ Episode stub creation skipped (no MAL ID or API error):', stubErr);
+      setProgressMessages(prev => [...prev, '⚠️ Stub creation skipped — will scrape anyway']);
+    }
     
     // Initialize all episodes as pending
     const initialStatuses: Record<number, { status: 'pending' }> = {};
@@ -422,7 +441,8 @@ export const AnimeScraperComponent: React.FC = () => {
     if (!selectedAnime) return;
     
     try {
-      const response = await fetch('http://localhost:3001/api/add-scraped-episode', {
+      const API_BASE = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+      const response = await fetch(`${API_BASE}/api/add-scraped-episode`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

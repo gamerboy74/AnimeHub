@@ -6,11 +6,12 @@ import HeroCarousel from '../../components/feature/HeroCarousel';
 import AnimeCard from '../../components/feature/AnimeCard';
 import VirtualizedGrid from '../../components/feature/VirtualizedGrid';
 import { SparkleLoadingSpinner } from '../../components/base/LoadingSpinner';
-import { useFeaturedAnime, useTrendingAnime, usePopularAnime, useRecentAnime, useContinueWatching } from '../../hooks/useAnime';
+import { useTrendingAnime, usePopularAnime, useRecentAnime, useContinueWatching } from '../../hooks/useAnime';
 import { useCurrentUser } from '../../hooks/auth/selectors';
 import ErrorBoundary from '../../components/common/ErrorBoundary';
 import { SectionError, ContentError } from '../../components/common/ErrorFallbacks';
 import Footer from '../../components/feature/Footer';
+import { getProxiedImageUrl } from '../../utils/media/imageProxy';
 
 // Interfaces for type safety
 interface Anime {
@@ -32,7 +33,8 @@ interface HeroSlide {
   id: string;
   title: string;
   description: string;
-  image: string;
+  banner_url?: string | null;
+  poster_url?: string | null;
   genres: string[];
   rating: number;
 }
@@ -63,7 +65,7 @@ export default function Home() {
   const user = useCurrentUser();
 
   // Data fetching hooks
-  const { anime: featuredAnime, loading: featuredLoading } = useFeaturedAnime();
+  // Data fetching hooks
   const { anime: trendingAnime, loading: trendingLoading } = useTrendingAnime();
   const { anime: popularAnime, loading: popularLoading } = usePopularAnime();
   const { anime: recentAnime, loading: recentLoading } = useRecentAnime(6);
@@ -79,15 +81,14 @@ export default function Home() {
     () => (anime: Anime, format: 'hero' | 'card') => {
       const fallbackPoster =
         '/assets/images/default-anime-poster.jpg'; // Local fallback
-      const fallbackBanner =
-        '/assets/images/default-anime-banner.jpg'; // Local fallback
 
       if (format === 'hero') {
         return {
           id: anime.id,
           title: anime.title,
           description: anime.description || 'An amazing anime adventure awaits!',
-          image: anime.banner_url || anime.poster_url || fallbackBanner,
+          banner_url: anime.banner_url,
+          poster_url: anime.poster_url,
           genres: anime.genres || [],
           rating: anime.rating || 0,
         } as HeroSlide;
@@ -131,9 +132,10 @@ export default function Home() {
   );
 
   // Memoized mapped data
-  const featuredSlides = useMemo(
-    () => featuredAnime.map((anime: Anime) => mapAnime(anime, 'hero') as HeroSlide),
-    [featuredAnime, mapAnime]
+  const heroSlides = useMemo(
+    () => trendingAnime.map((anime: Anime) => mapAnime(anime, 'hero') as HeroSlide),
+    [trendingAnime, mapAnime]
+  );
   );
   const trendingCards = useMemo(
     () => trendingAnime.map((anime: Anime) => mapAnime(anime, 'card')),
@@ -150,20 +152,20 @@ export default function Home() {
 
   // Calculate average rating
   const averageRating = useMemo(() => {
-    const allAnime = [...featuredAnime, ...trendingAnime, ...popularAnime];
+    const allAnime = [...trendingAnime, ...popularAnime];
     if (!allAnime.length) return 0;
     const validRatings = allAnime.filter((anime) => anime.rating && anime.rating > 0);
     if (!validRatings.length) return 0;
     const sum = validRatings.reduce((acc, anime) => acc + (anime.rating || 0), 0);
     return Math.round((sum / validRatings.length) * 10) / 10;
-  }, [featuredAnime, trendingAnime, popularAnime]);
+  }, [trendingAnime, popularAnime]);
 
   // Calculate total anime count
   const totalAnimeCount = useMemo(() => {
-    const allAnime = [...featuredAnime, ...trendingAnime, ...popularAnime, ...recentAnime];
+    const allAnime = [...trendingAnime, ...popularAnime, ...recentAnime];
     const uniqueAnimeIds = new Set(allAnime.map((anime) => anime.id));
     return uniqueAnimeIds.size;
-  }, [featuredAnime, trendingAnime, popularAnime, recentAnime]);
+  }, [trendingAnime, popularAnime, recentAnime]);
 
   // Reduced animation variants for better performance
   const containerVariants = {
@@ -181,17 +183,20 @@ export default function Home() {
 
   // Preload first hero image for LCP optimization
   useEffect(() => {
-    if (featuredSlides.length > 0 && featuredSlides[0].image) {
-      const link = document.createElement('link');
-      link.rel = 'preload';
-      link.as = 'image';
-      link.href = featuredSlides[0].image;
-      link.fetchPriority = 'high';
-      document.head.appendChild(link);
-      return () => { document.head.removeChild(link); };
+    if (heroSlides.length > 0) {
+      const imageUrl = heroSlides[0].banner_url || heroSlides[0].poster_url;
+      if (imageUrl) {
+        const link = document.createElement('link');
+        link.rel = 'preload';
+        link.as = 'image';
+        link.href = getProxiedImageUrl(imageUrl) || imageUrl;
+        link.fetchPriority = 'high';
+        document.head.appendChild(link);
+        return () => { document.head.removeChild(link); };
+      }
     }
     return undefined;
-  }, [featuredSlides]);
+  }, [heroSlides]);
 
   // Optimized anime section component (memoized)
   const AnimeSection = memo(function AnimeSection({ 
@@ -327,7 +332,7 @@ export default function Home() {
               <h2 id="featured-anime" className="sr-only">
                 Featured Anime
               </h2>
-              <HeroCarousel slides={featuredSlides} loading={featuredLoading} />
+              <HeroCarousel slides={heroSlides} loading={trendingLoading} />
             </motion.section>
           </ErrorBoundary>
 

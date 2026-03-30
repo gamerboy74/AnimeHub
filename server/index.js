@@ -30,6 +30,7 @@ import {
   validateRequestSize,
 } from "./middleware/security.js";
 import { getHealthHandler, getDetailedHealthHandler } from "./routes/health.js";
+import imageProxyRouter from "./routes/imageProxy.js";
 
 // Get the directory name of the current module (for ES modules)
 const __filename = fileURLToPath(import.meta.url);
@@ -163,6 +164,10 @@ axios.defaults.httpsAgent = new https.Agent({
 
 // Rate limiting - general API rate limit
 app.use("/api", rateLimiter.middleware(60_000, 60)); // 60 requests per minute
+
+// Image Proxy route - higher rate limit since pages load many images
+app.use("/api/image-proxy", rateLimiter.middleware(60_000, 200));
+app.use("/api/image-proxy", imageProxyRouter);
 
 // Stricter rate limiting for scraper endpoints
 app.use("/api/scrape", rateLimiter.middleware(60_000, 10)); // 10 requests per minute
@@ -443,6 +448,21 @@ class NineAnimeScraperService {
           );
 
           if (episodeResult.success) {
+            // Check if we need to retrieve the poster URL to use as episode thumbnail
+            let thumbnailUrl = null;
+            if (dbAnimeId) {
+              try {
+                const { data: animeRow } = await supabase
+                  .from('anime')
+                  .select('poster_url')
+                  .eq('id', dbAnimeId)
+                  .single();
+                thumbnailUrl = animeRow?.poster_url || null;
+              } catch (e) {
+                console.warn('Could not fetch poster URL for thumbnail:', e.message);
+              }
+            }
+
             scrapedEpisodes.push({
               ...episode,
               streamUrl: episodeResult.streamUrl,
@@ -450,6 +470,20 @@ class NineAnimeScraperService {
               embeddingReason: episodeResult.embeddingReason,
               scrapedAt: new Date().toISOString(),
             });
+            
+            // Save to DB so that anime without initial episode stubs actually get stored.
+            if (dbAnimeId && episodeResult.streamUrl) {
+              await this.saveEpisodeToDatabase({
+                animeId: dbAnimeId,
+                episodeNumber: episode.number,
+                title: episode.title || `${animeTitle} - Episode ${episode.number}`,
+                videoUrl: episodeResult.streamUrl,
+                thumbnailUrl: thumbnailUrl,
+                duration: 1440,
+                description: `Episode ${episode.number} of ${animeTitle}`,
+                createdAt: new Date(),
+              });
+            }
             console.log(`✅ Episode ${episode.number} scraped successfully`);
           } else {
             failedEpisodes.push({

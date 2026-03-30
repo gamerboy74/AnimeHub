@@ -25,12 +25,6 @@ self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(STATIC_CACHE).then((cache) => {
       return cache.addAll([
-        '/',
-        '/anime',
-        '/player',
-        '/favorites',
-        '/watchlist',
-        '/profile',
         '/manifest.json'
       ]);
     })
@@ -97,6 +91,12 @@ async function handleRequest(request) {
   const pathname = url.pathname;
   
   try {
+    // Always use network-first for HTML navigation requests
+    // to avoid serving stale cached pages after login/logout
+    if (request.mode === 'navigate') {
+      return await networkFirst(request, DYNAMIC_CACHE);
+    }
+
     // Determine cache strategy based on request type
     if (isStaticAsset(request)) {
       return await cacheFirst(request, STATIC_CACHE);
