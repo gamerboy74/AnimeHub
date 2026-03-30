@@ -9,6 +9,7 @@ export const config = {
 
 const ALLOWED_HOSTS = [
   'megacloud.tv',
+  'megaplay.buzz',
   'megacloud.bloggy.click',
   'rapidcloud.cc',
   'streamsb.net',
