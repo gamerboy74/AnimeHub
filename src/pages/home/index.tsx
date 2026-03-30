@@ -136,7 +136,7 @@ export default function Home() {
     () => trendingAnime.map((anime: Anime) => mapAnime(anime, 'hero') as HeroSlide),
     [trendingAnime, mapAnime]
   );
-  );
+  
   const trendingCards = useMemo(
     () => trendingAnime.map((anime: Anime) => mapAnime(anime, 'card')),
     [trendingAnime, mapAnime]
