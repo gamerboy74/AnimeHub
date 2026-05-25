@@ -1001,6 +1001,7 @@ function HLSVideoPlayer({
   optimizeBuffer?: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const hlsSeekedRef = useRef(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -1011,6 +1012,7 @@ function HLSVideoPlayer({
   const [selectedQuality, setSelectedQuality] = useState<'auto' | string>('auto');
   const [captionsEnabled, setCaptionsEnabled] = useState(false);
   const [hasCaptions, setHasCaptions] = useState(false);
+  const [isSeeking, setIsSeeking] = useState(false);
 
   const formatTime = useCallback((timeInSeconds: number) => {
     if (!Number.isFinite(timeInSeconds) || timeInSeconds < 0) return '0:00';
@@ -1054,6 +1056,15 @@ function HLSVideoPlayer({
     video.currentTime = nextTime;
   }, [duration]);
 
+  const seekTo = useCallback((timeInSeconds: number) => {
+    const video = videoRef.current;
+    if (!video || !Number.isFinite(timeInSeconds)) return;
+
+    const nextTime = Math.max(0, Math.min(video.duration || duration || 0, timeInSeconds));
+    video.currentTime = nextTime;
+    setCurrentTime(nextTime);
+  }, [duration]);
+
   const togglePlay = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -1062,6 +1073,30 @@ function HLSVideoPlayer({
       void video.play().catch(() => {});
     } else {
       video.pause();
+    }
+  }, []);
+
+  const toggleFullscreen = useCallback(async () => {
+    const video = videoRef.current;
+    const container = containerRef.current;
+
+    if (document.fullscreenElement) {
+      await document.exitFullscreen().catch(() => {});
+      return;
+    }
+
+    if (video && typeof (video as any).webkitEnterFullscreen === 'function' && /iPad|iPhone|iPod/.test(navigator.userAgent)) {
+      (video as any).webkitEnterFullscreen();
+      return;
+    }
+
+    if (container?.requestFullscreen) {
+      await container.requestFullscreen().catch(() => {});
+      return;
+    }
+
+    if (video?.requestFullscreen) {
+      await video.requestFullscreen().catch(() => {});
     }
   }, []);
 
@@ -1208,15 +1243,18 @@ function HLSVideoPlayer({
   }, [src, startTime]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className="relative w-full h-full bg-black overflow-hidden group">
+    <div ref={containerRef} className="relative w-full h-full bg-black overflow-hidden group">
       <video
         ref={videoRef}
         className="w-full h-full object-contain bg-black"
         controls={false}
         playsInline
         crossOrigin="anonymous"
+        onClick={togglePlay}
+        style={{ cursor: 'pointer' }}
         onTimeUpdate={(event) => {
           const video = event.currentTarget;
+          if (isSeeking) return;
           setCurrentTime(video.currentTime);
           setDuration(video.duration || 0);
           onTimeUpdate?.(event);
@@ -1270,10 +1308,22 @@ function HLSVideoPlayer({
       />
 
       <div className="absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/90 via-black/60 to-transparent px-3 py-3 sm:px-4 sm:py-4">
-        <div className="mb-3 h-1.5 w-full overflow-hidden rounded-full bg-white/15">
-          <div
-            className="h-full rounded-full bg-emerald-400 transition-all duration-150"
-            style={{ width: `${duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0}%` }}
+        <div className="mb-3 flex items-center gap-3">
+          <span className="hidden text-[10px] font-semibold uppercase tracking-[0.2em] text-white/60 sm:inline">Seek</span>
+          <input
+            type="range"
+            min="0"
+            max={Math.max(duration, 0)}
+            step="0.1"
+            value={Math.min(currentTime, duration || currentTime)}
+            disabled={!duration || Number.isNaN(duration)}
+            onMouseDown={() => setIsSeeking(true)}
+            onTouchStart={() => setIsSeeking(true)}
+            onChange={(event) => seekTo(Number(event.target.value))}
+            onMouseUp={() => setIsSeeking(false)}
+            onTouchEnd={() => setIsSeeking(false)}
+            className="h-2 w-full cursor-pointer appearance-none rounded-full bg-white/15 accent-emerald-400"
+            aria-label="Seek video"
           />
         </div>
 
@@ -1357,6 +1407,16 @@ function HLSVideoPlayer({
                 )}
               </select>
             </label>
+
+            <button
+              type="button"
+              onClick={() => { void toggleFullscreen(); }}
+              className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/20"
+              aria-label="Toggle fullscreen"
+            >
+              <i className="ri-fullscreen-line" />
+              <span className="hidden sm:inline">Fullscreen</span>
+            </button>
           </div>
         </div>
       </div>
