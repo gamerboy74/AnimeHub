@@ -36,6 +36,9 @@ export interface CreateEpisodeData {
   air_date?: string
 }
 
+export type UpdateAnimeData = Partial<{ [K in keyof CreateAnimeData]: CreateAnimeData[K] | null }>
+export type UpdateEpisodeData = Partial<{ [K in keyof CreateEpisodeData]: CreateEpisodeData[K] | null }>
+
 export interface AnimeWithEpisodes extends Anime {
   episodes?: Episode[]
   episode_count?: number
@@ -146,7 +149,7 @@ export class AdminAnimeService {
   }
 
   // Update anime (via server to bypass RLS)
-  static async updateAnime(animeId: string, updates: Partial<CreateAnimeData>): Promise<Anime | null> {
+  static async updateAnime(animeId: string, updates: UpdateAnimeData): Promise<Anime | null> {
     try {
       const res = await fetch(`${API_BASE}/api/admin/anime/${animeId}`, {
         method: 'PUT',
@@ -158,7 +161,7 @@ export class AdminAnimeService {
       return json.data
     } catch (err) {
       console.error('Error updating anime:', err)
-      return null
+      throw err
     }
   }
 
@@ -225,7 +228,7 @@ export class AdminAnimeService {
   }
 
   // Update episode (via server to bypass RLS)
-  static async updateEpisode(episodeId: string, updates: Partial<CreateEpisodeData>): Promise<Episode | null> {
+  static async updateEpisode(episodeId: string, updates: UpdateEpisodeData): Promise<Episode | null> {
     try {
       const res = await fetch(`${API_BASE}/api/admin/episodes/${episodeId}`, {
         method: 'PUT',
@@ -233,11 +236,11 @@ export class AdminAnimeService {
         body: JSON.stringify(updates)
       })
       const json = await res.json()
-      if (!json.success) return null
+      if (!json.success) throw new Error(json.error || 'Failed to update episode')
       return json.data
     } catch (err) {
       console.error('Error updating episode:', err)
-      return null
+      throw err
     }
   }
 

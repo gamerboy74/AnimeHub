@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { AdminService } from '../../services/admin';
+import { AdminAnimeService } from '../../services/admin/anime';
 
 interface EditAnimeModalProps {
   isOpen: boolean;
@@ -83,17 +83,17 @@ export default function EditAnimeModal({ isOpen, onClose, onSuccess, anime }: Ed
         trailer_url: formData.trailer_url || null,
         rating: formData.rating ? parseFloat(formData.rating) : null,
         year: formData.year ? parseInt(formData.year) : null,
-        status: formData.status,
-        type: formData.type,
+        status: formData.status as any,
+        type: formData.type.toLowerCase() as any,
         genres: formData.genres.length > 0 ? formData.genres : null,
         studios: formData.studios.length > 0 ? formData.studios : null,
         total_episodes: formData.total_episodes ? parseInt(formData.total_episodes) : null,
         duration: formData.duration ? parseInt(formData.duration) : null,
-        age_rating: formData.age_rating || null
+        age_rating: (formData.age_rating || null) as any
       };
 
       console.log('Sending update data:', updateData);
-      await AdminService.updateAnime(anime.id, updateData);
+      await AdminAnimeService.updateAnime(anime.id, updateData);
       onSuccess();
       onClose();
     } catch (err) {

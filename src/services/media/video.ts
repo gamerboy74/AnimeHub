@@ -6,6 +6,7 @@ export interface VideoSource {
   provider: string;
   type: VideoSourceType;
   embedUrl?: string;
+  lang?: 'sub' | 'dub';
 }
 
 export interface VideoMetadata {
@@ -28,6 +29,13 @@ export class VideoService {
     // YouTube detection
     if (lowerUrl.includes('youtube.com') || lowerUrl.includes('youtu.be')) {
       return 'youtube';
+    }
+
+    // Re:ANIME/Flixcloud embeds should be treated as iframe sources
+    if (lowerUrl.includes('flixcloud.cc') ||
+        lowerUrl.includes('reanime.to/watch') ||
+        lowerUrl.includes('reanime.to/anime')) {
+      return 'iframe';
     }
     
     // Anime streaming sites that require iframe embedding
@@ -268,8 +276,8 @@ export class VideoService {
         break;
 
       case 'hls':
-        // HLS streams are fetched directly by hls.js — no proxy needed
-        // The CDN serves Access-Control-Allow-Origin: * headers
+        // HLS streams are fetched directly by hls.js when the CDN allows it.
+        // This CDN is reachable directly, so keep the manifest URL unchanged.
         processedUrl = source.url;
         metadata = {
           title: `Episode ${episodeNumber}`,

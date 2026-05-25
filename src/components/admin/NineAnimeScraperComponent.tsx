@@ -10,6 +10,7 @@ import Input from '../../components/base/Input';
 import { SparkleLoadingSpinner } from '../../components/base/LoadingSpinner';
 import { ScrapedEpisodesModal } from './ScrapedEpisodesModal';
 
+
 interface Anime {
   id: string;
   title: string;
@@ -36,7 +37,11 @@ interface BatchScrapeResult {
   };
 }
 
-export const AnimeScraperComponent: React.FC = () => {
+interface NineAnimeScraperComponentProps {
+  initialSelectedAnime?: Anime | null;
+}
+
+export const NineAnimeScraperComponent: React.FC<NineAnimeScraperComponentProps> = ({ initialSelectedAnime }) => {
   const queryClient = useQueryClient();
   const [isLoading, setIsLoading] = useState(false);
   const [animeList, setAnimeList] = useState<Anime[]>([]);
@@ -49,6 +54,7 @@ export const AnimeScraperComponent: React.FC = () => {
   const [batchResult, setBatchResult] = useState<BatchScrapeResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [overwriteExisting, setOverwriteExisting] = useState(false);
   
   // Scraped episodes modal state
   const [showScrapedEpisodes, setShowScrapedEpisodes] = useState(false);
@@ -72,9 +78,16 @@ export const AnimeScraperComponent: React.FC = () => {
 
   // Load anime list on component mount
   useEffect(() => {
-    console.log('🎯 AnimeScraperComponent mounted');
+    console.log('🎯 NineAnimeScraperComponent mounted');
     loadAnimeList();
   }, []);
+
+  // Pre-select anime if passed as prop
+  useEffect(() => {
+    if (initialSelectedAnime) {
+      handleAnimeSelect(initialSelectedAnime);
+    }
+  }, [initialSelectedAnime]);
 
   // Log when selectedAnime changes
   useEffect(() => {
@@ -221,7 +234,8 @@ export const AnimeScraperComponent: React.FC = () => {
           headless: true,
           timeout: 30000,
           retries: 2,
-          delayBetweenEpisodes: 3000
+          delayBetweenEpisodes: 3000,
+          overwrite: overwriteExisting
         }
       );
 
@@ -326,6 +340,7 @@ export const AnimeScraperComponent: React.FC = () => {
           switch (event.type) {
             case 'start':
               console.log('🎬 START event - setting progress messages');
+              setProgressMessages(prev => [...prev, `🎬 Starting batch scrape for ${event.total || 0} episodes...`]);
               setCurrentProgress({
                 current: 0,
                 total: event.total || 0,
@@ -336,6 +351,7 @@ export const AnimeScraperComponent: React.FC = () => {
             
             case 'progress':
               console.log('📺 PROGRESS event - episode', event.episode, 'scraping');
+              setProgressMessages(prev => [...prev, `⏳ Scraping Episode ${event.episode}...`]);
               setEpisodeStatuses(prev => ({
                 ...prev,
                 [event.episode!]: { status: 'scraping' }
@@ -344,6 +360,7 @@ export const AnimeScraperComponent: React.FC = () => {
             
             case 'success':
               console.log('✅ SUCCESS event - episode', event.episode);
+              setProgressMessages(prev => [...prev, `✅ Episode ${event.episode} scraped successfully!`]);
               setEpisodeStatuses(prev => ({
                 ...prev,
                 [event.episode!]: { status: 'success', message: 'Scraped successfully' }
@@ -369,6 +386,7 @@ export const AnimeScraperComponent: React.FC = () => {
             
             case 'error':
               console.log('❌ ERROR event - episode', event.episode);
+              setProgressMessages(prev => [...prev, `❌ Episode ${event.episode} failed: ${event.error || 'Unknown error'}`]);
               setEpisodeStatuses(prev => ({
                 ...prev,
                 [event.episode!]: { status: 'error', message: event.error || 'Failed' }
@@ -391,6 +409,7 @@ export const AnimeScraperComponent: React.FC = () => {
             
             case 'complete':
               console.log('🎉 COMPLETE event');
+              setProgressMessages(prev => [...prev, `🎉 Scraping complete! ${scrapedEpisodes.length} successful, ${failedEpisodes.length} failed.`]);
               
               // Prepare data for modal
               const summary = {
@@ -417,7 +436,8 @@ export const AnimeScraperComponent: React.FC = () => {
           headless: true,
           timeout: 30000,
           retries: 2,
-          delayBetweenEpisodes: 3000
+          delayBetweenEpisodes: 3000,
+          overwrite: overwriteExisting
         }
       );
       
@@ -497,7 +517,7 @@ export const AnimeScraperComponent: React.FC = () => {
       >
         <h2 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2 flex items-center justify-center gap-3">
           <i className="ri-movie-2-line text-blue-600 text-3xl"></i>
-          Anime Episode Scraper
+          9Anime Episode Scraper
         </h2>
         <p className="text-slate-500 text-sm">
           Scrape episodes from 9anime.org.lv for your anime collection
@@ -622,6 +642,35 @@ export const AnimeScraperComponent: React.FC = () => {
           </div>
         </div>
       </motion.div>
+
+      {/* Scraping Preferences */}
+      {selectedAnime && (
+        <motion.div
+          initial={{ opacity: 0, y: 15 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.12 }}
+          className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg border border-white/20 p-6 flex items-center justify-between"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
+              <i className="ri-refresh-line text-white text-sm"></i>
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-slate-800">Rescrape & Overwrite</h3>
+              <p className="text-xs text-slate-500">Force re-scraping and update existing URLs in database</p>
+            </div>
+          </div>
+          <label className="relative inline-flex items-center cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={overwriteExisting}
+              onChange={(e) => setOverwriteExisting(e.target.checked)}
+              className="sr-only peer"
+            />
+            <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
+          </label>
+        </motion.div>
+      )}
 
       {/* Scraping Options */}
       {selectedAnime && (
@@ -771,6 +820,17 @@ export const AnimeScraperComponent: React.FC = () => {
               );
             })}
           </div>
+          {/* Real-time Logs Console */}
+          {progressMessages.length > 0 && (
+            <div className="mt-6 p-4 bg-slate-900 text-slate-300 rounded-xl border border-slate-800 font-mono text-xs max-h-40 overflow-y-auto space-y-1">
+              {progressMessages.map((msg, idx) => (
+                <div key={idx} className="flex gap-2">
+                  <span className="text-slate-500">[{idx + 1}]</span>
+                  <span>{msg}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </motion.div>
       )}
 

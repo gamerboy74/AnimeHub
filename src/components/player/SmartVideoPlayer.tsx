@@ -67,12 +67,82 @@ export default function SmartVideoPlayer({
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const directSeekedRef = useRef(false);
 
+  const normalizeLang = useCallback((lang?: string | null): 'sub' | 'dub' | undefined => {
+    const normalized = lang?.toLowerCase();
+    if (normalized === 'sub' || normalized === 'dub') return normalized;
+    return undefined;
+  }, []);
 
+  useEffect(() => {
+    directSeekedRef.current = false;
+  }, [playerState.currentSource?.url]);
+
+  const seekToStartTimeDirect = useCallback((video: HTMLVideoElement) => {
+    if (!directSeekedRef.current && startTime && startTime > 0) {
+      if (video.readyState >= 2) { // readyState >= 2 (HAVE_CURRENT_DATA) is required for browser seek to succeed
+        console.log(`🚀 Executing robust direct HTML5 seek to: ${startTime}s (readyState: ${video.readyState})`);
+        video.currentTime = startTime;
+        directSeekedRef.current = true;
+      } else {
+        console.log(`⏳ Direct HTML5 player not ready for seek yet (readyState: ${video.readyState})`);
+      }
+    }
+  }, [startTime]);
+
+  const [activeLang, setActiveLang] = useState<'sub' | 'dub'>('sub');
+
+  // Find which languages are available in sources
+  const availableLangs = useMemo(() => {
+    const langs = new Set<'sub' | 'dub'>();
+    sources.forEach(s => {
+      const normalizedLang = normalizeLang(s.lang);
+      if (normalizedLang) langs.add(normalizedLang);
+    });
+    return Array.from(langs);
+  }, [sources, normalizeLang]);
+
+  useEffect(() => {
+    if (availableLangs.length > 0) {
+      if (availableLangs.includes('sub')) {
+        setActiveLang('sub');
+      } else {
+        setActiveLang(availableLangs[0]);
+      }
+    }
+  }, [availableLangs]);
+
+  const filteredSources = useMemo(() => {
+    const hasLangTags = sources.some(s => !!s.lang);
+    if (!hasLangTags) return sources;
+    return sources.filter(s => normalizeLang(s.lang) === activeLang);
+  }, [sources, activeLang, normalizeLang]);
+
+  // Group sources by language for server selector below player
+  const subSources = useMemo(() => sources.filter(s => !s.lang || normalizeLang(s.lang) === 'sub'), [sources, normalizeLang]);
+  const dubSources = useMemo(() => sources.filter(s => normalizeLang(s.lang) === 'dub'), [sources, normalizeLang]);
+
+  // Select a source manually from the selector below player
+  const selectSource = useCallback((source: VideoSource) => {
+    const normalizedLang = normalizeLang(source.lang);
+    if (normalizedLang) {
+      setActiveLang(normalizedLang);
+    }
+    setPlayerState(prev => ({
+      ...prev,
+      currentSource: source,
+      quality: source.quality,
+      isLoading: true,
+      error: null,
+      retryCount: 0,
+      isRetrying: false
+    }));
+  }, []);
 
   // Initialize player with best available source (memoized for performance)
   const initializePlayer = useCallback(() => {
-    if (sources.length === 0) {
+    if (filteredSources.length === 0) {
       // Don't set error if sources are still loading - parent handles loading state
       setPlayerState(prev => ({ 
         ...prev, 
@@ -84,11 +154,20 @@ export default function SmartVideoPlayer({
     }
 
     // Pick adaptive best source based on network conditions
-    const available = sources.map(s => s.quality);
+    const available = filteredSources.map(s => s.quality);
     const preferred = chooseBestQuality(available);
-    const bestSource = sources.find(s => s.quality === preferred) || sources[0];
+    const bestSource = filteredSources.find(s => s.quality === preferred) || filteredSources[0];
 
     setPlayerState(prev => {
+      // If we already have a valid source from the current filtered sources, keep it!
+      if (prev.currentSource && filteredSources.some(s => s.url === prev.currentSource?.url)) {
+        return {
+          ...prev,
+          isLoading: false,
+          error: null
+        };
+      }
+
       // If we already have the same source, don't update state to prevent flickering
       if (prev.currentSource?.url === bestSource.url) {
         return prev;
@@ -98,17 +177,17 @@ export default function SmartVideoPlayer({
         ...prev,
         currentSource: bestSource,
         quality: bestSource.quality,
-        isLoading: false,
+        isLoading: true,
         error: null,
         retryCount: 0,
         isRetrying: false
       };
     });
-  }, [sources]);
+  }, [filteredSources]);
 
   useEffect(() => {
     // Only initialize if we have sources
-    if (sources.length === 0) {
+    if (filteredSources.length === 0) {
       // Reset to loading state if sources are empty (only if not already in loading state)
       setPlayerState(prev => {
         if (prev.currentSource === null && prev.isLoading) return prev;
@@ -125,7 +204,7 @@ export default function SmartVideoPlayer({
     // Initialize player - it will handle checking if source changed
     initializePlayer();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sources.length, JSON.stringify(sources.map(s => s.url))]);
+  }, [filteredSources.length, JSON.stringify(filteredSources.map(s => s.url))]);
 
 
 
@@ -154,17 +233,28 @@ export default function SmartVideoPlayer({
     } catch {}
   }, [playerState.currentSource?.url]);
 
+  // Instantly resolve loading state for external fallback sources that can't be embedded
+  useEffect(() => {
+    if (playerState.currentSource) {
+      const isExternal = VideoService.isStreamingSitePage(playerState.currentSource.url) && 
+                         !playerState.currentSource.url.toLowerCase().includes('hianime.do');
+      if (isExternal) {
+        setPlayerState(prev => ({ ...prev, isLoading: false }));
+      }
+    }
+  }, [playerState.currentSource]);
+
   // Video preloading for next episode
   const preloadNextEpisode = useCallback(() => {
-    if (sources.length > 1) {
-      const nextSource = sources[1]; // Preload next source
+    if (filteredSources.length > 1) {
+      const nextSource = filteredSources[1]; // Preload next source
       const preloadLink = document.createElement('link');
       preloadLink.rel = 'preload';
       preloadLink.as = 'video';
       preloadLink.href = nextSource.url;
       document.head.appendChild(preloadLink);
     }
-  }, [sources]);
+  }, [filteredSources]);
 
   // Buffer optimization
   const optimizeBuffer = useCallback(() => {
@@ -208,7 +298,7 @@ export default function SmartVideoPlayer({
 
   // Throttled adaptive bitrate streaming (max 1 call per 2 seconds)
   const throttledAdaptiveBitrate = useCallback(() => {
-    if (videoRef.current && sources.length > 1) {
+    if (videoRef.current && filteredSources.length > 1) {
       const video = videoRef.current;
       const currentTime = video.currentTime;
       
@@ -219,7 +309,7 @@ export default function SmartVideoPlayer({
         
         // If buffer is low, switch to lower quality
         if (bufferAhead < 10 && playerState.quality !== '480p') {
-          const lowerQualitySource = sources.find(s => s.quality === '480p') || sources[sources.length - 1];
+          const lowerQualitySource = filteredSources.find(s => s.quality === '480p') || filteredSources[filteredSources.length - 1];
           if (lowerQualitySource) {
             setPlayerState(prev => ({
               ...prev,
@@ -230,7 +320,7 @@ export default function SmartVideoPlayer({
         }
         // If buffer is healthy, switch to higher quality
         else if (bufferAhead > 30 && playerState.quality !== '1080p') {
-          const higherQualitySource = sources.find(s => s.quality === '1080p') || sources[0];
+          const higherQualitySource = filteredSources.find(s => s.quality === '1080p') || filteredSources[0];
           if (higherQualitySource) {
             setPlayerState(prev => ({
               ...prev,
@@ -241,7 +331,7 @@ export default function SmartVideoPlayer({
         }
       }
     }
-  }, [sources, playerState.quality]);
+  }, [filteredSources, playerState.quality]);
 
   // Create throttled version (max 1 call per 2 seconds)
   const throttledHandleAdaptiveBitrate = useMemo(() => 
@@ -259,10 +349,11 @@ export default function SmartVideoPlayer({
   }, []);
 
   // Handle video time updates
-  const handleTimeUpdate = useCallback(() => {
-    if (videoRef.current) {
-      const currentTime = videoRef.current.currentTime;
-      const duration = videoRef.current.duration;
+  const handleTimeUpdate = useCallback((e?: any) => {
+    const video = e?.currentTarget || videoRef.current;
+    if (video) {
+      const currentTime = video.currentTime;
+      const duration = video.duration;
       
       setPlayerState(prev => ({ ...prev, currentTime, duration }));
       onTimeUpdate?.(currentTime, duration);
@@ -331,7 +422,7 @@ export default function SmartVideoPlayer({
 
   // Change quality
   const changeQuality = useCallback((quality: string) => {
-    const newSource = sources.find(s => s.quality === quality);
+    const newSource = filteredSources.find(s => s.quality === quality);
     if (newSource) {
       setPlayerState(prev => ({
         ...prev,
@@ -340,10 +431,10 @@ export default function SmartVideoPlayer({
         isLoading: true
       }));
     }
-  }, [sources]);
+  }, [filteredSources]);
 
   // Get available qualities
-  const availableQualities = sources.map(s => s.quality).filter((quality, index, self) => 
+  const availableQualities = filteredSources.map(s => s.quality).filter((quality, index, self) => 
     self.indexOf(quality) === index
   );
 
@@ -363,7 +454,10 @@ export default function SmartVideoPlayer({
         className="w-full h-full"
         allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
         loading="lazy"
-        onLoad={handleYouTubeReady}
+        onLoad={() => {
+          handleYouTubeReady();
+          setPlayerState(prev => ({ ...prev, isLoading: false }));
+        }}
       />
     );
   };
@@ -438,6 +532,11 @@ export default function SmartVideoPlayer({
         estimatedDuration={estimatedDuration}
         onProgressUpdate={onProgressUpdate}
         onTimeUpdate={onTimeUpdate}
+        startTime={startTime}
+        onLoad={() => {
+          console.log('Iframe loaded - clearing spinner');
+          setPlayerState(prev => ({ ...prev, isLoading: false }));
+        }}
         className="w-full h-full"
       />
     );
@@ -473,12 +572,12 @@ export default function SmartVideoPlayer({
             <i className="ri-external-link-line"></i>
             Watch on External Site
           </a>
-          {sources.length > 1 && (
+          {filteredSources.length > 1 && (
             <button
               onClick={() => {
                 // Try next available source
-                const currentIndex = sources.findIndex(s => s.url === source.url);
-                const nextSource = sources[currentIndex + 1] || sources[0];
+                const currentIndex = filteredSources.findIndex(s => s.url === source.url);
+                const nextSource = filteredSources[currentIndex + 1] || filteredSources[0];
                 setPlayerState(prev => ({
                   ...prev,
                   currentSource: nextSource,
@@ -542,7 +641,13 @@ export default function SmartVideoPlayer({
         autoPlay={autoPlay}
         crossOrigin="anonymous"
         onTimeUpdate={handleTimeUpdate}
-        onPlay={handlePlay}
+        onPlay={(e) => {
+          handlePlay();
+          seekToStartTimeDirect(e.currentTarget);
+        }}
+        onPlaying={(e) => {
+          seekToStartTimeDirect(e.currentTarget);
+        }}
         onPause={handlePause}
         onEnded={handleEnded}
         onError={(e) => {
@@ -561,8 +666,9 @@ export default function SmartVideoPlayer({
           
           handleError(errorMessage);
         }}
-        onLoadStart={() => setPlayerState(prev => ({ ...prev, isLoading: true }))}
-        onLoadedData={() => setPlayerState(prev => ({ ...prev, isLoading: false }))}
+        onLoadedData={(e) => {
+          setPlayerState(prev => ({ ...prev, isLoading: false }));
+        }}
       >
         Your browser does not support the video tag.
       </video>
@@ -600,9 +706,9 @@ export default function SmartVideoPlayer({
 
   // Try different source
   const handleTryDifferentSource = useCallback(() => {
-    if (sources.length > 1) {
-      const currentIndex = sources.findIndex(s => s === playerState.currentSource);
-      const nextSource = sources[(currentIndex + 1) % sources.length];
+    if (filteredSources.length > 1) {
+      const currentIndex = filteredSources.findIndex(s => s === playerState.currentSource);
+      const nextSource = filteredSources[(currentIndex + 1) % filteredSources.length];
       setPlayerState(prev => ({
         ...prev,
         currentSource: nextSource,
@@ -613,7 +719,7 @@ export default function SmartVideoPlayer({
         isRetrying: false
       }));
     }
-  }, [sources, playerState.currentSource]);
+  }, [filteredSources, playerState.currentSource]);
 
   // Render error state
   const renderError = () => (
@@ -672,21 +778,65 @@ export default function SmartVideoPlayer({
     </div>
   );
 
-  // Quality selector (deferred until metadata loaded)
+  // Premium server/source selector dropdown
   const renderQualitySelector = () => (
-    <div className="absolute top-4 right-4 z-10">
-      <div className="bg-black/80 backdrop-blur-sm rounded-lg p-2">
+    <div className="absolute top-4 right-4 z-20">
+      <div className="bg-slate-950/80 backdrop-blur-md rounded-xl p-1.5 border border-white/10 shadow-2xl flex items-center gap-2 transition-all hover:border-emerald-500/30">
+        <div className="flex items-center gap-1.5 text-slate-400 px-2 text-[11px] font-semibold tracking-wide uppercase">
+          <i className="ri-server-line text-emerald-400 text-xs"></i>
+          <span>Server</span>
+        </div>
         <select
           value={playerState.quality}
           onChange={(e) => changeQuality(e.target.value)}
-          className="bg-transparent text-white text-sm border border-gray-600 rounded px-2 py-1"
+          className="bg-slate-900/90 text-slate-100 text-xs border border-white/10 rounded-lg pl-3 pr-8 py-1.5 focus:ring-2 focus:ring-emerald-500/30 font-medium cursor-pointer outline-none transition-all appearance-none relative"
+          style={{
+            backgroundImage: `url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%2310b981' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3E%3C/svg%3E")`,
+            backgroundPosition: 'right 0.5rem center',
+            backgroundSize: '1.25em 1.25em',
+            backgroundRepeat: 'no-repeat'
+          }}
         >
           {availableQualities.map(quality => (
-            <option key={quality} value={quality} className="bg-gray-800">
+            <option key={quality} value={quality} className="bg-slate-950 text-slate-200">
               {quality}
             </option>
           ))}
         </select>
+      </div>
+    </div>
+  );
+
+  // Language selector (Sub / Dub tabs)
+  const renderLangSelector = () => (
+    <div className="absolute top-4 left-4 z-20">
+      <div className="bg-slate-950/80 backdrop-blur-md rounded-xl p-1 border border-white/10 shadow-2xl flex gap-1">
+        {availableLangs.includes('sub') && (
+          <button
+            onClick={() => setActiveLang('sub')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase transition-all flex items-center gap-1 cursor-pointer ${
+              activeLang === 'sub'
+                ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-md'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
+            }`}
+          >
+            <i className="ri-chat-3-line"></i>
+            Sub
+          </button>
+        )}
+        {availableLangs.includes('dub') && (
+          <button
+            onClick={() => setActiveLang('dub')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase transition-all flex items-center gap-1 cursor-pointer ${
+              activeLang === 'dub'
+                ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-md'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
+            }`}
+          >
+            <i className="ri-volume-up-line"></i>
+            Dub
+          </button>
+        )}
       </div>
     </div>
   );
@@ -700,7 +850,7 @@ export default function SmartVideoPlayer({
     );
   }
 
-  if (playerState.isLoading || !playerState.currentSource) {
+  if (!playerState.currentSource) {
     return (
       <div className={`relative bg-black rounded-lg overflow-hidden ${className}`}>
         {renderLoading()}
@@ -711,28 +861,111 @@ export default function SmartVideoPlayer({
   const sourceType = VideoService.detectVideoSource(playerState.currentSource.url);
 
   return (
-    <div className={`relative bg-black rounded-lg overflow-hidden ${className}`}>
-      {/* Quality Selector */}
-      {availableQualities.length > 1 && !playerState.isLoading && renderQualitySelector()}
-      
-      {/* Video Player */}
-      {sourceType === 'youtube' ? (
-        renderYouTubePlayer(playerState.currentSource)
-      ) : sourceType === 'iframe' ? (
-        renderIframePlayer(playerState.currentSource)
-      ) : sourceType === 'hls' ? (
-        renderHLSPlayer(playerState.currentSource)
-      ) : (
-        renderDirectVideoPlayer(playerState.currentSource)
-      )}
-      
-      {/* Loading Overlay */}
-      {playerState.isLoading && (
-        <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-          <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+    <>
+      <div className={`relative bg-black overflow-hidden ${className}`}>
+        {/* Video Player */}
+        {sourceType === 'youtube' ? (
+          renderYouTubePlayer(playerState.currentSource)
+        ) : sourceType === 'iframe' ? (
+          renderIframePlayer(playerState.currentSource)
+        ) : sourceType === 'hls' ? (
+          renderHLSPlayer(playerState.currentSource)
+        ) : (
+          renderDirectVideoPlayer(playerState.currentSource)
+        )}
+        
+        {/* Loading Overlay */}
+        {playerState.isLoading && (
+          <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+            <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+          </div>
+        )}
+      </div>
+
+      {/* Elegant, high-end server switcher directly below the player - matching the Animehub light glassmorphism teal theme */}
+      <div className="bg-white/95 backdrop-blur-md border border-teal-100/80 rounded-2xl p-5 md:p-6 mt-6 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-6 transition-all duration-300 hover:shadow-2xl hover:border-teal-200/80">
+        {/* Left Info Column */}
+        <div className="flex-1">
+          <span className="text-teal-600 text-[10px] font-extrabold uppercase tracking-widest mb-1 block">
+            YOU ARE WATCHING
+          </span>
+          <h4 className="text-teal-900 text-base md:text-lg font-extrabold tracking-wide flex items-center gap-2">
+            Episode {episodeNumber}
+            {title && (
+              <>
+                <span className="text-teal-200 font-normal">|</span>
+                <span className="text-teal-700 font-semibold text-sm md:text-base line-clamp-1">
+                  {title.replace(/.*- Episode \d+\s*-?\s*/i, '') || title}
+                </span>
+              </>
+            )}
+          </h4>
+          <p className="text-slate-500 text-xs mt-2 flex items-center gap-1.5 font-medium">
+            <i className="ri-information-line text-teal-500 text-sm"></i>
+            If current server doesn't work please try other servers beside.
+          </p>
         </div>
-      )}
-    </div>
+
+        {/* Right Switchers Column */}
+        <div className="flex flex-col gap-3 min-w-[280px]">
+          {/* SUB Row */}
+          {subSources.length > 0 && (
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1.5 min-w-[80px] text-teal-800 text-xs font-black tracking-wider">
+                <i className="ri-closed-captioning-line text-teal-600 text-base"></i>
+                <span>SUB:</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {subSources.map((source, index) => {
+                  const isActive = playerState.currentSource?.url === source.url;
+                  return (
+                    <button
+                      key={`sub-${index}-${source.quality}`}
+                      onClick={() => selectSource(source)}
+                      className={`px-4 py-1.5 rounded-lg text-xs font-black tracking-wide transition-all duration-300 shadow-md active:scale-95 cursor-pointer ${
+                        isActive
+                          ? 'bg-gradient-to-r from-teal-500 to-emerald-600 hover:from-teal-600 hover:to-emerald-700 text-white font-extrabold shadow-[0_4px_12px_rgba(20,184,166,0.3)] border border-transparent'
+                          : 'bg-teal-50/60 hover:bg-teal-100/80 text-teal-800 border border-teal-200/50 hover:border-teal-300/60'
+                      }`}
+                    >
+                      {source.quality}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* DUB Row */}
+          {dubSources.length > 0 && (
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1.5 min-w-[80px] text-teal-800 text-xs font-black tracking-wider">
+                <i className="ri-mic-line text-teal-600 text-base"></i>
+                <span>DUB:</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {dubSources.map((source, index) => {
+                  const isActive = playerState.currentSource?.url === source.url;
+                  return (
+                    <button
+                      key={`dub-${index}-${source.quality}`}
+                      onClick={() => selectSource(source)}
+                      className={`px-4 py-1.5 rounded-lg text-xs font-black tracking-wide transition-all duration-300 shadow-md active:scale-95 cursor-pointer ${
+                        isActive
+                          ? 'bg-gradient-to-r from-teal-500 to-emerald-600 hover:from-teal-600 hover:to-emerald-700 text-white font-extrabold shadow-[0_4px_12px_rgba(20,184,166,0.3)] border border-transparent'
+                          : 'bg-teal-50/60 hover:bg-teal-100/80 text-teal-800 border border-teal-200/50 hover:border-teal-300/60'
+                      }`}
+                    >
+                      {source.quality}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -769,6 +1002,112 @@ function HLSVideoPlayer({
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
+  const hlsSeekedRef = useRef(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [isMuted, setIsMuted] = useState(false);
+  const [qualityLevels, setQualityLevels] = useState<Array<{ index: number; label: string }>>([]);
+  const [selectedQuality, setSelectedQuality] = useState<'auto' | string>('auto');
+  const [captionsEnabled, setCaptionsEnabled] = useState(false);
+  const [hasCaptions, setHasCaptions] = useState(false);
+
+  const formatTime = useCallback((timeInSeconds: number) => {
+    if (!Number.isFinite(timeInSeconds) || timeInSeconds < 0) return '0:00';
+    const hours = Math.floor(timeInSeconds / 3600);
+    const minutes = Math.floor((timeInSeconds % 3600) / 60);
+    const seconds = Math.floor(timeInSeconds % 60);
+    if (hours > 0) {
+      return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    }
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  }, []);
+
+  const syncNativeCaptionTracks = useCallback((enabled: boolean) => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const textTracks = video.textTracks;
+    if (!textTracks || textTracks.length === 0) return;
+
+    for (let index = 0; index < textTracks.length; index += 1) {
+      textTracks[index].mode = enabled && index === 0 ? 'showing' : 'disabled';
+    }
+  }, []);
+
+  const syncHlsCaptions = useCallback((enabled: boolean) => {
+    const hls = hlsRef.current;
+    if (!hls || hls.subtitleTracks.length === 0) return;
+    hls.subtitleTrack = enabled ? 0 : -1;
+  }, []);
+
+  const applyCaptions = useCallback((enabled: boolean) => {
+    syncHlsCaptions(enabled);
+    syncNativeCaptionTracks(enabled);
+  }, [syncHlsCaptions, syncNativeCaptionTracks]);
+
+  const seekBy = useCallback((offsetSeconds: number) => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const nextTime = Math.max(0, Math.min((video.duration || duration || 0), video.currentTime + offsetSeconds));
+    video.currentTime = nextTime;
+  }, [duration]);
+
+  const togglePlay = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    if (video.paused) {
+      void video.play().catch(() => {});
+    } else {
+      video.pause();
+    }
+  }, []);
+
+  const seekToStartTime = useCallback((video: HTMLVideoElement) => {
+    if (!hlsSeekedRef.current && startTime && startTime > 0 && video.readyState >= 2) {
+      console.log(`🚀 Executing robust HLS seek to: ${startTime}s (readyState: ${video.readyState})`);
+      video.currentTime = startTime;
+      hlsSeekedRef.current = true;
+    }
+  }, [startTime]);
+
+  const toggleCaptions = useCallback(() => {
+    setCaptionsEnabled(prev => {
+      const next = !prev;
+      applyCaptions(next);
+      return next;
+    });
+  }, [applyCaptions]);
+
+  const changeQuality = useCallback((qualityValue: string) => {
+    const hls = hlsRef.current;
+    if (!hls) return;
+
+    setSelectedQuality(qualityValue);
+    if (qualityValue === 'auto') {
+      hls.currentLevel = -1;
+      return;
+    }
+
+    const levelIndex = Number(qualityValue);
+    if (Number.isFinite(levelIndex)) {
+      hls.currentLevel = levelIndex;
+    }
+  }, []);
+
+  useEffect(() => {
+    hlsSeekedRef.current = false;
+    setIsPlaying(false);
+    setCurrentTime(0);
+    setDuration(0);
+    setIsMuted(false);
+    setSelectedQuality('auto');
+    setQualityLevels([]);
+    setCaptionsEnabled(false);
+    setHasCaptions(false);
+  }, [src]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -779,6 +1118,16 @@ function HLSVideoPlayer({
       hlsRef.current.destroy();
       hlsRef.current = null;
     }
+
+    const handlePlay = () => {
+      seekToStartTime(video);
+    };
+    const handlePlaying = () => {
+      seekToStartTime(video);
+    };
+
+    video.addEventListener('play', handlePlay);
+    video.addEventListener('playing', handlePlaying);
 
     if (Hls.isSupported()) {
       // Chrome, Firefox, Edge — use hls.js
@@ -796,8 +1145,29 @@ function HLSVideoPlayer({
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         console.log('✅ HLS manifest parsed, levels:', hls.levels.length);
+        setQualityLevels([
+          { index: -1, label: 'Auto' },
+          ...hls.levels
+            .map((level, index) => ({
+              index,
+              label: level.height ? `${level.height}p` : level.bitrate ? `${Math.round(level.bitrate / 1000)} kbps` : `Level ${index + 1}`,
+            }))
+            .filter((level, index, self) => self.findIndex(item => item.label === level.label) === index),
+        ]);
+        setHasCaptions(hls.subtitleTracks.length > 0);
+        applyCaptions(captionsEnabled);
+        onLoadedData?.();
         if (autoPlay) video.play().catch(() => {});
-        if (startTime && startTime > 0) video.currentTime = startTime;
+      });
+
+      hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, () => {
+        setHasCaptions(hls.subtitleTracks.length > 0);
+        applyCaptions(captionsEnabled);
+      });
+
+      hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
+        if (selectedQuality === 'auto') return;
+        setSelectedQuality(String(data.level));
       });
 
       hls.on(Hls.Events.ERROR, (_event, data) => {
@@ -823,50 +1193,173 @@ function HLSVideoPlayer({
       // Safari — native HLS support
       video.src = src;
       if (autoPlay) video.play().catch(() => {});
-      if (startTime && startTime > 0) video.currentTime = startTime;
     } else {
       onError?.('HLS playback is not supported in this browser');
     }
 
     return () => {
+      video.removeEventListener('play', handlePlay);
+      video.removeEventListener('playing', handlePlaying);
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
       }
     };
-  }, [src]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [src, startTime]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <video
-      ref={videoRef}
-      className="w-full h-full"
-      controls
-      crossOrigin="anonymous"
-      onTimeUpdate={onTimeUpdate}
-      onPlay={onPlay}
-      onPause={onPause}
-      onEnded={onEnded}
-      onLoadStart={() => {
-        onLoadStart?.();
-        optimizeBuffer?.();
-      }}
-      onLoadedData={onLoadedData}
-      onProgress={onProgress}
-      onWaiting={onProgress}
-      onError={(e) => {
-        const target = e.target as HTMLVideoElement;
-        const error = target.error;
-        let errorMessage = 'HLS stream failed to load';
-        if (error) {
-          switch (error.code) {
-            case 1: errorMessage = 'Video loading aborted'; break;
-            case 2: errorMessage = 'Network error - check your connection'; break;
-            case 3: errorMessage = 'Video decoding error'; break;
-            case 4: errorMessage = 'Video source not supported'; break;
+    <div className="relative w-full h-full bg-black overflow-hidden group">
+      <video
+        ref={videoRef}
+        className="w-full h-full object-contain bg-black"
+        controls={false}
+        playsInline
+        crossOrigin="anonymous"
+        onTimeUpdate={(event) => {
+          const video = event.currentTarget;
+          setCurrentTime(video.currentTime);
+          setDuration(video.duration || 0);
+          onTimeUpdate?.(event);
+        }}
+        onPlay={(event) => {
+          setIsPlaying(true);
+          onPlay?.();
+          seekToStartTime(event.currentTarget);
+          const video = event.currentTarget;
+          setIsMuted(video.muted);
+        }}
+        onPause={() => {
+          setIsPlaying(false);
+          onPause?.();
+        }}
+        onEnded={() => {
+          setIsPlaying(false);
+          onEnded?.();
+        }}
+        onVolumeChange={(event) => {
+          const video = event.currentTarget;
+          setIsMuted(video.muted);
+        }}
+        onDurationChange={(event) => {
+          setDuration(event.currentTarget.duration || 0);
+        }}
+        onLoadedMetadata={(event) => {
+          setDuration(event.currentTarget.duration || 0);
+        }}
+        onLoadStart={() => {
+          onLoadStart?.();
+          optimizeBuffer?.();
+        }}
+        onLoadedData={onLoadedData}
+        onProgress={onProgress}
+        onWaiting={onProgress}
+        onError={(e) => {
+          const target = e.target as HTMLVideoElement;
+          const error = target.error;
+          let errorMessage = 'HLS stream failed to load';
+          if (error) {
+            switch (error.code) {
+              case 1: errorMessage = 'Video loading aborted'; break;
+              case 2: errorMessage = 'Network error - check your connection'; break;
+              case 3: errorMessage = 'Video decoding error'; break;
+              case 4: errorMessage = 'Video source not supported'; break;
+            }
           }
-        }
-        onError?.(errorMessage);
-      }}
-    />
+          onError?.(errorMessage);
+        }}
+      />
+
+      <div className="absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/90 via-black/60 to-transparent px-3 py-3 sm:px-4 sm:py-4">
+        <div className="mb-3 h-1.5 w-full overflow-hidden rounded-full bg-white/15">
+          <div
+            className="h-full rounded-full bg-emerald-400 transition-all duration-150"
+            style={{ width: `${duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0}%` }}
+          />
+        </div>
+
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <button
+              type="button"
+              onClick={() => seekBy(-10)}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20"
+              aria-label="Skip backward 10 seconds"
+            >
+              <i className="ri-rewind-mini-line text-lg" />
+            </button>
+
+            <button
+              type="button"
+              onClick={togglePlay}
+              className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-emerald-500 text-black transition hover:bg-emerald-400"
+              aria-label={isPlaying ? 'Pause' : 'Play'}
+            >
+              <i className={`text-xl ${isPlaying ? 'ri-pause-fill' : 'ri-play-fill'}`} />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => seekBy(10)}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20"
+              aria-label="Skip forward 10 seconds"
+            >
+              <i className="ri-speed-mini-line text-lg" />
+            </button>
+
+            <span className="hidden text-xs font-medium text-white/75 sm:inline">
+              {formatTime(currentTime)} / {formatTime(duration)}
+            </span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+            <button
+              type="button"
+              onClick={() => {
+                const video = videoRef.current;
+                if (!video) return;
+                video.muted = !video.muted;
+                setIsMuted(video.muted);
+              }}
+              className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/20"
+              aria-label={isMuted ? 'Unmute' : 'Mute'}
+            >
+              <i className={isMuted ? 'ri-volume-mute-line' : 'ri-volume-up-line'} />
+              <span className="hidden sm:inline">{isMuted ? 'Muted' : 'Sound'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={toggleCaptions}
+              disabled={!hasCaptions}
+              className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+              aria-label={captionsEnabled ? 'Turn captions off' : 'Turn captions on'}
+            >
+              <i className="ri-closed-captioning-line" />
+              <span className="hidden sm:inline">{captionsEnabled ? 'CC On' : 'CC Off'}</span>
+            </button>
+
+            <label className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/20">
+              <i className="ri-settings-3-line" />
+              <select
+                value={selectedQuality}
+                onChange={(event) => changeQuality(event.target.value)}
+                className="min-w-[92px] appearance-none rounded-md border border-white/10 bg-transparent px-2 py-1 text-xs text-white outline-none"
+                aria-label="Select quality"
+              >
+                {qualityLevels.length === 0 ? (
+                  <option value="auto">Auto</option>
+                ) : (
+                  qualityLevels.map(level => (
+                    <option key={level.index} value={level.index === -1 ? 'auto' : String(level.index)} className="text-slate-900">
+                      {level.label}
+                    </option>
+                  ))
+                )}
+              </select>
+            </label>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

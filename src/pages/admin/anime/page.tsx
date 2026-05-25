@@ -9,7 +9,8 @@ import ConfirmationDialog from '../../../components/admin/ConfirmationDialog';
 import EditAnimeModal from '../../../components/admin/EditAnimeModal';
 import EditEpisodeModal from '../../../components/admin/EditEpisodeModal';
 import { EnhancedAnimeImporter } from '../../../components/admin/EnhancedAnimeImporter';
-import { AnimeScraperComponent } from '../../../components/admin/AnimeScraperComponent';
+import { NineAnimeScraperComponent } from '../../../components/admin/NineAnimeScraperComponent';
+import { ReAnimeScraperComponent } from '../../../components/admin/ReAnimeScraperComponent';
 import { ScrapedEpisodesModal } from '../../../components/admin/ScrapedEpisodesModal';
 import LargeAnimeScraper from '../../../components/admin/LargeAnimeScraper';
 import { SparkleLoadingSpinner } from '../../../components/base/LoadingSpinner';
@@ -48,6 +49,7 @@ export default function AnimeManagement() {
   const [selectedAnimeForEdit, setSelectedAnimeForEdit] = useState<any>(null);
   const [showImporter, setShowImporter] = useState(false);
   const [showScraper, setShowScraper] = useState(false);
+  const [activeScraperTab, setActiveScraperTab] = useState<'9anime' | 'reanime'>('9anime');
   const [showScrapedEpisodesModal, setShowScrapedEpisodesModal] = useState(false);
   const [scrapedEpisodes, setScrapedEpisodes] = useState<any[]>([]);
   const [failedEpisodes, setFailedEpisodes] = useState<any[]>([]);
@@ -438,41 +440,9 @@ This action cannot be undone.`,
     setTimeout(() => setSuccessMessage(null), 3000);
   };
 
-  const handleScrapAnime = async (anime: any) => {
-    try {
-      setError(null);
-      setSuccessMessage(null);
-      
-      console.log(`🎬 Starting scrape for all episodes of "${anime.title}" (ID: ${anime.id})`);
-      
-      // Import the scraper service
-      const { HiAnimeScraperService } = await import('../../../services/scrapers/hianime');
-      
-      // Scrape all episodes
-      const result = await HiAnimeScraperService.scrapeAllEpisodes(anime.title, {
-        animeId: anime.id,
-        maxEpisodes: anime.total_episodes || 50
-      });
-      
-      if (result.success && result.data) {
-        // Set the scraped data
-        setScrapedEpisodes(result.data.scrapedEpisodes || []);
-        setFailedEpisodes(result.data.failedEpisodes || []);
-        setScrapingSummary(result.data.summary || { total: 0, successful: 0, failed: 0, embeddingProtected: 0 });
-        setSelectedAnimeForScraping(anime);
-        setShowScrapedEpisodesModal(true);
-        
-        setSuccessMessage(`Scraped ${result.data.summary?.successful || 0} episodes successfully!`);
-        setTimeout(() => setSuccessMessage(null), 5000);
-      } else {
-        setError(`Scraping failed: ${result.error}`);
-        setTimeout(() => setError(null), 10000);
-      }
-    } catch (error: any) {
-      console.error('Scraping error:', error);
-      setError(`Error: ${error.message}`);
-      setTimeout(() => setError(null), 10000);
-    }
+  const handleScrapAnime = (anime: any) => {
+    setSelectedAnimeForScraping(anime);
+    setShowScraper(true);
   };
 
   const handleLargeScrape = (anime: any) => {
@@ -628,7 +598,10 @@ This action cannot be undone.`,
                   <span className="font-medium">Import</span>
                 </button>
                 <button
-                  onClick={() => setShowScraper(true)}
+                  onClick={() => {
+                    setSelectedAnimeForScraping(null);
+                    setShowScraper(true);
+                  }}
                   className="px-5 py-2.5 bg-gradient-to-r from-purple-600 to-purple-700 text-white rounded-xl hover:from-purple-700 hover:to-purple-800 transition-all duration-200 flex items-center gap-2 shadow-lg hover:shadow-xl"
                 >
                   <i className="ri-search-line text-lg"></i>
@@ -1592,25 +1565,66 @@ This action cannot be undone.`,
             initial={{ opacity: 0, scale: 0.9, y: 30 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.9, y: 30 }}
-            className="relative w-full max-w-6xl max-h-[90vh] overflow-hidden rounded-3xl border border-indigo-200/60 shadow-2xl"
+            className={`relative w-full max-w-6xl max-h-[90vh] overflow-hidden rounded-3xl border shadow-2xl transition-all duration-300 ${
+              activeScraperTab === '9anime' ? 'border-indigo-200/60' : 'border-rose-200/60'
+            }`}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="absolute inset-0 bg-gradient-to-br from-indigo-600/85 via-purple-600/85 to-pink-500/80" />
+            <div
+              className={`absolute inset-0 transition-all duration-500 bg-gradient-to-br ${
+                activeScraperTab === '9anime'
+                  ? 'from-indigo-600/85 via-purple-600/85 to-pink-500/80'
+                  : 'from-rose-600/85 via-red-600/85 to-amber-500/80'
+              }`}
+            />
             <div className="absolute inset-0 opacity-25 bg-[radial-gradient(circle_at_bottom_right,_#fff7,_#ffffff00_45%)]" />
 
-            <div className="relative flex items-center justify-between px-6 py-5 border-b border-white/20 backdrop-blur-xl">
+            <div className="relative flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-6 py-5 border-b border-white/20 backdrop-blur-xl">
               <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center shadow-lg">
-                  <i className="ri-search-line text-white text-2xl"></i>
+                <div className={`w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center shadow-lg transition-all duration-300 ${
+                  activeScraperTab === 'reanime' ? 'animate-pulse' : ''
+                }`}>
+                  <i className={`text-white text-2xl transition-all duration-300 ${
+                    activeScraperTab === '9anime' ? 'ri-search-line' : 'ri-fire-line'
+                  }`}></i>
                 </div>
                 <div>
-                  <h2 className="text-2xl font-bold text-white drop-shadow">HiAnime.do Scraper</h2>
+                  <h2 className="text-2xl font-bold text-white drop-shadow">
+                    {activeScraperTab === '9anime' ? '9Anime Scraper' : 'Re:ANIME Scraper'}
+                  </h2>
                   <p className="text-white/80 text-sm">Streamed progress with SSE</p>
                 </div>
               </div>
+
+              {/* Scraper Selector Tabs */}
+              <div className="flex items-center gap-2 bg-black/20 p-1 rounded-2xl border border-white/10 backdrop-blur-md">
+                <button
+                  onClick={() => setActiveScraperTab('9anime')}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-300 flex items-center gap-1.5 ${
+                    activeScraperTab === '9anime'
+                      ? 'bg-white text-indigo-700 shadow-md scale-105'
+                      : 'text-white/80 hover:text-white hover:bg-white/10'
+                  }`}
+                >
+                  <i className="ri-tv-line"></i>
+                  9Anime.org.lv
+                </button>
+                <button
+                  onClick={() => setActiveScraperTab('reanime')}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-300 flex items-center gap-1.5 ${
+                    activeScraperTab === 'reanime'
+                      ? 'bg-white text-rose-700 shadow-md scale-105'
+                      : 'text-white/80 hover:text-white hover:bg-white/10'
+                  }`}
+                >
+                  <i className="ri-fire-line"></i>
+                  Re:ANIME
+                </button>
+              </div>
+
               <button
                 onClick={() => setShowScraper(false)}
-                className="text-white/80 hover:text-white hover:bg-white/15 transition-all duration-200 p-3 rounded-xl"
+                className="text-white/80 hover:text-white hover:bg-white/15 transition-all duration-200 p-3 rounded-xl self-end sm:self-auto"
               >
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -1620,7 +1634,11 @@ This action cannot be undone.`,
 
             <div className="relative p-6 overflow-y-auto max-h-[calc(90vh-90px)] bg-white/5 backdrop-blur-xl">
               <div className="rounded-2xl border border-white/15 bg-white/10 p-4 shadow-lg">
-                <AnimeScraperComponent />
+                {activeScraperTab === '9anime' ? (
+                  <NineAnimeScraperComponent initialSelectedAnime={selectedAnimeForScraping} />
+                ) : (
+                  <ReAnimeScraperComponent initialSelectedAnime={selectedAnimeForScraping} />
+                )}
               </div>
             </div>
           </motion.div>

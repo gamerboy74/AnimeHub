@@ -44,11 +44,11 @@ A modern, full-featured anime streaming platform built with React, TypeScript, V
 
 4. **Start development:**
    ```bash
-   # Start frontend only
+   # Start frontend + backend
    npm run dev
 
-   # Start both frontend and backend
-   npm run dev:full
+   # Start frontend only
+   npm run dev:client
    ```
 
 ## 📁 Project Structure
@@ -71,7 +71,8 @@ animehub/
 
 ## 🛠️ Available Scripts
 
-- `npm run dev` - Start development server
+- `npm run dev` - Start frontend and backend
+- `npm run dev:client` - Start frontend only
 - `npm run dev:analyze` - Dev server with bundle analyzer
 - `npm run build` - Production build
 - `npm run build:analyze` - Build with bundle analysis

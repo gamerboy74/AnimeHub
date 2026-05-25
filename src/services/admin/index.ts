@@ -113,13 +113,13 @@ export class AdminService {
 
       // Calculate active users (users with recent activity)
       const activeUsersResult = await supabase
-        .from('user_progress')
+        .from('user_watch_progress_detailed')
         .select('user_id', { count: 'exact' })
         .gte('last_watched', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
 
       // Calculate total watch time (simplified)
       const watchTimeResult = await supabase
-        .from('user_progress')
+        .from('user_watch_progress_detailed')
         .select('progress_seconds')
 
       const totalWatchTimeSeconds = watchTimeResult.data?.reduce((total, progress) => 
@@ -170,11 +170,11 @@ export class AdminService {
       
       const [watchTimeResult, animeWatchedResult] = await Promise.all([
         supabase
-          .from('user_progress')
+          .from('user_watch_progress_detailed')
           .select('user_id, progress_seconds')
           .in('user_id', userIds),
         supabase
-          .from('user_progress')
+          .from('user_watch_progress_detailed')
           .select('user_id, episode_id')
           .in('user_id', userIds)
           .eq('is_completed', true)
@@ -324,14 +324,12 @@ export class AdminService {
           .order('created_at', { ascending: false })
           .limit(limit),
         supabase
-          .from('user_progress')
+          .from('user_watch_progress_detailed')
           .select(`
-            id, is_completed, last_watched,
-            user:user_id (username),
-            episode:episode_id (
-              title,
-              anime:anime_id (title)
-            )
+            progress_id, is_completed, last_watched,
+            username,
+            episode_title,
+            anime_title
           `)
           .order('last_watched', { ascending: false })
           .limit(limit)
@@ -361,8 +359,22 @@ export class AdminService {
         })
       })
 
+      const newProgressMapped = (newProgress.data || []).map((row: any) => ({
+        is_completed: row.is_completed,
+        last_watched: row.last_watched,
+        user: {
+          username: row.username
+        },
+        episode: {
+          title: row.episode_title,
+          anime: {
+            title: row.anime_title
+          }
+        }
+      }))
+ 
       // Add watch progress
-      newProgress.data?.forEach((progress: any) => {
+      newProgressMapped.forEach((progress: any) => {
         activities.push({
           type: progress.is_completed ? 'episode_completed' : 'episode_watched',
           user: progress.user?.username,
@@ -646,7 +658,7 @@ export class AdminService {
         const episodeIds = item.episodes?.map((ep: any) => ep.id) || [];
         const { data: viewers } = episodeIds.length > 0
           ? await supabase
-            .from('user_progress')
+            .from('user_watch_progress_detailed')
             .select('user_id')
             .in('episode_id', episodeIds)
             .not('user_id', 'is', null)
@@ -763,22 +775,22 @@ export class AdminService {
           // Delete related data in proper order
           await Promise.all([
             // Delete user progress for all episodes of this anime
-            episodeIds.length > 0 ? supabase.from('user_progress').delete().in('episode_id', episodeIds) : Promise.resolve(),
+            episodeIds.length > 0 ? (supabase.from('user_progress').delete().in('episode_id', episodeIds) as any) : Promise.resolve(),
             
             // Delete reviews for this anime
-            supabase.from('reviews').delete().eq('anime_id', animeId),
+            (supabase.from('reviews').delete().eq('anime_id', animeId) as any),
             
             // Delete user watchlist entries for this anime
-            supabase.from('user_watchlist').delete().eq('anime_id', animeId),
+            (supabase.from('user_watchlist').delete().eq('anime_id', animeId) as any),
             
             // Delete user favorites for this anime
-            supabase.from('user_favorites').delete().eq('anime_id', animeId),
+            (supabase.from('user_favorites').delete().eq('anime_id', animeId) as any),
             
             // Delete content reports for this anime (with fallback)
-            supabase.from('content_reports').delete().eq('content_id', animeId).eq('content_type', 'anime'),
+            (supabase.from('content_reports').delete().eq('content_id', animeId).eq('content_type', 'anime') as any),
             
             // Delete episodes for this anime (this will cascade to user_progress via ON DELETE CASCADE)
-            supabase.from('episodes').delete().eq('anime_id', animeId)
+            (supabase.from('episodes').delete().eq('anime_id', animeId) as any)
           ]);
 
       // Finally delete the anime itself
@@ -848,16 +860,16 @@ export class AdminService {
           // Delete related data for all anime
           await Promise.all([
             // Delete user progress for all episodes of these anime
-            episodeIds.length > 0 ? supabase.from('user_progress').delete().in('episode_id', episodeIds) : Promise.resolve(),
+            episodeIds.length > 0 ? (supabase.from('user_progress').delete().in('episode_id', episodeIds) as any) : Promise.resolve(),
             
             // Delete reviews for these anime
-            supabase.from('reviews').delete().in('anime_id', animeIds),
+            (supabase.from('reviews').delete().in('anime_id', animeIds) as any),
             
             // Delete user watchlist entries for these anime
-            supabase.from('user_watchlist').delete().in('anime_id', animeIds),
+            (supabase.from('user_watchlist').delete().in('anime_id', animeIds) as any),
             
             // Delete user favorites for these anime
-            supabase.from('user_favorites').delete().in('anime_id', animeIds),
+            (supabase.from('user_favorites').delete().in('anime_id', animeIds) as any),
             
             // Delete content reports for these anime (with fallback)
             supabase.from('content_reports').delete().in('content_id', animeIds).eq('content_type', 'anime'),
@@ -940,8 +952,8 @@ export class AdminService {
     try {
       // Delete related data first
       await Promise.all([
-        supabase.from('user_progress').delete().eq('episode_id', episodeId),
-        supabase.from('reviews').delete().eq('episode_id', episodeId)
+        (supabase.from('user_progress').delete().eq('episode_id', episodeId) as any),
+        (supabase.from('reviews').delete().eq('episode_id', episodeId) as any)
       ])
 
       // Delete the episode
@@ -1054,7 +1066,7 @@ export class AdminService {
       const episodeIds = episodes?.map(ep => ep.id) || [];
       const { data: viewers } = episodeIds.length > 0
         ? await supabase
-          .from('user_progress')
+          .from('user_watch_progress_detailed')
           .select('user_id, episode_id, progress_seconds, is_completed, last_watched')
           .in('episode_id', episodeIds)
         : { data: [] };

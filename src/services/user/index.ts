@@ -67,27 +67,13 @@ export class UserService {
   // Get user's watch progress
   static async getUserProgress(userId: string, animeId?: string) {
     let query = supabase
-      .from('user_progress')
-      .select(`
-        *,
-        episode:episode_id (
-          id,
-          episode_number,
-          title,
-          anime_id,
-          duration,
-          anime:anime_id (
-            id,
-            title,
-            poster_url
-          )
-        )
-      `)
+      .from('user_watch_progress_detailed')
+      .select('*')
       .eq('user_id', userId)
       .order('last_watched', { ascending: false })
 
     if (animeId) {
-      query = query.eq('episode.anime_id', animeId)
+      query = query.eq('anime_id', animeId)
     }
 
     const { data, error } = await query
@@ -96,7 +82,26 @@ export class UserService {
       throw new Error(`Failed to fetch user progress: ${error.message}`)
     }
 
-    return data || []
+    return (data || []).map((row: any) => ({
+      id: row.progress_id,
+      user_id: row.user_id,
+      episode_id: row.episode_id,
+      progress_seconds: row.progress_seconds,
+      is_completed: row.is_completed,
+      last_watched: row.last_watched,
+      episode: {
+        id: row.episode_id,
+        episode_number: row.episode_number,
+        title: row.episode_title,
+        anime_id: row.anime_id,
+        duration: row.episode_duration,
+        anime: {
+          id: row.anime_id,
+          title: row.anime_title,
+          poster_url: row.poster_url
+        }
+      }
+    }))
   }
 
   // Get continue watching list (recently watched episodes with progress)
@@ -105,28 +110,8 @@ export class UserService {
     try {
       // Fetch more than limit to ensure we have enough after deduplication
       const { data, error } = await supabase
-        .from('user_progress')
-        .select(`
-          *,
-          episode:episode_id (
-            id,
-            episode_number,
-            title,
-            anime_id,
-            duration,
-            thumbnail_url,
-            anime:anime_id (
-              id,
-              title,
-              poster_url,
-              rating,
-              year,
-              genres,
-              status,
-              total_episodes
-            )
-          )
-        `)
+        .from('user_watch_progress_detailed')
+        .select('*')
         .eq('user_id', userId)
         .eq('is_completed', false)
         .order('last_watched', { ascending: false })
@@ -141,14 +126,11 @@ export class UserService {
         return []
       }
 
-      // Filter out items without anime data
-      const validItems = data.filter(item => item.episode?.anime && item.episode?.anime_id)
-
       // Group by anime_id and keep only the latest episode per anime
       const animeMap = new Map<string, any>()
       
-      for (const item of validItems) {
-        const animeId = item.episode.anime_id
+      for (const item of data) {
+        const animeId = item.anime_id
         if (!animeId) continue
 
         // If this anime is not in the map, or this episode was watched more recently
@@ -163,7 +145,33 @@ export class UserService {
         .sort((a, b) => new Date(b.last_watched).getTime() - new Date(a.last_watched).getTime())
         .slice(0, limit) // Take only the requested limit
 
-      return uniqueAnimeItems
+      // Map back to expected nested shape for frontend compatibility
+      return uniqueAnimeItems.map((row: any) => ({
+        id: row.progress_id,
+        user_id: row.user_id,
+        episode_id: row.episode_id,
+        progress_seconds: row.progress_seconds,
+        is_completed: row.is_completed,
+        last_watched: row.last_watched,
+        episode: {
+          id: row.episode_id,
+          episode_number: row.episode_number,
+          title: row.episode_title,
+          anime_id: row.anime_id,
+          duration: row.episode_duration,
+          thumbnail_url: row.thumbnail_url,
+          anime: {
+            id: row.anime_id,
+            title: row.anime_title,
+            poster_url: row.poster_url,
+            rating: row.anime_rating,
+            year: row.year,
+            genres: row.genres,
+            status: row.anime_status,
+            total_episodes: row.total_episodes
+          }
+        }
+      }))
     } catch (err) {
       console.warn('Continue watching fetch failed:', err)
       return []
@@ -471,15 +479,11 @@ export class UserService {
     try {
       const [progressResult, favoritesResult, watchlistResult, reviewsResult] = await Promise.all([
         supabase
-          .from('user_progress')
+          .from('user_watch_progress_detailed')
           .select(`
             is_completed,
             progress_seconds,
-            episode:episode_id (
-              id,
-              duration,
-              anime_id
-            )
+            episode_duration
           `)
           .eq('user_id', userId),
         
@@ -499,19 +503,27 @@ export class UserService {
           .eq('user_id', userId)
       ])
 
+      const progressData = (progressResult.data || []).map((p: any) => ({
+        is_completed: p.is_completed,
+        progress_seconds: p.progress_seconds,
+        episode: {
+          duration: p.episode_duration
+        }
+      }))
+
       const completedEpisodes = progressResult.data?.filter(p => p.is_completed).length || 0
       const totalFavorites = favoritesResult.data?.length || 0
       const totalWatchlist = watchlistResult.data?.length || 0
       const totalReviews = reviewsResult.data?.length || 0
-      const totalEpisodesWatched = progressResult.data?.length || 0
+      const totalEpisodesWatched = progressData.length || 0
 
       // Calculate watch time
       // For completed episodes, use episode duration. For in-progress, use progress_seconds
       // Handle estimated vs accurate progress: weight accurate data higher
       let totalWatchTimeSeconds = 0
       let estimatedWatchTimeSeconds = 0
-      if (progressResult.data) {
-        progressResult.data.forEach((progress: any) => {
+      if (progressData) {
+        progressData.forEach((progress: any) => {
           if (progress.is_completed && progress.episode?.duration) {
             // Use full episode duration for completed episodes
             totalWatchTimeSeconds += progress.episode.duration
@@ -589,18 +601,14 @@ export class UserService {
     try {
       const [progressResult, favoritesResult, watchlistResult, reviewsResult] = await Promise.all([
         supabase
-          .from('user_progress')
+          .from('user_watch_progress_detailed')
           .select(`
             last_watched,
             is_completed,
-            episode:episode_id (
-              episode_number,
-              anime:anime_id (
-                id,
-                title,
-                poster_url
-              )
-            )
+            episode_number,
+            anime_id,
+            anime_title,
+            poster_url
           `)
           .eq('user_id', userId)
           .order('last_watched', { ascending: false })
@@ -650,10 +658,23 @@ export class UserService {
           .limit(5)
       ])
 
+      const progressData = (progressResult.data || []).map((row: any) => ({
+        last_watched: row.last_watched,
+        is_completed: row.is_completed,
+        episode: {
+          episode_number: row.episode_number,
+          anime: {
+            id: row.anime_id,
+            title: row.anime_title,
+            poster_url: row.poster_url
+          }
+        }
+      }))
+
       const activities: any[] = []
 
       // Add progress activities
-      progressResult.data?.forEach((item: any) => {
+      progressData.forEach((item: any) => {
         if (item.episode?.anime) {
           activities.push({
             type: item.is_completed ? 'completed' : 'watched',

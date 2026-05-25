@@ -210,6 +210,7 @@ export class HiAnimeScraperService {
       timeout?: number;
       retries?: number;
       delayBetweenEpisodes?: number;
+      overwrite?: boolean;
     } = {}
   ): Promise<BatchScrapeResult> {
     try {
@@ -276,6 +277,7 @@ export class HiAnimeScraperService {
       timeout?: number;
       retries?: number;
       delayBetweenEpisodes?: number;
+      overwrite?: boolean;
     } = {}
   ): Promise<void> {
     return new Promise((resolve, reject) => {

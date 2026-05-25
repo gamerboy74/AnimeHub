@@ -22,6 +22,12 @@ const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 export const useAnimePlayer = () => {
 
+  const normalizeLang = (lang?: string | null): 'sub' | 'dub' | undefined => {
+    const normalized = lang?.toLowerCase();
+    if (normalized === 'sub' || normalized === 'dub') return normalized;
+    return undefined;
+  };
+
   const getEpisodeSources = useCallback(async (animeId: string, episodeNumber: number): Promise<AnimeEpisode> => {
     try {
       // Check cache first
@@ -43,7 +49,7 @@ export const useAnimePlayer = () => {
         throw new Error('Episode not found');
       }
 
-      // Generate video sources based on the video URL
+      // Generate video sources based on the video URL and servers list
       const videoUrl = episode.video_url;
       if (!videoUrl) {
         throw new Error('No video URL available for this episode');
@@ -52,7 +58,19 @@ export const useAnimePlayer = () => {
       const sourceType = VideoService.detectVideoSource(videoUrl);
       let sources: VideoSource[] = [];
 
-      if (sourceType === 'youtube') {
+      if (episode.video_servers && Array.isArray(episode.video_servers) && episode.video_servers.length > 0) {
+        // Map database video_servers array directly to available player sources
+        sources = episode.video_servers.map((srv: any) => {
+          const type = VideoService.detectVideoSource(srv.url);
+          return {
+            quality: srv.name || 'HD',
+            url: srv.url,
+            provider: srv.name || 'Server',
+            type: type,
+            lang: normalizeLang(srv.lang) || (srv.url.toLowerCase().includes('dub') ? 'dub' : 'sub'),
+          };
+        });
+      } else if (sourceType === 'youtube') {
         // Generate multiple quality options for YouTube
         sources = VideoService.generateYouTubeQualities(videoUrl);
       } else {
@@ -87,16 +105,31 @@ export const useAnimePlayer = () => {
     timestamp: number,
     accuracy: 'accurate' | 'estimated' | 'manual' = 'accurate'
   ): Promise<void> => {
+    console.log('⏳ [WatchProgress] Triggering progress save...', { animeId, episodeNumber, timestamp, accuracy });
     try {
       // Get current user
       const { data: { user } } = await supabase.auth.getUser();
+      console.log('👤 [WatchProgress] Auth status:', user ? `Logged in as ${user.email}` : 'Not logged in');
       
       // Always save to localStorage as backup
       const key = `watch_progress_${animeId}_${episodeNumber}`;
       localStorage.setItem(key, timestamp.toString());
       localStorage.setItem(`${key}_accuracy`, accuracy);
       
+      // Clear previous localStorage saves for other episodes of the same anime
+      const keysToRemove = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith(`watch_progress_${animeId}_`)) {
+          if (!k.startsWith(`watch_progress_${animeId}_${episodeNumber}`)) {
+            keysToRemove.push(k);
+          }
+        }
+      }
+      keysToRemove.forEach(k => localStorage.removeItem(k));
+      
       if (!user) {
+        console.log('💾 [WatchProgress] Saving to localStorage only (Not logged in)');
         return; // For non-authenticated users, only use localStorage
       }
 
@@ -109,8 +142,31 @@ export const useAnimePlayer = () => {
         .single();
 
       if (episodeError || !episode) {
-        console.warn('Episode not found for progress update:', episodeError);
+        console.warn('⚠️ [WatchProgress] Episode not found in database for progress:', episodeError);
         return; // localStorage backup is already saved
+      }
+      console.log('📺 [WatchProgress] Found DB Episode ID:', episode.id);
+
+      // Clear previous database progress for other episodes of the same anime
+      const { data: otherEpisodes, error: otherError } = await supabase
+        .from('episodes')
+        .select('id')
+        .eq('anime_id', animeId)
+        .neq('episode_number', episodeNumber);
+
+      if (!otherError && otherEpisodes && otherEpisodes.length > 0) {
+        const otherEpisodeIds = otherEpisodes.map(ep => ep.id);
+        const { error: deleteError } = await supabase
+          .from('user_progress')
+          .delete()
+          .eq('user_id', user.id)
+          .in('episode_id', otherEpisodeIds);
+        
+        if (deleteError) {
+          console.warn('Error clearing previous watch progress from database:', deleteError);
+        } else {
+          console.log(`Cleared database watch progress for other episodes of anime ${animeId}`);
+        }
       }
 
       // Determine if episode is completed (90%+ watched or manual complete)
@@ -118,7 +174,7 @@ export const useAnimePlayer = () => {
       const isCompleted = accuracy === 'manual' && timestamp >= duration * 0.9 || timestamp >= duration * 0.9;
 
       // Update or insert watch progress with metadata
-      // Store accuracy in metadata JSON field (if available) or use a separate approach
+      console.log('📤 [WatchProgress] Sending upsert to user_progress base table...');
       const { error } = await supabase
         .from('user_progress')
         .upsert({
@@ -127,18 +183,18 @@ export const useAnimePlayer = () => {
           progress_seconds: timestamp,
           is_completed: isCompleted,
           last_watched: new Date().toISOString()
-          // Note: If your schema has a metadata JSON field, add:
-          // metadata: { accuracy, source: accuracy === 'postmessage' ? 'postmessage' : accuracy }
         }, {
           onConflict: 'user_id,episode_id'
         });
 
       if (error) {
-        console.warn('Error updating watch progress in database:', error);
+        console.error('❌ [WatchProgress] Database Upsert Error:', error);
         // Don't throw error - localStorage backup is already saved
+      } else {
+        console.log('✅ [WatchProgress] Progress successfully saved to Supabase!');
       }
     } catch (error) {
-      console.error('Error updating watch progress:', error);
+      console.error('💥 [WatchProgress] Unexpected error saving progress:', error);
       // Don't throw error for progress updates - they're not critical
     }
   }, []);

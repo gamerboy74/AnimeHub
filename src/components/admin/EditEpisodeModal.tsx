@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { AdminService } from '../../services/admin';
+import { AdminAnimeService } from '../../services/admin/anime';
 
 interface EditEpisodeModalProps {
   isOpen: boolean;
@@ -52,18 +52,22 @@ export default function EditEpisodeModal({
       setLoading(true);
       setError(null);
 
-      const durationInSeconds = parseInt(formData.duration) * 60;
+      const parsedDuration = parseInt(formData.duration);
+      const durationInSeconds = isNaN(parsedDuration) ? null : parsedDuration * 60;
 
-      await AdminService.updateEpisode(episode.id, {
-        title: formData.title,
-        description: formData.description,
+      // Clean the updates object - convert empty strings to null
+      const updateData = {
+        title: formData.title || null,
+        description: formData.description || null,
         duration: durationInSeconds,
-        video_url: formData.video_url,
-        thumbnail_url: formData.thumbnail_url,
+        video_url: formData.video_url || null,
+        thumbnail_url: formData.thumbnail_url || null,
         episode_number: formData.episode_number,
         is_premium: formData.is_premium,
-        air_date: formData.air_date
-      });
+        air_date: formData.air_date || null
+      };
+
+      await AdminAnimeService.updateEpisode(episode.id, updateData);
 
       onSuccess();
       onClose();

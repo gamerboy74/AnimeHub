@@ -322,29 +322,30 @@ export class AnimeService {
         return null
       }
 
-      // Sort episodes by episode number
-      const sortedEpisodes = animeWithEpisodes.episodes?.sort((a: any, b: any) => 
-        a.episode_number - b.episode_number
-      ) || []
+      // Only expose episodes that actually have a playable video URL.
+      // Stub rows stay available in the database for admin scraping flows.
+      const playableEpisodes = (animeWithEpisodes.episodes || [])
+        .filter((episode: any) => episode?.video_url)
+        .sort((a: any, b: any) => a.episode_number - b.episode_number)
 
       const result: AnimeWithEpisodes = {
         ...animeWithEpisodes,
-        episodes: sortedEpisodes
+        episodes: playableEpisodes
       }
 
       // Fetch user-specific data in parallel if userId is provided
       if (userId) {
         try {
-          const episodeIds = sortedEpisodes.map((e: any) => e.id)
+          const episodeIds = playableEpisodes.map((e: any) => e.id)
           
           // Batch episode IDs to avoid URL length limits for anime with many episodes
           const BATCH_SIZE = 50
-          const progressPromises: Promise<{ data: any[] | null }>[] = []
+          const progressPromises: any[] = []
           for (let i = 0; i < episodeIds.length; i += BATCH_SIZE) {
             const batch = episodeIds.slice(i, i + BATCH_SIZE)
             progressPromises.push(
               supabase
-                .from('user_progress')
+                .from('user_watch_progress_detailed')
                 .select('*')
                 .eq('user_id', userId)
                 .in('episode_id', batch)
@@ -373,7 +374,14 @@ export class AnimeService {
               .maybeSingle()
           ])
 
-          result.user_progress = progressResults
+          result.user_progress = (progressResults || []).map((row: any) => ({
+            id: row.progress_id,
+            user_id: row.user_id,
+            episode_id: row.episode_id,
+            progress_seconds: row.progress_seconds,
+            is_completed: row.is_completed,
+            last_watched: row.last_watched
+          }))
           result.is_favorited = !!favoritesResult.data
           result.is_in_watchlist = !!watchlistResult.data
         } catch (userError) {
@@ -642,73 +650,53 @@ export class AnimeService {
       const cached = getCachedData(cacheKey)
       if (cached) return cached
 
-      // Fetch recent unfinished progress entries joined with episode + anime
+      // Fetch recent unfinished progress entries from detailed view
       const { data, error } = await supabase
-        .from('user_progress')
-        .select(`
-          id,
-          progress_seconds,
-          is_completed,
-          last_watched,
-          episodes!inner (
-            id,
-            anime_id,
-            episode_number,
-            title,
-            duration
-          )
-        `)
+        .from('user_watch_progress_detailed')
+        .select('*')
         .eq('user_id', userId)
         .eq('is_completed', false)
         .gt('progress_seconds', 0)
         .order('last_watched', { ascending: false })
-        .limit(limit)
+        .limit(limit * 3) // Fetch more to allow deduplication
 
       if (error || !data) {
         console.error('Continue watching query error:', error)
         return []
       }
 
-      // Collect unique anime IDs
-      const animeIds = [...new Set(data.map((d: any) => d.episodes?.anime_id).filter(Boolean))]
-      if (animeIds.length === 0) return []
-
-      // Fetch anime metadata in one call
-      const { data: animeData, error: animeError } = await supabase
-        .from('anime')
-        .select('id, title, poster_url, banner_url, rating, total_episodes, genres, status, type, studios, year, description')
-        .in('id', animeIds)
-
-      if (animeError) {
-        console.error('Continue watching anime fetch error:', animeError)
-        return []
-      }
-
-      const animeMap = new Map((animeData || []).map((a: any) => [a.id, a]))
-
       // Deduplicate to one entry per anime (most recent episode)
       const seenAnime = new Set<string>()
       const results = data
         .filter((d: any) => {
-          const aid = d.episodes?.anime_id
+          const aid = d.anime_id
           if (!aid || seenAnime.has(aid)) return false
           seenAnime.add(aid)
           return true
         })
         .map((d: any) => {
-          const ep = d.episodes
-          const anime = animeMap.get(ep.anime_id)
-          if (!anime) return null
           return {
-            ...anime,
-            continueEpisode: ep.episode_number,
-            continueEpisodeTitle: ep.title,
+            id: d.anime_id,
+            title: d.anime_title,
+            poster_url: d.poster_url,
+            banner_url: d.banner_url,
+            rating: d.anime_rating,
+            total_episodes: d.total_episodes,
+            genres: d.genres,
+            status: d.anime_status,
+            type: d.anime_type,
+            studios: d.studios,
+            year: d.year,
+            description: d.anime_description,
+            continueEpisode: d.episode_number,
+            continueEpisodeTitle: d.episode_title,
             progressSeconds: d.progress_seconds,
-            episodeDuration: ep.duration,
+            episodeDuration: d.episode_duration,
             lastWatched: d.last_watched,
           }
         })
         .filter(Boolean)
+        .slice(0, limit)
 
       setCachedData(cacheKey, results)
       return results

@@ -15,6 +15,7 @@ const ALLOWED_HOSTS = [
   'streamsb.net',
   'streamtape.com',
   'hianime.to',
+  'cdn.videas.fr',
 ];
 
 const SPOOF_HEADERS: Record<string, string> = {

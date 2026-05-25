@@ -8,14 +8,15 @@ export const LazyAddAnimeModal = lazy(() => import('../admin/AddAnimeModal'));
 export const LazyAddEpisodeModal = lazy(() => import('../admin/AddEpisodeModal'));
 export const LazyEditAnimeModal = lazy(() => import('../admin/EditAnimeModal'));
 export const LazyEditEpisodeModal = lazy(() => import('../admin/EditEpisodeModal'));
-export const LazyAnimeScraperComponent = lazy(() => import('../admin/AnimeScraperComponent'));
-export const LazyHiAnimeScraperComponent = lazy(() => import('../admin/HiAnimeScraperComponent'));
-export const LazyEnhancedAnimeImporter = lazy(() => import('../admin/EnhancedAnimeImporter'));
+export const LazyNineAnimeScraperComponent = lazy(() => import('../admin/NineAnimeScraperComponent').then(m => ({ default: m.NineAnimeScraperComponent })));
+export const LazyReAnimeScraperComponent = lazy(() => import('../admin/ReAnimeScraperComponent').then(m => ({ default: m.ReAnimeScraperComponent })));
+export const LazyHiAnimeScraperComponent = lazy(() => import('../admin/HiAnimeScraperComponent').then(m => ({ default: m.HiAnimeScraperComponent })));
+export const LazyEnhancedAnimeImporter = lazy(() => import('../admin/EnhancedAnimeImporter').then(m => ({ default: m.EnhancedAnimeImporter })));
 export const LazyLargeAnimeScraper = lazy(() => import('../admin/LargeAnimeScraper'));
-export const LazyImportAnalyticsDashboard = lazy(() => import('../admin/ImportAnalyticsDashboard'));
-export const LazyTrailerDebugger = lazy(() => import('../admin/TrailerDebugger'));
+export const LazyImportAnalyticsDashboard = lazy(() => import('../admin/ImportAnalyticsDashboard').then(m => ({ default: m.ImportAnalyticsDashboard })));
+export const LazyTrailerDebugger = lazy(() => import('../admin/TrailerDebugger').then(m => ({ default: m.TrailerDebugger })));
 export const LazyEpisodeStatusManager = lazy(() => import('../admin/EpisodeStatusManager'));
-export const LazyScrapedEpisodesModal = lazy(() => import('../admin/ScrapedEpisodesModal'));
+export const LazyScrapedEpisodesModal = lazy(() => import('../admin/ScrapedEpisodesModal').then(m => ({ default: m.ScrapedEpisodesModal })));
 
 // Feature Components - Load on demand
 export const LazyTrailerSection = lazy(() => import('../feature/TrailerSection'));

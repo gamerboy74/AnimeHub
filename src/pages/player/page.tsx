@@ -79,10 +79,18 @@ export default function PlayerPage() {
 
   const handlePause = () => {
     console.log('Video paused');
+    if (currentTimeRef.current > 0 && animeId && episode) {
+      updateWatchProgress(animeId, parseInt(episode), Math.floor(currentTimeRef.current), 'accurate')
+        .catch(console.error);
+    }
   };
 
   const handleEnded = () => {
     console.log('Video ended');
+    if (animeId && episode) {
+      updateWatchProgress(animeId, parseInt(episode), Math.floor(currentTimeRef.current), 'accurate')
+        .catch(console.error);
+    }
   };
 
   const handleError = (error: string) => {
@@ -105,21 +113,17 @@ export default function PlayerPage() {
         }
       }
 
-      // Check if this is a "continue watching" request (has continue=true param)
-      const isContinueWatching = searchParams.get('continue') === 'true';
-      
-      if (isContinueWatching) {
-        // For continue watching, get saved progress from database/localStorage
-        try {
-          const savedProgress = await getWatchProgress(animeId, parseInt(episode));
-          if (savedProgress > 0) {
-            setInitialTime(savedProgress);
-          }
-        } catch (error) {
-          console.warn('Failed to get saved progress:', error);
+      // Always retrieve saved watch progress from database or localStorage
+      try {
+        const savedProgress = await getWatchProgress(animeId, parseInt(episode));
+        if (savedProgress > 0) {
+          console.log(`🎬 Restoring watch progress for anime: ${animeId}, EP: ${episode} to: ${savedProgress}s`);
+          setInitialTime(savedProgress);
+        } else {
+          setInitialTime(0);
         }
-      } else {
-        // For direct episode clicks, start from beginning
+      } catch (error) {
+        console.warn('Failed to get saved progress:', error);
         setInitialTime(0);
       }
       setInitialTimeResolved(true);
@@ -188,18 +192,28 @@ export default function PlayerPage() {
   useEffect(() => {
     // Only save progress for native video players, not embedded
     if (isEmbeddedPlayer || !animeId || !episode) {
+      console.log('🚫 [WatchProgress] Embedded player or missing episode data. Autosave deactivated.', { isEmbeddedPlayer, animeId, episode });
       return; // Don't set up interval for embedded players
     }
 
+    console.log('🎬 [WatchProgress] Setting up 5-second progress saving loop...');
     const progressInterval = setInterval(() => {
+      console.log('⏰ [WatchProgress] Checking current playhead time:', currentTimeRef.current);
       if (currentTimeRef.current > 0) {
         updateWatchProgress(animeId, parseInt(episode), Math.floor(currentTimeRef.current), 'accurate')
           .catch(console.error);
       }
-    }, 30000); // Save every 30 seconds
+    }, 5000); // Save every 5 seconds for responsive tracking
 
     return () => {
+      console.log('🧹 [WatchProgress] Cleaning up progress saving loop...');
       clearInterval(progressInterval);
+      // Immediately save progress when interval is cleared (unmounting or switching episodes)
+      if (currentTimeRef.current > 0 && animeId && episode) {
+        console.log('📤 [WatchProgress] Executing immediate unmount/switch progress save at:', currentTimeRef.current);
+        updateWatchProgress(animeId, parseInt(episode), Math.floor(currentTimeRef.current), 'accurate')
+          .catch(console.error);
+      }
     };
   }, [animeId, episode, isEmbeddedPlayer, updateWatchProgress]); // removed currentTime — use ref instead
 
@@ -300,16 +314,16 @@ export default function PlayerPage() {
 
           {/* Video Player */}
           <ErrorBoundary fallback={<VideoPlayerError title="Video Player Error" message="The video player encountered an error. This might be due to network issues or an unsupported video format." />}>
-            <div className="relative bg-black rounded-2xl overflow-hidden shadow-2xl aspect-video mb-6 sm:mb-12">
+            <div className="mb-6 sm:mb-12">
               {sourcesLoading ? (
-                <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-gray-900 to-black">
+                <div className="relative bg-black rounded-2xl overflow-hidden shadow-2xl aspect-video w-full h-full flex items-center justify-center bg-gradient-to-br from-gray-900 to-black">
                   <div className="text-center text-white">
                     <SparkleLoadingSpinner size="xl" text="Loading video sources..." />
                     <p className="text-white/60 mt-4">Preparing your video experience</p>
                   </div>
                 </div>
               ) : sourcesError ? (
-                <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-red-900 to-black">
+                <div className="relative bg-black rounded-2xl overflow-hidden shadow-2xl aspect-video w-full h-full flex items-center justify-center bg-gradient-to-br from-red-900 to-black">
                   <div className="text-center text-white max-w-md mx-auto px-4">
                     <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
                       <i className="ri-error-warning-line text-3xl text-red-400"></i>
@@ -361,10 +375,10 @@ export default function PlayerPage() {
                   onProgressUpdate={isEmbeddedPlayer ? handleProgressUpdate : undefined}
                   autoPlay={true}
                   startTime={initialTime}
-                  className="w-full h-full"
+                  className="w-full aspect-video rounded-2xl shadow-2xl"
                 />
               ) : (
-                <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-gray-900 to-black">
+                <div className="relative bg-black rounded-2xl overflow-hidden shadow-2xl aspect-video w-full h-full flex items-center justify-center bg-gradient-to-br from-gray-900 to-black">
                   <div className="text-center text-white">
                     <i className="ri-video-line text-6xl text-white/40 mb-4"></i>
                     <p className="text-white/60">No video sources available</p>

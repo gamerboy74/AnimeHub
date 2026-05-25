@@ -54,8 +54,114 @@ const useDelayedLoading = (isLoading: boolean, delay: number = 800) => {
 
   return showSpinner;
 };
+// Premium custom card for Continue Watching with glassmorphic styling, no nested links, and fluid physics
+interface ContinueWatchingCardProps {
+  item: any;
+}
 
+const ContinueWatchingCard = memo(function ContinueWatchingCard({ item }: ContinueWatchingCardProps) {
+  const fallbackPoster = '/assets/images/default-anime-poster.jpg';
+  const progressPct = item.episodeDuration && item.episodeDuration > 0
+    ? Math.min(100, Math.round((item.progressSeconds / item.episodeDuration) * 100))
+    : 0;
 
+  const playerUrl = `/player/${item.id}/${item.continueEpisode}?continue=true&progress=${item.progressSeconds || 0}`;
+
+  return (
+    <motion.div
+      whileHover={{ y: -6, scale: 1.02 }}
+      transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+      className="group bg-white/95 backdrop-blur-md rounded-2xl border border-teal-100/80 shadow-md hover:shadow-2xl transition-all duration-300 overflow-hidden flex flex-col relative h-full hover:border-teal-200/90"
+    >
+      {/* Poster / Play Overlay Container */}
+      <div className="relative aspect-[3/4] overflow-hidden bg-slate-900">
+        <img
+          src={getProxiedImageUrl(item.poster_url) || fallbackPoster}
+          alt={item.title}
+          className="w-full h-full object-cover object-top transition-transform duration-500 group-hover:scale-110 animate-fade-in"
+          loading="lazy"
+        />
+        
+        {/* Subtle Dark Gradient Overlay */}
+        <div className="absolute inset-0 bg-gradient-to-t from-slate-950/70 via-transparent to-transparent opacity-80" />
+
+        {/* Hover Premium Play Button Glass Overlay */}
+        <Link
+          to={playerUrl}
+          className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-10 cursor-pointer"
+          aria-label={`Resume watching ${item.title} Episode ${item.continueEpisode}`}
+        >
+          <div className="w-14 h-14 bg-gradient-to-br from-emerald-400 to-teal-600 rounded-full flex items-center justify-center shadow-lg transform scale-75 group-hover:scale-100 transition-transform duration-300">
+            <i className="ri-play-fill text-white text-2xl ml-1"></i>
+          </div>
+        </Link>
+
+        {/* Episode Badge (Always Visible) */}
+        <div className="absolute top-3 left-3 bg-slate-900/80 backdrop-blur-md border border-white/10 px-2.5 py-1 rounded-full text-white text-[11px] font-black tracking-wide shadow-md">
+          EP {item.continueEpisode}
+        </div>
+
+        {/* Inline Info Button (Goes to Detail page, avoiding nested links!) */}
+        <Link
+          to={`/anime/${item.id}`}
+          className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/90 hover:bg-teal-600 text-teal-700 hover:text-white flex items-center justify-center transition-all duration-200 backdrop-blur-sm shadow-md hover:scale-110 z-20 cursor-pointer"
+          title="Anime Details"
+        >
+          <i className="ri-information-line text-sm"></i>
+        </Link>
+        
+        {/* Progress Bar overlay at the bottom of the poster */}
+        {progressPct > 0 && (
+          <div className="absolute bottom-0 inset-x-0 h-1.5 bg-slate-950/50">
+            <div
+              className="h-full bg-gradient-to-r from-teal-400 to-emerald-500 rounded-r-full transition-all duration-300"
+              style={{ width: `${progressPct}%` }}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Info Content Area */}
+      <div className="p-4 flex flex-col flex-grow justify-between bg-white/50">
+        <div>
+          {/* Title */}
+          <Link
+            to={playerUrl}
+            className="block cursor-pointer group-hover:text-teal-600 transition-colors"
+          >
+            <h3 className="font-extrabold text-slate-800 text-sm leading-snug line-clamp-2 mb-1">
+              {item.title}
+            </h3>
+          </Link>
+          
+          {/* Episode Title / Status */}
+          {item.continueEpisodeTitle ? (
+            <p className="text-slate-400 text-xs font-semibold truncate leading-normal">
+              {item.continueEpisodeTitle}
+            </p>
+          ) : (
+            <p className="text-slate-400 text-xs font-semibold leading-normal">
+              Episode {item.continueEpisode}
+            </p>
+          )}
+        </div>
+
+        {/* Bottom Metadata & Interactive Resume Link */}
+        <div className="mt-3 pt-3 border-t border-teal-50 flex items-center justify-between text-xs">
+          <span className="text-teal-600 font-bold">
+            {progressPct}% watched
+          </span>
+          <Link
+            to={playerUrl}
+            className="flex items-center gap-1 text-emerald-600 hover:text-teal-700 font-black cursor-pointer group-hover:underline"
+          >
+            Resume <i className="ri-arrow-right-s-line font-bold"></i>
+          </Link>
+        </div>
+      </div>
+    </motion.div>
+  );
+});
 
 /* -------------------------------------------------------------------------- */
 /*                             Primary Home Page                              */
@@ -412,41 +518,9 @@ export default function Home() {
                 <div className="h-1 w-20 bg-gradient-to-r from-teal-500 to-green-500 rounded-full mt-2"></div>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-                {continueWatchingAnime.map((item: any) => {
-                  const progressPct = item.episodeDuration && item.episodeDuration > 0
-                    ? Math.min(100, Math.round((item.progressSeconds / item.episodeDuration) * 100))
-                    : null;
-                  const mapped = mapAnime(item, 'card') as React.ComponentProps<typeof AnimeCard>;
-                  return (
-                    <div key={item.id} className="relative">
-                      <AnimeCard {...mapped} />
-                      {/* Continue-watching overlay */}
-                      <Link
-                        to={`/player/${item.id}/${item.continueEpisode}?continue=true&progress=${item.progressSeconds || 0}`}
-                        className="absolute inset-x-0 bottom-0 z-10"
-                      >
-                        <div className="bg-gradient-to-t from-black/90 via-black/60 to-transparent rounded-b-xl px-3 pt-8 pb-3">
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="text-white text-xs font-semibold">
-                              EP {item.continueEpisode}{item.continueEpisodeTitle ? ` – ${item.continueEpisodeTitle}` : ''}
-                            </span>
-                            <div className="w-7 h-7 bg-teal-500 rounded-full flex items-center justify-center flex-shrink-0 ml-2">
-                              <i className="ri-play-fill text-white text-xs"></i>
-                            </div>
-                          </div>
-                          {progressPct !== null && (
-                            <div className="w-full bg-white/20 rounded-full h-1.5">
-                              <div
-                                className="h-full bg-teal-400 rounded-full transition-all"
-                                style={{ width: `${progressPct}%` }}
-                              />
-                            </div>
-                          )}
-                        </div>
-                      </Link>
-                    </div>
-                  );
-                })}
+                {continueWatchingAnime.map((item: any) => (
+                  <ContinueWatchingCard key={item.id} item={item} />
+                ))}
               </div>
             </motion.section>
           )}

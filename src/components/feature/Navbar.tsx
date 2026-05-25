@@ -6,6 +6,7 @@ import Button from '../base/Button';
 import NotificationCenter from './NotificationCenter';
 import SearchBar from '../search/SearchBar';
 import { useCurrentUser, useSignOut } from '../../hooks/auth/selectors';
+import { useAdmin } from '../../hooks/admin';
 
 import { prefetchOnHover } from '../../router/helpers/prefetch';
 
@@ -16,6 +17,7 @@ export default function Navbar() {
   const user = useCurrentUser();
   const signOut = useSignOut();
   const navigate = useNavigate();
+  const { isAdmin } = useAdmin();
 
   const menuItems = [
     { label: 'Home', href: '/', icon: 'ri-home-line' },
@@ -175,7 +177,7 @@ export default function Navbar() {
                       ))}
                       
                       {/* Admin Link */}
-                      {user?.subscription_type === 'vip' && (
+                      {isAdmin && (
                         <button
                           onClick={() => {
                             navigate('/admin');
@@ -254,6 +256,19 @@ export default function Navbar() {
                   <span className="font-medium">{item.label}</span>
                 </Link>
               ))}
+
+              {/* Mobile Admin Link */}
+              {isAdmin && (
+                <Link
+                  to="/admin"
+                  onClick={() => setIsMenuOpen(false)}
+                  onMouseEnter={() => prefetchOnHover('/admin')}
+                  className="flex items-center space-x-3 px-4 py-2 text-purple-700 hover:text-purple-900 hover:bg-purple-50 rounded-lg transition-all duration-200 cursor-pointer"
+                >
+                  <i className="ri-admin-line"></i>
+                  <span className="font-medium">Admin Panel</span>
+                </Link>
+              )}
 
               {/* Mobile User Actions */}
               <div className="pt-4 border-t border-teal-200">

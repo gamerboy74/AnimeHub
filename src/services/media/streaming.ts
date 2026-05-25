@@ -80,12 +80,12 @@ export class StreamingService {
       .upload(fileName, file, {
         cacheControl: '3600',
         upsert: false,
-        onUploadProgress: (progress) => {
+        onUploadProgress: (progress: any) => {
           if (onProgress) {
             onProgress((progress.loaded / progress.total) * 100)
           }
         }
-      })
+      } as any)
 
     if (error) {
       throw new Error(`Failed to upload video: ${error.message}`)
@@ -173,7 +173,7 @@ export class StreamingService {
   // Get video analytics (views, completion rate, etc.)
   static async getVideoAnalytics(episodeId: string, dateRange?: { from: string, to: string }) {
     let query = supabase
-      .from('user_progress')
+      .from('user_watch_progress_detailed')
       .select('*')
       .eq('episode_id', episodeId)
 
@@ -244,16 +244,8 @@ export class StreamingService {
   // Get streaming statistics for admin dashboard
   static async getStreamingStats(dateRange?: { from: string, to: string }) {
     let query = supabase
-      .from('user_progress')
-      .select(`
-        *,
-        episode:episode_id (
-          anime_id,
-          anime:anime_id (
-            title
-          )
-        )
-      `)
+      .from('user_watch_progress_detailed')
+      .select('*')
 
     if (dateRange) {
       query = query
@@ -274,7 +266,7 @@ export class StreamingService {
     
     // Group by anime
     const animeStats = data?.reduce((acc, progress) => {
-      const animeId = progress.episode?.anime_id
+      const animeId = progress.anime_id
       if (animeId) {
         acc[animeId] = (acc[animeId] || 0) + 1
       }
@@ -287,7 +279,7 @@ export class StreamingService {
       completedViews,
       completionRate: totalViews > 0 ? (completedViews / totalViews) * 100 : 0,
       topAnime: Object.entries(animeStats)
-        .sort(([,a], [,b]) => b - a)
+        .sort((a: any, b: any) => b[1] - a[1])
         .slice(0, 10)
     }
   }

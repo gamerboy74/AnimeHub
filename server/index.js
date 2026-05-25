@@ -42,7 +42,7 @@ dotenv.config({ path: join(__dirname, "..", ".env") });
 // Apply stealth plugin to avoid detection
 chromium.use(StealthPlugin());
 
-const supabase = createClient(
+export const supabase = createClient(
   process.env.VITE_SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY
 );
@@ -209,7 +209,7 @@ const BREAKER_COOLDOWN_MS = parseInt(
   10
 );
 
-async function getBrowser() {
+export async function getBrowser() {
   try {
     if (sharedBrowser) {
       // Verify browser is valid by checking for newContext method
@@ -262,7 +262,7 @@ async function getBrowser() {
   }
 }
 
-function enqueue(task) {
+export function enqueue(task) {
   return new Promise((resolve, reject) => {
     // Circuit breaker: fast-fail when open
     if (breakerOpenedAt && Date.now() - breakerOpenedAt < BREAKER_COOLDOWN_MS) {
@@ -302,2083 +302,9 @@ function enqueue(task) {
 }
 
 // Scraper service
-class NineAnimeScraperService {
-  static BASE_URL = "https://9anime.org.lv";
-  static USER_AGENT =
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-
-  static async scrapeAnimeEpisode(animeTitle, episodeNumber = 1, options = {}) {
-    const { timeout = 45000, retries = 3, dbAnimeId = null } = options;
-
-    console.log(
-      `🎬 Scraping 9anime.org.lv for "${animeTitle}", Episode ${episodeNumber}${dbAnimeId ? ` (DB ID: ${dbAnimeId})` : ''}...`
-    );
-
-    let lastError = null;
-
-    for (let attempt = 1; attempt <= retries; attempt++) {
-      try {
-        // Step 1: Use Cheerio for fast search (with multi-title resolution)
-        const searchResult = await this.searchAnimeWithCheerio(
-          animeTitle,
-          episodeNumber,
-          dbAnimeId
-        );
-
-        if (!searchResult.success) {
-          throw new Error(searchResult.error || "Search failed");
-        }
-
-        const { animeLink, animeId } = searchResult;
-        console.log(
-          `🔍 DEBUG: animeLink = ${animeLink}, episodeNumber = ${episodeNumber}`
-        );
-
-        // Step 2: Use Puppeteer for dynamic video extraction (queued)
-        const videoResult = await enqueue(() =>
-          this.extractVideoWithPuppeteer(animeLink, animeId, episodeNumber, {
-            timeout,
-          })
-        );
-
-        if (!videoResult.success) {
-          throw new Error(videoResult.error || "Video extraction failed");
-        }
-
-        // Step 3: Check for anti-embedding protection
-        const embeddingCheck = await this.checkEmbeddingProtection(
-          videoResult.streamUrl
-        );
-
-        const finalEpisodeData = {
-          animeTitle,
-          animeId,
-          animeLink,
-          ...videoResult.episodeData,
-          episodeNumber, // Put this after the spread to ensure it's not overwritten
-        };
-
-        console.log(
-          `🔍 DEBUG: Final episodeData = ${JSON.stringify(finalEpisodeData)}`
-        );
-        console.log(
-          "📦 DEBUG: Returning from scrapeAnimeEpisode - streamUrl:",
-          videoResult.streamUrl
-        );
-
-        return {
-          success: true,
-          streamUrl: videoResult.streamUrl,
-          embeddingProtected: embeddingCheck.protected,
-          embeddingReason: embeddingCheck.reason,
-          episodeData: finalEpisodeData,
-        };
-      } catch (error) {
-        lastError = error;
-        console.error(`❌ Attempt ${attempt} failed:`, error.message);
-
-        if (attempt < retries) {
-          console.log(`⏳ Retrying in 2 seconds... (${attempt}/${retries})`);
-          await new Promise((resolve) => setTimeout(resolve, 2000));
-        }
-      }
-    }
-
-    return {
-      success: false,
-      error: lastError?.message || "Unknown error occurred",
-    };
-  }
-
-  // New method to scrape all available episodes
-  static async scrapeAllEpisodes(animeTitle, options = {}) {
-    const { maxEpisodes = 50, timeout = 45000, retries = 2, dbAnimeId = null } = options;
-
-    console.log(
-      `🎬 Scraping all episodes for "${animeTitle}" (max ${maxEpisodes})...`
-    );
-
-    try {
-      // Step 1: Find the anime and get episode list (use episode 1 for initial search)
-      const searchResult = await this.searchAnimeWithCheerio(animeTitle, 1, dbAnimeId);
-
-      if (!searchResult.success) {
-        return { success: false, error: searchResult.error || "Search failed" };
-      }
-
-      const { animeLink, animeId } = searchResult;
-
-      // Step 2: Get available episodes from the anime page
-      const episodesResult = await this.getAvailableEpisodes(
-        animeLink,
-        animeId,
-        maxEpisodes
-      );
-
-      if (!episodesResult.success) {
-        return {
-          success: false,
-          error: episodesResult.error || "Failed to get episodes",
-        };
-      }
-
-      const { episodes, totalEpisodes } = episodesResult;
-      console.log(
-        `📺 Found ${totalEpisodes} total episodes, checking first ${episodes.length}...`
-      );
-
-      // Step 3: Scrape each episode
-      const scrapedEpisodes = [];
-      const failedEpisodes = [];
-
-      for (const episode of episodes) {
-        try {
-          console.log(
-            `🎬 Scraping Episode ${episode.number}: "${episode.title}"`
-          );
-
-          const episodeResult = await this.scrapeAnimeEpisode(
-            animeTitle,
-            episode.number,
-            {
-              timeout: timeout / episodes.length, // Distribute timeout across episodes
-              retries,
-              dbAnimeId,
-            }
-          );
-
-          if (episodeResult.success) {
-            // Check if we need to retrieve the poster URL to use as episode thumbnail
-            let thumbnailUrl = null;
-            if (dbAnimeId) {
-              try {
-                const { data: animeRow } = await supabase
-                  .from('anime')
-                  .select('poster_url')
-                  .eq('id', dbAnimeId)
-                  .single();
-                thumbnailUrl = animeRow?.poster_url || null;
-              } catch (e) {
-                console.warn('Could not fetch poster URL for thumbnail:', e.message);
-              }
-            }
-
-            scrapedEpisodes.push({
-              ...episode,
-              streamUrl: episodeResult.streamUrl,
-              embeddingProtected: episodeResult.embeddingProtected,
-              embeddingReason: episodeResult.embeddingReason,
-              scrapedAt: new Date().toISOString(),
-            });
-            
-            // Save to DB so that anime without initial episode stubs actually get stored.
-            if (dbAnimeId && episodeResult.streamUrl) {
-              await this.saveEpisodeToDatabase({
-                animeId: dbAnimeId,
-                episodeNumber: episode.number,
-                title: episode.title || `${animeTitle} - Episode ${episode.number}`,
-                videoUrl: episodeResult.streamUrl,
-                thumbnailUrl: thumbnailUrl,
-                duration: 1440,
-                description: `Episode ${episode.number} of ${animeTitle}`,
-                createdAt: new Date(),
-              });
-            }
-            console.log(`✅ Episode ${episode.number} scraped successfully`);
-          } else {
-            failedEpisodes.push({
-              ...episode,
-              error: episodeResult.error,
-            });
-            console.log(
-              `❌ Episode ${episode.number} failed: ${episodeResult.error}`
-            );
-          }
-
-          // Small delay between episodes to avoid rate limiting
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-        } catch (error) {
-          failedEpisodes.push({
-            ...episode,
-            error: error.message,
-          });
-          console.log(`❌ Episode ${episode.number} error: ${error.message}`);
-        }
-      }
-
-      return {
-        success: true,
-        animeTitle,
-        animeId,
-        totalEpisodes,
-        scrapedEpisodes,
-        failedEpisodes,
-        summary: {
-          total: episodes.length,
-          successful: scrapedEpisodes.length,
-          failed: failedEpisodes.length,
-          embeddingProtected: scrapedEpisodes.filter(
-            (ep) => ep.embeddingProtected
-          ).length,
-        },
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error.message,
-      };
-    }
-  }
-
-  // Get available episodes from anime page
-  static async getAvailableEpisodes(animeLink, animeId, maxEpisodes = 50) {
-    try {
-      console.log("📺 Getting available episodes...");
-
-      const response = await axios.get(animeLink, {
-        headers: { "User-Agent": this.USER_AGENT },
-        timeout: 15000,
-      });
-
-      const $ = cheerio.load(response.data);
-
-      // Extract anime slug from the URL for filtering
-      const animeSlug =
-        animeLink.match(/\/([^\/]+)-episode-\d+/)?.[1] ||
-        animeLink.match(/anime\/([^\/]+)/)?.[1] ||
-        animeId;
-
-      console.log(`🔍 Looking for episodes with anime slug: ${animeSlug}`);
-
-      // Look for episode lists in specific containers ONLY (not all links)
-      const episodes = [];
-
-      // Method 1: Look for episode lists in specific containers ONLY
-      const episodeContainers = $(
-        '.episode-list, .episodes, .episode-item, [class*="episode"]'
-      );
-
-      episodeContainers.each((i, container) => {
-        const episodeItems = $(container).find(
-          'a, .episode, [class*="episode"]'
-        );
-
-        episodeItems.each((j, item) => {
-          const text = $(item).text().trim();
-          const href = $(item).attr("href");
-
-          if (text && href) {
-            // Check if this link belongs to the same anime
-            const isSameAnime =
-              href.includes(animeSlug) ||
-              href.includes(animeId) ||
-              href.includes(animeLink.split("/").pop()?.split("-episode")[0]);
-
-            if (isSameAnime) {
-              // Extract episode number from URL or text
-              const episodeMatch =
-                href.match(/-episode-(\d+)/) ||
-                href.match(/\/episode\/(\d+)/) ||
-                href.match(/\/watch\/.*?(\d+)/) ||
-                text.match(/episode\s*(\d+)/i) ||
-                text.match(/ep\s*(\d+)/i);
-
-              if (episodeMatch) {
-                const episodeNumber = parseInt(episodeMatch[1]);
-                if (episodeNumber && episodeNumber <= maxEpisodes) {
-                  episodes.push({
-                    number: episodeNumber,
-                    title: text,
-                    url: href.startsWith("http") ? href : this.BASE_URL + href,
-                  });
-                }
-              } else if (text.match(/\d+/)) {
-                // Fallback: extract number from text
-                const episodeNumber = parseInt(text.match(/\d+/)[0]);
-                if (episodeNumber && episodeNumber <= maxEpisodes) {
-                  episodes.push({
-                    number: episodeNumber,
-                    title: text,
-                    url: href.startsWith("http") ? href : this.BASE_URL + href,
-                  });
-                }
-              }
-            }
-          }
-        });
-      });
-
-      // Remove duplicates and sort by episode number
-      const uniqueEpisodes = episodes
-        .filter(
-          (ep, index, self) =>
-            index === self.findIndex((e) => e.number === ep.number)
-        )
-        .sort((a, b) => a.number - b.number);
-
-      // If no episodes found, try to construct episode URLs based on the anime pattern
-      let filteredEpisodes = uniqueEpisodes;
-      if (uniqueEpisodes.length === 0) {
-        console.log("⚠️ No episodes found, constructing episode URLs...");
-
-        // For movies, there should only be 1 episode
-        if (
-          animeSlug.toLowerCase().includes("film") ||
-          animeSlug.toLowerCase().includes("movie")
-        ) {
-          filteredEpisodes.push({
-            number: 1,
-            title: "Movie",
-            url: animeLink, // Use the original link as it's already episode 1
-          });
-        } else {
-          // For regular anime, try to construct episode URLs
-          for (let i = 1; i <= Math.min(12, maxEpisodes); i++) {
-            const episodeUrl = animeLink.replace(
-              /-episode-\d+/,
-              `-episode-${i}`
-            );
-            filteredEpisodes.push({
-              number: i,
-              title: `Episode ${i}`,
-              url: episodeUrl,
-            });
-          }
-        }
-      }
-
-      // Additional filtering: Remove episodes that don't belong to this anime
-      filteredEpisodes = filteredEpisodes.filter((episode) => {
-        // For movies, only allow episode 1
-        if (
-          animeSlug.toLowerCase().includes("film") ||
-          animeSlug.toLowerCase().includes("movie")
-        ) {
-          return episode.number === 1;
-        }
-        // For regular anime, check if the episode URL actually exists (we'll let the scraper handle validation)
-        return true;
-      });
-
-      console.log(
-        `✅ Found ${filteredEpisodes.length} episodes for ${animeSlug}`
-      );
-      console.log(
-        "Episodes:",
-        filteredEpisodes.map((ep) => `Ep ${ep.number}: ${ep.title}`)
-      );
-
-      return {
-        success: true,
-        episodes: filteredEpisodes,
-        totalEpisodes: filteredEpisodes.length,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error.message,
-      };
-    }
-  }
-
-  // Check if video source has anti-embedding protection
-  static async checkEmbeddingProtection(videoUrl) {
-    try {
-      console.log("🔍 Checking for anti-embedding protection...");
-
-      const response = await axios.get(videoUrl, {
-        headers: { "User-Agent": this.USER_AGENT },
-        timeout: 10000,
-        validateStatus: (status) => status < 500,
-      });
-
-      const html = response.data;
-
-      // Check for common anti-embedding patterns
-      const antiEmbeddingPatterns = [
-        /if\s*\(\s*window\s*==\s*window\.top\s*\)/i,
-        /window\.location\.replace/i,
-        /window\.top\.location/i,
-        /parent\.location/i,
-        /top\.location/i,
-        /frameElement/i,
-        /anti-embed/i,
-        /embedding.*block/i,
-        /no.*embed/i,
-      ];
-
-      const protectionReasons = [];
-
-      for (const pattern of antiEmbeddingPatterns) {
-        if (pattern.test(html)) {
-          protectionReasons.push(pattern.toString());
-        }
-      }
-
-      // Check for Cloudflare protection (but be lenient with all mega domains)
-      if (html.includes("cloudflare") || html.includes("challenge-platform")) {
-        if (videoUrl.match(/mega(play|cloud|backup|cdn|stream)/i)) {
-          console.log(
-            "🎯 Mega domain detected - Cloudflare protection is usually embeddable"
-          );
-          // Don't add to protection reasons for mega domains
-        } else {
-          protectionReasons.push("Cloudflare protection detected");
-        }
-      }
-
-      // Check for dynamic iframe loading
-      if (html.includes("data-src") && !html.includes("src=")) {
-        protectionReasons.push("Dynamic iframe loading detected");
-      }
-
-      // Special case: All mega domains are generally embeddable even with some protection
-      const isProtected =
-        protectionReasons.length > 0 &&
-        !videoUrl.match(/mega(play|cloud|backup|cdn|stream)/i);
-
-      console.log(
-        `${isProtected ? "⚠️" : "✅"} Embedding protection: ${
-          isProtected ? "DETECTED" : "NONE"
-        }`
-      );
-      if (isProtected) {
-        console.log("Reasons:", protectionReasons);
-      }
-
-      return {
-        protected: isProtected,
-        reason: isProtected ? protectionReasons.join(", ") : null,
-      };
-    } catch (error) {
-      console.log("⚠️ Could not check embedding protection:", error.message);
-      return {
-        protected: true, // Assume protected if we can't check
-        reason: `Check failed: ${error.message}`,
-      };
-    }
-  }
-
-  static async searchAnimeWithCheerio(animeTitle, episodeNumber = 1, dbAnimeId = null) {
-    // Cached search to reduce upstream calls
-    try {
-      const cached = await cacheGet(`search:${animeTitle}:${episodeNumber}`);
-      if (cached) return cached;
-    } catch {}
-    try {
-      // =====================================================================
-      // STEP 0: Check if we already have a verified 9anime slug in the DB
-      // =====================================================================
-      if (dbAnimeId) {
-        try {
-          const { data: animeRecord } = await supabase
-            .from("anime")
-            .select("nine_anime_slug, title_english, title_romaji, title_japanese, title_synonyms, mal_id")
-            .eq("id", dbAnimeId)
-            .maybeSingle();
-
-          if (animeRecord?.nine_anime_slug) {
-            const slugUrl = `${this.BASE_URL}/${animeRecord.nine_anime_slug}-episode-${episodeNumber}/`;
-            console.log(`🔗 Using cached 9anime slug: ${slugUrl}`);
-            try {
-              const testResp = await axios.get(slugUrl, {
-                headers: { "User-Agent": this.USER_AGENT },
-                timeout: 5000,
-                validateStatus: (s) => s < 500,
-              });
-              if (testResp.status === 200) {
-                const result = { success: true, animeLink: slugUrl, animeId: animeRecord.nine_anime_slug };
-                try { await cacheSet(`search:${animeTitle}:${episodeNumber}`, result, 300_000); } catch {}
-                return result;
-              }
-            } catch {}
-
-            // Episode URL didn't work — verify the slug itself is still valid via episode 1
-            if (episodeNumber > 1) {
-              try {
-                const ep1Url = `${this.BASE_URL}/${animeRecord.nine_anime_slug}-episode-1/`;
-                const ep1Resp = await axios.get(ep1Url, {
-                  headers: { "User-Agent": this.USER_AGENT },
-                  timeout: 5000,
-                  validateStatus: (s) => s < 500,
-                });
-                if (ep1Resp.status === 200) {
-                  // Slug is valid — this episode just isn't available yet
-                  console.log(`ℹ️ Slug "${animeRecord.nine_anime_slug}" is valid but episode ${episodeNumber} is not available yet on 9anime`);
-                  return {
-                    success: false,
-                    error: `Episode ${episodeNumber} not yet available on 9anime`,
-                    slugValid: true,
-                  };
-                }
-              } catch {}
-            }
-
-            console.log("⚠️ Cached slug no longer works, re-resolving...");
-          }
-        } catch (e) {
-          console.log("⚠️ DB lookup for slug failed:", e.message);
-        }
-      }
-
-      // =====================================================================
-      // STEP 1: Build multiple title variants to try
-      // =====================================================================
-      const titleVariants = await this.getTitleVariants(animeTitle, dbAnimeId);
-      console.log(`📝 Title variants to try: ${JSON.stringify(titleVariants)}`);
-
-      // =====================================================================
-      // STEP 2: Try direct URL construction with each title variant
-      // =====================================================================
-      for (const variant of titleVariants) {
-        const slug = this.buildSlug(variant);
-        if (!slug) continue;
-
-        const directUrl = `${this.BASE_URL}/${slug}-episode-${episodeNumber}/`;
-        console.log(`🔗 Testing direct URL: ${directUrl} (from: "${variant}")`);
-
-        try {
-          const testResponse = await axios.get(directUrl, {
-            headers: { "User-Agent": this.USER_AGENT },
-            timeout: 5000,
-            validateStatus: (status) => status < 500,
-          });
-
-          if (testResponse.status === 200) {
-            // Verify this is actually the right anime by checking page content
-            const pageTitle = this.extractPageTitle(testResponse.data);
-            const similarity = this.titleSimilarity(animeTitle, pageTitle);
-            
-            if (similarity >= 0.75) {
-              console.log(`✅ Direct URL verified (similarity: ${similarity.toFixed(2)}): ${directUrl}`);
-              // Save the verified slug to DB for future use
-              await this.saveVerifiedSlug(dbAnimeId, slug);
-              const result = { success: true, animeLink: directUrl, animeId: slug };
-              try { await cacheSet(`search:${animeTitle}:${episodeNumber}`, result, 300_000); } catch {}
-              return result;
-            } else {
-              console.log(`⚠️ Direct URL exists but title mismatch (similarity: ${similarity.toFixed(2)}): page="${pageTitle}" vs expected="${animeTitle}"`);
-            }
-          }
-        } catch (error) {
-          console.log(`❌ Direct URL test failed for "${variant}": ${error.message}`);
-        }
-      }
-
-      // =====================================================================
-      // STEP 3: Search 9anime with each title variant
-      // =====================================================================
-      console.log("🔍 Direct URLs failed, searching 9anime...");
-
-      for (const variant of titleVariants) {
-        const searchResult = await this.search9animeByKeyword(variant, animeTitle, episodeNumber);
-        if (searchResult.success) {
-          // Save verified slug
-          const foundSlug = searchResult.animeId;
-          await this.saveVerifiedSlug(dbAnimeId, foundSlug);
-          try { await cacheSet(`search:${animeTitle}:${episodeNumber}`, searchResult, 300_000); } catch {}
-          return searchResult;
-        }
-      }
-
-      // =====================================================================
-      // STEP 4: Last resort — use Jikan API to find the English title
-      // =====================================================================
-      console.log("🔍 All variants failed, trying Jikan API title resolution...");
-      const jikanTitles = await this.resolveViaTitleFromJikan(animeTitle);
-      
-      for (const jikanTitle of jikanTitles) {
-        // Skip if we already tried this
-        if (titleVariants.some(v => v.toLowerCase() === jikanTitle.toLowerCase())) continue;
-
-        // Don't accept a different season (e.g. "Season 2" when looking for "Season 3")
-        if (this.hasDifferentSeason(animeTitle, jikanTitle)) {
-          console.log(`⚠️ Skipping Jikan result "${jikanTitle}" — different season from "${animeTitle}"`);
-          continue;
-        }
-
-        const slug = this.buildSlug(jikanTitle);
-        if (!slug) continue;
-
-        const directUrl = `${this.BASE_URL}/${slug}-episode-${episodeNumber}/`;
-        console.log(`🔗 Testing Jikan-resolved URL: ${directUrl} (from: "${jikanTitle}")`);
-
-        try {
-          const testResponse = await axios.get(directUrl, {
-            headers: { "User-Agent": this.USER_AGENT },
-            timeout: 5000,
-            validateStatus: (s) => s < 500,
-          });
-
-          if (testResponse.status === 200) {
-            console.log(`✅ Jikan-resolved URL works: ${directUrl}`);
-            await this.saveVerifiedSlug(dbAnimeId, slug);
-            // Also update the English title in DB if we found one
-            await this.updateTitleEnglish(dbAnimeId, jikanTitle);
-            const result = { success: true, animeLink: directUrl, animeId: slug };
-            try { await cacheSet(`search:${animeTitle}:${episodeNumber}`, result, 300_000); } catch {}
-            return result;
-          }
-        } catch {}
-
-        // Also try searching 9anime with the Jikan title
-        const searchResult = await this.search9animeByKeyword(jikanTitle, animeTitle, episodeNumber);
-        if (searchResult.success) {
-          await this.saveVerifiedSlug(dbAnimeId, searchResult.animeId);
-          await this.updateTitleEnglish(dbAnimeId, jikanTitle);
-          try { await cacheSet(`search:${animeTitle}:${episodeNumber}`, searchResult, 300_000); } catch {}
-          return searchResult;
-        }
-      }
-
-      return {
-        success: false,
-        error: `Could not find "${animeTitle}" on 9anime after trying ${titleVariants.length} title variants + Jikan resolution`,
-      };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  }
-
-  // =========================================================================
-  // HELPER: Build a URL slug from a title
-  // =========================================================================
-  // Check if two titles refer to different seasons of the same show
-  static hasDifferentSeason(originalTitle, resolvedTitle) {
-    const seasonRegex = /(?:season\s*(\d+)|(\d+)(?:st|nd|rd|th)\s*season)/i;
-    const origMatch = originalTitle.match(seasonRegex);
-    const resolvedMatch = resolvedTitle.match(seasonRegex);
-
-    // One title has an explicit season and the other doesn't → different season
-    // (e.g. "[Oshi No Ko]" vs "[Oshi No Ko] Season 2")
-    if ((!origMatch && resolvedMatch) || (origMatch && !resolvedMatch)) return true;
-    // Neither has a season number → same (both are season 1 / base title)
-    if (!origMatch && !resolvedMatch) return false;
-    // Both have season numbers — compare them
-    const origSeason = origMatch[1] || origMatch[2];
-    const resolvedSeason = resolvedMatch[1] || resolvedMatch[2];
-    return origSeason !== resolvedSeason;
-  }
-
-  static buildSlug(title) {
-    if (!title) return null;
-    return title
-      .toLowerCase()
-      .replace(/[''""`]/g, "")               // Remove quotes/apostrophes (e.g., "don't" → "dont")
-      .replace(/[&]/g, "and")                 // & → and
-      .replace(/[@]/g, "at")                  // @ → at
-      .replace(/[^a-z0-9\s-]/g, "")          // Remove non-alphanumeric (keep spaces & hyphens)
-      .replace(/\s+/g, "-")                   // Spaces → hyphens
-      .replace(/-+/g, "-")                    // Collapse multiple hyphens
-      .replace(/^-|-$/g, "")                  // Trim leading/trailing hyphens
-      .trim();
-  }
-
-  // =========================================================================
-  // HELPER: Get all title variants to try for URL resolution
-  // =========================================================================
-  static async getTitleVariants(animeTitle, dbAnimeId) {
-    const variants = new Set();
-    
-    // Always add the provided title first
-    variants.add(animeTitle);
-
-    // If we have a DB ID, fetch all stored title variants  
-    if (dbAnimeId) {
-      try {
-        const { data: animeRecord } = await supabase
-          .from("anime")
-          .select("title, title_english, title_romaji, title_japanese, title_synonyms")
-          .eq("id", dbAnimeId)
-          .maybeSingle();
-
-        if (animeRecord) {
-          if (animeRecord.title) variants.add(animeRecord.title);
-          if (animeRecord.title_english) variants.add(animeRecord.title_english);
-          if (animeRecord.title_romaji) variants.add(animeRecord.title_romaji);
-          // Don't add Japanese title — it won't produce valid URL slugs
-          if (animeRecord.title_synonyms && Array.isArray(animeRecord.title_synonyms)) {
-            for (const syn of animeRecord.title_synonyms) {
-              // Only add Latin-script synonyms (skip Japanese/Chinese/Korean)
-              if (syn && /^[a-zA-Z0-9\s\-':!,.&]+$/.test(syn)) {
-                variants.add(syn);
-              }
-            }
-          }
-        }
-      } catch (e) {
-        console.log("⚠️ Failed to fetch title variants from DB:", e.message);
-      }
-    }
-
-    // Generate common variations of the title
-    const baseVariants = [...variants];
-    for (const v of baseVariants) {
-      // "Season 2" → "2nd season", "season-2" etc.
-      if (/season\s*(\d+)/i.test(v)) {
-        const num = v.match(/season\s*(\d+)/i)[1];
-        variants.add(v.replace(/season\s*\d+/i, `${num}nd-season`).trim());
-        variants.add(v.replace(/season\s*\d+/i, `season-${num}`).trim());
-        variants.add(v.replace(/\s*season\s*\d+/i, "").trim()); // Without season suffix
-      }
-      // "Part 2" → "part-2" etc.
-      if (/part\s*(\d+)/i.test(v)) {
-        const num = v.match(/part\s*(\d+)/i)[1];
-        variants.add(v.replace(/part\s*\d+/i, `part-${num}`).trim());
-      }
-      // Handle "II", "III" → "2", "3"
-      if (/\bII\b/.test(v)) {
-        variants.add(v.replace(/\bII\b/, "2").trim());
-        variants.add(v.replace(/\bII\b/, "2nd-season").trim());
-      }
-      if (/\bIII\b/.test(v)) {
-        variants.add(v.replace(/\bIII\b/, "3").trim());
-        variants.add(v.replace(/\bIII\b/, "3rd-season").trim());
-      }
-      // Handle "The" prefix — try without it
-      if (/^the\s+/i.test(v)) {
-        variants.add(v.replace(/^the\s+/i, "").trim());
-      }
-      // Handle colons — 9anime sometimes drops them
-      if (v.includes(":")) {
-        variants.add(v.replace(/:/g, "").trim());
-        variants.add(v.replace(/:/g, " -").trim());
-      }
-    }
-
-    return [...variants].filter(Boolean);
-  }
-
-  // =========================================================================
-  // HELPER: Search 9anime by keyword and validate the result
-  // =========================================================================
-  static async search9animeByKeyword(searchTitle, originalTitle, episodeNumber) {
-    try {
-      const searchUrl = `${this.BASE_URL}/search?keyword=${encodeURIComponent(searchTitle)}`;
-      console.log(`🔍 Searching 9anime: ${searchUrl}`);
-
-      const searchResponse = await axios.get(searchUrl, {
-        headers: {
-          "User-Agent": this.USER_AGENT,
-          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-          "Accept-Language": "en-US,en;q=0.5",
-          "Accept-Encoding": "gzip, deflate",
-          DNT: "1",
-          Connection: "keep-alive",
-          "Upgrade-Insecure-Requests": "1",
-        },
-        timeout: 15000,
-      });
-
-      const $ = cheerio.load(searchResponse.data);
-
-      // Collect all candidate links with their text
-      const candidates = [];
-      const linkSelectors = 'a[href*="/category/"], a[href*="/anime/"], a[href*="/v/"], a[href*="/watch/"], a[href*="-episode-"]';
-      
-      $(linkSelectors).each((i, el) => {
-        const href = $(el).attr("href") || "";
-        const text = $(el).text().trim();
-        if (href && text) {
-          const fullUrl = href.startsWith("http") ? href : this.BASE_URL + href;
-          candidates.push({ url: fullUrl, text, href });
-        }
-      });
-
-      console.log(`🔍 Found ${candidates.length} candidate links for "${searchTitle}"`);
-
-      // Score each candidate by title similarity
-      const scoredCandidates = candidates.map(c => ({
-        ...c,
-        similarity: Math.max(
-          this.titleSimilarity(originalTitle, c.text),
-          this.titleSimilarity(searchTitle, c.text),
-          this.titleSimilarity(originalTitle, this.slugToTitle(c.href)),
-          this.titleSimilarity(searchTitle, this.slugToTitle(c.href))
-        ),
-      }));
-
-      // Sort by similarity descending
-      scoredCandidates.sort((a, b) => b.similarity - a.similarity);
-
-      // Log top candidates for debugging
-      const topN = scoredCandidates.slice(0, 5);
-      for (const c of topN) {
-        console.log(`   📊 Score ${c.similarity.toFixed(2)}: "${c.text}" → ${c.url}`);
-      }
-
-      // Accept only candidates with decent similarity (>= 0.6)
-      const bestMatch = scoredCandidates.find(c => c.similarity >= 0.6);
-
-      if (!bestMatch) {
-        console.log(`❌ No good match found for "${searchTitle}" (best similarity: ${scoredCandidates[0]?.similarity?.toFixed(2) || 'N/A'})`);
-        return { success: false, error: "No matching anime found in search results" };
-      }
-
-      let animeLink = bestMatch.url;
-
-      // Extract the anime slug from the matched URL
-      let animeSlug =
-        animeLink.match(/\/([^\/]+)-episode-\d+/)?.[1] ||
-        animeLink.match(/\/([^\/]+)-film-/)?.[1] ||
-        animeLink.match(/\/([^\/]+)-movie-/)?.[1] ||
-        animeLink.match(/category\/([^?\/]+)/)?.[1] ||
-        animeLink.match(/anime\/([^?\/]+)/)?.[1] ||
-        animeLink.match(/v\/([^?\/]+)/)?.[1] ||
-        animeLink.match(/watch\/([^?\/]+)/)?.[1] ||
-        null;
-
-      if (!animeSlug) {
-        return { success: false, error: "Could not extract anime slug from URL" };
-      }
-
-      // Construct the correct episode URL
-      if (!animeLink.includes(`-episode-${episodeNumber}`)) {
-        if (animeLink.includes("-episode-")) {
-          animeLink = animeLink.replace(/-episode-\d+/, `-episode-${episodeNumber}`);
-        } else {
-          animeLink = `${this.BASE_URL}/${animeSlug}-episode-${episodeNumber}/`;
-        }
-      }
-
-      console.log(`✅ Best match (similarity: ${bestMatch.similarity.toFixed(2)}): ${animeLink}`);
-      return { success: true, animeLink, animeId: animeSlug };
-    } catch (error) {
-      console.log(`❌ 9anime search failed for "${searchTitle}": ${error.message}`);
-      return { success: false, error: error.message };
-    }
-  }
-
-  // =========================================================================
-  // HELPER: Resolve titles via Jikan (MAL) API
-  // =========================================================================
-  static async resolveViaTitleFromJikan(animeTitle) {
-    try {
-      const searchUrl = `https://api.jikan.moe/v4/anime?q=${encodeURIComponent(animeTitle)}&limit=3`;
-      console.log(`🔍 Jikan API lookup: ${searchUrl}`);
-
-      const response = await axios.get(searchUrl, { timeout: 10000 });
-      const results = response.data?.data || [];
-
-      const titles = [];
-      for (const anime of results) {
-        // Add English title (most likely to match 9anime)
-        if (anime.title_english) titles.push(anime.title_english);
-        // Add default title (usually romaji)
-        if (anime.title) titles.push(anime.title);
-        // Add synonyms (alternate transliterations)
-        if (anime.title_synonyms && Array.isArray(anime.title_synonyms)) {
-          for (const syn of anime.title_synonyms) {
-            if (syn && /^[a-zA-Z0-9\s\-':!,.&]+$/.test(syn)) {
-              titles.push(syn);
-            }
-          }
-        }
-      }
-
-      // Deduplicate and filter out titles from different seasons
-      const uniqueTitles = [...new Set(titles)].filter(
-        t => !this.hasDifferentSeason(animeTitle, t)
-      );
-      console.log(`📝 Jikan resolved ${uniqueTitles.length} title variants: ${JSON.stringify(uniqueTitles)}`);
-      return uniqueTitles;
-    } catch (error) {
-      console.log(`⚠️ Jikan API lookup failed: ${error.message}`);
-      return [];
-    }
-  }
-
-  // =========================================================================
-  // HELPER: Save a verified 9anime slug to the database
-  // =========================================================================
-  static async saveVerifiedSlug(dbAnimeId, slug) {
-    if (!dbAnimeId || !slug) return;
-    try {
-      await supabase
-        .from("anime")
-        .update({ nine_anime_slug: slug, updated_at: new Date().toISOString() })
-        .eq("id", dbAnimeId);
-      console.log(`💾 Saved verified 9anime slug "${slug}" for anime ${dbAnimeId}`);
-    } catch (e) {
-      console.log(`⚠️ Failed to save slug: ${e.message}`);
-    }
-  }
-
-  // =========================================================================
-  // HELPER: Update title_english in DB when resolved via Jikan
-  // =========================================================================
-  static async updateTitleEnglish(dbAnimeId, englishTitle) {
-    if (!dbAnimeId || !englishTitle) return;
-    try {
-      await supabase
-        .from("anime")
-        .update({ title_english: englishTitle, updated_at: new Date().toISOString() })
-        .eq("id", dbAnimeId);
-      console.log(`💾 Updated title_english to "${englishTitle}" for anime ${dbAnimeId}`);
-    } catch (e) {
-      console.log(`⚠️ Failed to update title_english: ${e.message}`);
-    }
-  }
-
-  // =========================================================================
-  // HELPER: Calculate title similarity (Jaccard on words + contains check)
-  // =========================================================================
-  static titleSimilarity(title1, title2) {
-    if (!title1 || !title2) return 0;
-
-    const normalise = (s) =>
-      s
-        .toLowerCase()
-        .replace(/[^a-z0-9\s]/g, "")
-        .replace(/\s+/g, " ")
-        .trim();
-
-    const a = normalise(title1);
-    const b = normalise(title2);
-
-    // Exact match
-    if (a === b) return 1.0;
-
-    // Contains check — but penalise large length differences
-    // "one piece" ⊂ "one piece the movie" should NOT score 0.85
-    if (a.includes(b) || b.includes(a)) {
-      const ratio = Math.min(a.length, b.length) / Math.max(a.length, b.length);
-      // Only give high score if the strings are similar in length (ratio > 0.8)
-      // Otherwise scale down: e.g. 9/19 = 0.47 → score ~0.55
-      return ratio >= 0.8 ? 0.9 : 0.4 + ratio * 0.5;
-    }
-
-    // Jaccard similarity on words
-    const wordsA = new Set(a.split(" ").filter((w) => w.length > 1));
-    const wordsB = new Set(b.split(" ").filter((w) => w.length > 1));
-
-    if (wordsA.size === 0 || wordsB.size === 0) return 0;
-
-    const intersection = new Set([...wordsA].filter((w) => wordsB.has(w)));
-    const union = new Set([...wordsA, ...wordsB]);
-    const jaccard = intersection.size / union.size;
-
-    // Also check order-aware similarity with significant words
-    const significantA = [...wordsA].filter((w) => w.length > 2);
-    const significantB = [...wordsB].filter((w) => w.length > 2);
-    const significantMatches = significantA.filter((w) => significantB.includes(w)).length;
-    const significantRatio = significantA.length > 0 ? significantMatches / Math.max(significantA.length, significantB.length) : 0;
-
-    return Math.max(jaccard, significantRatio);
-  }
-
-  // =========================================================================
-  // HELPER: Extract the page title from an HTML response
-  // =========================================================================
-  static extractPageTitle(html) {
-    try {
-      const $ = cheerio.load(html);
-      // Try 9anime-specific title selectors first
-      const pageTitle =
-        $("h1.title").text().trim() ||
-        $("h1").first().text().trim() ||
-        $(".anime-title").text().trim() ||
-        $('meta[property="og:title"]').attr("content")?.trim() ||
-        $("title").text().trim() ||
-        "";
-      // Clean up — remove "Episode X" suffix and site name
-      return pageTitle
-        .replace(/\s*-?\s*episode\s*\d+.*/i, "")
-        .replace(/\s*\|\s*9anime.*/i, "")
-        .replace(/\s*-\s*watch\s*online.*/i, "")
-        .trim();
-    } catch {
-      return "";
-    }
-  }
-
-  // =========================================================================
-  // HELPER: Convert a URL slug back to a human-readable title for comparison
-  // =========================================================================
-  static slugToTitle(urlOrSlug) {
-    try {
-      // Extract slug from URL
-      const slug =
-        urlOrSlug.match(/\/([^\/]+)-episode-\d+/)?.[1] ||
-        urlOrSlug.match(/category\/([^?\/]+)/)?.[1] ||
-        urlOrSlug.match(/anime\/([^?\/]+)/)?.[1] ||
-        urlOrSlug.match(/\/([^\/]+)\/?$/)?.[1] ||
-        urlOrSlug;
-      return slug.replace(/-/g, " ").trim();
-    } catch {
-      return "";
-    }
-  }
-
-  /**
-   * Extract actual HLS stream URL from a bysesayeveum.com/e/{id} URL
-   * by calling their API and decrypting the encrypted playback payload.
-   * Returns the HLS m3u8 URL or null on failure.
-   */
-  static async extractBysesayeveumHLS(byseUrl) {
-    try {
-      const idMatch = byseUrl.match(/bysesayeveum\.com\/e\/([a-zA-Z0-9]+)/);
-      if (!idMatch) return null;
-      const videoId = idMatch[1];
-      console.log("🔍 Extracting HLS from bysesayeveum video:", videoId);
-
-      // Use native https (axios times out on this host)
-      const fetchByseJson = (path) =>
-        new Promise((resolve, reject) => {
-          const req = https.request(
-            {
-              hostname: "bysesayeveum.com",
-              path,
-              method: "GET",
-              headers: {
-                "User-Agent": this.USER_AGENT,
-                Accept: "application/json",
-                Referer: `https://bysesayeveum.com/e/${videoId}`,
-                Origin: "https://bysesayeveum.com",
-              },
-              timeout: 20000,
-            },
-            (res) => {
-              let body = "";
-              res.on("data", (d) => (body += d));
-              res.on("end", () => {
-                try {
-                  resolve(JSON.parse(body));
-                } catch (e) {
-                  reject(new Error("Invalid JSON: " + body.substring(0, 100)));
-                }
-              });
-            }
-          );
-          req.on("error", reject);
-          req.on("timeout", () => {
-            req.destroy();
-            reject(new Error("Request timed out"));
-          });
-          req.end();
-        });
-
-      const data = await fetchByseJson(`/api/videos/${videoId}`);
-      if (!data || !data.playback) {
-        console.log("⚠️ No playback data in bysesayeveum response");
-        return null;
-      }
-
-      const pb = data.playback;
-      if (pb.algorithm !== "AES-256-GCM") {
-        console.log("⚠️ Unknown encryption algorithm:", pb.algorithm);
-        return null;
-      }
-
-      // Helper to decode base64url
-      const b64Decode = (str) => {
-        let b64 = str.replace(/-/g, "+").replace(/_/g, "/");
-        while (b64.length % 4 !== 0) b64 += "=";
-        return Buffer.from(b64, "base64");
-      };
-
-      // Helper to try AES-256-GCM decryption
-      const tryDecrypt = (payload, iv, keyBuf) => {
-        try {
-          const payloadBuf = b64Decode(payload);
-          const ivBuf = b64Decode(iv);
-          // Last 16 bytes = GCM auth tag
-          const authTag = payloadBuf.slice(-16);
-          const ciphertext = payloadBuf.slice(0, -16);
-          const decipher = crypto.createDecipheriv("aes-256-gcm", keyBuf, ivBuf);
-          decipher.setAuthTag(authTag);
-          let decrypted = decipher.update(ciphertext);
-          decrypted = Buffer.concat([decrypted, decipher.final()]);
-          return JSON.parse(decrypted.toString("utf8"));
-        } catch {
-          return null;
-        }
-      };
-
-      // Build possible keys
-      const keyParts = pb.key_parts
-        ? Buffer.concat(pb.key_parts.map(b64Decode))
-        : null;
-      const edgeKey =
-        pb.decrypt_keys && pb.decrypt_keys.edge_1 && pb.decrypt_keys.edge_2
-          ? Buffer.concat([
-              b64Decode(pb.decrypt_keys.edge_1),
-              b64Decode(pb.decrypt_keys.edge_2),
-            ])
-          : null;
-
-      // Try payload1 with key_parts, then payload2 with edge keys
-      const attempts = [];
-      if (keyParts && keyParts.length === 32)
-        attempts.push({ payload: pb.payload, iv: pb.iv, key: keyParts, label: "key_parts→payload1" });
-      if (edgeKey && edgeKey.length === 32)
-        attempts.push({ payload: pb.payload, iv: pb.iv, key: edgeKey, label: "edge→payload1" });
-      if (pb.payload2 && pb.iv2) {
-        if (keyParts && keyParts.length === 32)
-          attempts.push({ payload: pb.payload2, iv: pb.iv2, key: keyParts, label: "key_parts→payload2" });
-        if (edgeKey && edgeKey.length === 32)
-          attempts.push({ payload: pb.payload2, iv: pb.iv2, key: edgeKey, label: "edge→payload2" });
-      }
-
-      for (const attempt of attempts) {
-        const result = tryDecrypt(attempt.payload, attempt.iv, attempt.key);
-        if (result && result.sources && result.sources.length > 0) {
-          const source = result.sources[0];
-          const hlsUrl = source.url
-            .replace(/\\u0026/g, "&")
-            .replace(/&amp;/g, "&");
-          console.log(
-            `✅ Decrypted bysesayeveum HLS [${attempt.label}]: ${source.label} ${source.height}p → ${hlsUrl.substring(0, 80)}...`
-          );
-          return hlsUrl;
-        }
-      }
-
-      console.log("⚠️ Could not decrypt any bysesayeveum playback payload");
-      // Fallback: try embed_frame_url from embed/details endpoint
-      try {
-        const embedData = await fetchByseJson(
-          `/api/videos/${videoId}/embed/details`
-        );
-        if (embedData && embedData.embed_frame_url) {
-          console.log("🔄 Fallback: using embed_frame_url:", embedData.embed_frame_url);
-          return embedData.embed_frame_url;
-        }
-      } catch {}
-      return null;
-    } catch (e) {
-      console.log("⚠️ bysesayeveum HLS extraction failed:", e.message);
-      return null;
-    }
-  }
-
-  /**
-   * Extract HLS stream URL from a vidmoly embed page.
-   * Vidmoly uses JWPlayer with a plain m3u8 URL in the sources array.
-   */
-  static async extractVidmolyHLS(vidmolyUrl) {
-    try {
-      const idMatch = vidmolyUrl.match(/vidmoly\.(?:biz|net)\/embed-([a-zA-Z0-9]+)/);
-      if (!idMatch) return null;
-      const videoId = idMatch[1];
-      // Always use .biz (net redirects to biz)
-      const embedUrl = `https://vidmoly.biz/embed-${videoId}.html`;
-      console.log("🔍 Extracting HLS from vidmoly:", embedUrl);
-
-      const resp = await axios.get(embedUrl, {
-        headers: {
-          "User-Agent": this.USER_AGENT,
-          Referer: "https://9anime.org.lv/",
-          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        },
-        timeout: 15000,
-        maxRedirects: 5,
-      });
-
-      const html = resp.data;
-      // JWPlayer setup: sources: [{ file: 'https://...master.m3u8?...' }]
-      const m3u8Match = html.match(/sources\s*:\s*\[\s*\{\s*file\s*:\s*['"]([^'"]*\.m3u8[^'"]*)['"]/);
-      if (m3u8Match && m3u8Match[1]) {
-        console.log("✅ Extracted vidmoly HLS:", m3u8Match[1].substring(0, 80) + "...");
-        return m3u8Match[1];
-      }
-
-      // Fallback: any m3u8 URL in the page
-      const fallback = html.match(/https?:\/\/[^"'\s]*\.m3u8[^"'\s]*/);
-      if (fallback) {
-        console.log("✅ Extracted vidmoly HLS (fallback):", fallback[0].substring(0, 80) + "...");
-        return fallback[0];
-      }
-
-      console.log("⚠️ No m3u8 URL found in vidmoly page");
-      return null;
-    } catch (e) {
-      console.log("⚠️ vidmoly HLS extraction failed:", e.message);
-      return null;
-    }
-  }
-
-  /**
-   * Extract actual HLS stream URL from a megaplay/megacloud embed URL.
-   * Megaplay embeds use encrypted payloads similar to bysesayeveum.
-   * Supports: megaplay.buzz, megacloud.blog, megacloud.tv, megastream, megabackup, megacdn
-   *
-   * Strategy:
-   *  1. Fetch the embed page HTML
-   *  2. Extract any inline m3u8 URLs or JS-packed source config
-   *  3. If encrypted, try /api/source/{id} and /ajax/embed/{id}/getSources
-   *  4. Decrypt AES payloads if needed
-   *  5. Return the m3u8 URL
-   */
-  static async extractMegaHLS(megaUrl) {
-    try {
-      // Parse ID from the mega embed URL
-      // Handles: megaplay.buzz/embed/{id}, megacloud.blog/embed/{id}, etc.
-      const idMatch = megaUrl.match(
-        /mega(?:play|cloud|backup|cdn|stream)[^/]*\/(?:embed|e)\/([a-zA-Z0-9]+)/i
-      );
-      if (!idMatch) {
-        console.log("⚠️ Could not parse mega video ID from:", megaUrl);
-        return null;
-      }
-      const videoId = idMatch[1];
-
-      // Extract the host from the URL
-      const hostMatch = megaUrl.match(/https?:\/\/([^/]+)/);
-      if (!hostMatch) return null;
-      const megaHost = hostMatch[1];
-
-      console.log(`🔍 Extracting HLS from mega embed: ${megaHost}/embed/${videoId}`);
-
-      const headers = {
-        "User-Agent": this.USER_AGENT,
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        Referer: `https://${megaHost}/embed/${videoId}`,
-        Origin: `https://${megaHost}`,
-      };
-
-      // --- Method 1: Fetch the embed page and look for inline m3u8 ---
-      try {
-        const embedRes = await axios.get(
-          `https://${megaHost}/embed/${videoId}`,
-          { headers, timeout: 15000, maxRedirects: 5 }
-        );
-        const html = embedRes.data;
-
-        // Check for direct m3u8 in the page source
-        const m3u8Direct = html.match(
-          /["'](https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)["']/i
-        );
-        if (m3u8Direct) {
-          const hlsUrl = m3u8Direct[1].replace(/\\u0026/g, "&").replace(/&amp;/g, "&");
-          console.log("✅ Found direct m3u8 in mega embed page:", hlsUrl.substring(0, 80));
-          return hlsUrl;
-        }
-
-        // Check for sources array in embedded JS
-        const sourcesMatch = html.match(
-          /sources\s*[:=]\s*\[\s*\{[^}]*["']?(?:file|src|url)["']?\s*:\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i
-        );
-        if (sourcesMatch) {
-          const hlsUrl = sourcesMatch[1].replace(/\\u0026/g, "&").replace(/&amp;/g, "&");
-          console.log("✅ Found m3u8 in mega sources config:", hlsUrl.substring(0, 80));
-          return hlsUrl;
-        }
-      } catch (e) {
-        console.log("⚠️ Mega embed page fetch failed:", e.message);
-      }
-
-      // --- Method 2: Try the getSources AJAX endpoint ---
-      const ajaxPaths = [
-        `/ajax/embed/${videoId}/getSources`,
-        `/api/source/${videoId}`,
-        `/ajax/v2/embed/${videoId}/getSources`,
-      ];
-
-      for (const path of ajaxPaths) {
-        try {
-          const res = await axios.get(`https://${megaHost}${path}`, {
-            headers: {
-              ...headers,
-              Accept: "application/json",
-              "X-Requested-With": "XMLHttpRequest",
-            },
-            timeout: 12000,
-          });
-
-          const data = res.data;
-          if (!data) continue;
-
-          // Case A: sources is a plain array (unencrypted)
-          if (Array.isArray(data.sources) && data.sources.length > 0) {
-            const src = data.sources[0];
-            const hlsUrl = (src.file || src.url || src.src || "")
-              .replace(/\\u0026/g, "&")
-              .replace(/&amp;/g, "&");
-            if (hlsUrl.includes(".m3u8") || hlsUrl.includes("master")) {
-              console.log(`✅ Mega getSources [${path}] unencrypted:`, hlsUrl.substring(0, 80));
-              return hlsUrl;
-            }
-          }
-
-          // Case B: sources is an encrypted string
-          if (typeof data.sources === "string" && data.sources.length > 50) {
-            console.log(`🔐 Mega getSources [${path}] returned encrypted payload, attempting decrypt...`);
-
-            const decrypted = this._tryDecryptMegaPayload(data);
-            if (decrypted) {
-              console.log("✅ Mega decrypted HLS:", decrypted.substring(0, 80));
-              return decrypted;
-            }
-          }
-
-          // Case C: data has direct URL field
-          if (data.url && (data.url.includes(".m3u8") || data.url.includes("master"))) {
-            console.log(`✅ Mega source URL [${path}]:`, data.url.substring(0, 80));
-            return data.url;
-          }
-        } catch (e) {
-          // 403/404 expected for some paths, continue
-          if (e.response?.status !== 403 && e.response?.status !== 404) {
-            console.log(`⚠️ Mega AJAX [${path}] failed:`, e.message);
-          }
-        }
-      }
-
-      console.log("⚠️ All mega extraction methods failed for:", megaUrl);
-      return null;
-    } catch (e) {
-      console.log("⚠️ Mega HLS extraction failed:", e.message);
-      return null;
-    }
-  }
-
-  /**
-   * Try to decrypt an encrypted mega sources payload.
-   * Mega embeds sometimes use AES encryption on the sources JSON.
-   */
-  static _tryDecryptMegaPayload(data) {
-    try {
-      const b64Decode = (str) => {
-        let b64 = str.replace(/-/g, "+").replace(/_/g, "/");
-        while (b64.length % 4 !== 0) b64 += "=";
-        return Buffer.from(b64, "base64");
-      };
-
-      const tryDecrypt = (payload, key, iv, algo) => {
-        try {
-          const payloadBuf = b64Decode(payload);
-          const keyBuf = typeof key === "string" ? b64Decode(key) : key;
-          const ivBuf = typeof iv === "string" ? b64Decode(iv) : iv;
-
-          if (algo === "aes-256-gcm" || algo === "AES-256-GCM") {
-            const authTag = payloadBuf.slice(-16);
-            const ciphertext = payloadBuf.slice(0, -16);
-            const decipher = crypto.createDecipheriv("aes-256-gcm", keyBuf, ivBuf);
-            decipher.setAuthTag(authTag);
-            let decrypted = decipher.update(ciphertext);
-            decrypted = Buffer.concat([decrypted, decipher.final()]);
-            return JSON.parse(decrypted.toString("utf8"));
-          } else {
-            // AES-256-CBC fallback
-            const decipher = crypto.createDecipheriv("aes-256-cbc", keyBuf, ivBuf);
-            let decrypted = decipher.update(payloadBuf);
-            decrypted = Buffer.concat([decrypted, decipher.final()]);
-            return JSON.parse(decrypted.toString("utf8"));
-          }
-        } catch {
-          return null;
-        }
-      };
-
-      const payload = data.sources;
-      const algo = data.algorithm || data.enc_algorithm || "aes-256-gcm";
-
-      // Try various key/iv source locations
-      const keyLocations = [
-        { key: data.key, iv: data.iv },
-        { key: data.decryptKey, iv: data.decryptIv },
-        { key: data.k, iv: data.iv },
-      ];
-
-      if (data.key_parts) {
-        const keyBuf = Buffer.concat(data.key_parts.map(b64Decode));
-        if (keyBuf.length === 32) {
-          keyLocations.unshift({ key: keyBuf, iv: data.iv });
-        }
-      }
-
-      if (data.decrypt_keys) {
-        const dk = data.decrypt_keys;
-        if (dk.edge_1 && dk.edge_2) {
-          const keyBuf = Buffer.concat([b64Decode(dk.edge_1), b64Decode(dk.edge_2)]);
-          if (keyBuf.length === 32) {
-            keyLocations.unshift({ key: keyBuf, iv: data.iv || data.iv2 });
-          }
-        }
-      }
-
-      for (const { key, iv } of keyLocations) {
-        if (!key || !iv) continue;
-        const result = tryDecrypt(payload, key, iv, algo);
-        if (result) {
-          // Result might be an array of sources or an object with sources
-          const sources = Array.isArray(result) ? result : result.sources || [result];
-          if (sources.length > 0) {
-            const src = sources[0];
-            const url = (src.file || src.url || src.src || "")
-              .replace(/\\u0026/g, "&")
-              .replace(/&amp;/g, "&");
-            if (url) return url;
-          }
-        }
-      }
-
-      return null;
-    } catch (e) {
-      console.log("⚠️ Mega payload decryption failed:", e.message);
-      return null;
-    }
-  }
-
-  static async extractVideoWithPuppeteer(
-    animeLink,
-    animeId,
-    episodeNumber,
-    options
-  ) {
-    // Cache extracted stream briefly
-    try {
-      const cached = await cacheGet(`stream:${animeId}:${episodeNumber}`);
-      if (cached) return cached;
-    } catch {}
-    let browser;
-    let context;
-
-    try {
-      console.log("🎥 Extracting video with Puppeteer from 9anime...");
-
-      browser = await getBrowser();
-      if (!browser) {
-        throw new Error("Failed to initialize browser");
-      }
-
-      // Verify browser has newContext method
-      if (typeof browser.newContext !== "function") {
-        throw new Error(
-          `Browser instance does not have newContext method. Browser type: ${typeof browser}, has newContext: ${
-            "newContext" in browser
-          }`
-        );
-      }
-
-      try {
-        context = await browser.newContext({
-          userAgent: this.USER_AGENT,
-          viewport: { width: 1280, height: 720 },
-          bypassCSP: true,
-          javaScriptEnabled: true,
-          extraHTTPHeaders: {
-            Accept:
-              "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.5",
-            "Accept-Encoding": "gzip, deflate",
-            DNT: "1",
-            Connection: "keep-alive",
-            "Upgrade-Insecure-Requests": "1",
-          },
-        });
-
-        if (!context) {
-          throw new Error("browser.newContext() returned null/undefined");
-        }
-      } catch (contextError) {
-        console.error("❌ Failed to create browser context:", contextError);
-        throw new Error(
-          `Failed to create browser context: ${contextError.message}`
-        );
-      }
-
-      const page = await context.newPage();
-
-      // Navigate to the anime page with minimal timeout
-      try {
-        await page.goto(animeLink, {
-          waitUntil: "domcontentloaded",
-          timeout: 10000,
-        });
-        console.log("✅ Page loaded successfully");
-      } catch (gotoError) {
-        console.log("⚠️ Page goto failed, trying with load event...");
-        try {
-          await page.goto(animeLink, { waitUntil: "load", timeout: 5000 });
-          console.log("✅ Page loaded with load event");
-        } catch (loadError) {
-          console.log("⚠️ Page load also failed, continuing anyway...");
-        }
-      }
-
-      // Wait briefly for any dynamic content
-      await page.waitForTimeout(2000);
-
-      // Try to find iframe elements (this is what we want!)
-      let streamUrl = "";
-
-      // Method 1: Look for 9anime specific video containers
-      try {
-        // 9anime usually has video players in specific containers
-        const videoContainers = [
-          ".player-embed iframe",
-          ".player iframe",
-          ".video-player iframe",
-          "#player iframe",
-          ".anime-video iframe",
-          'iframe[src*="embed"]',
-          'iframe[src*="player"]',
-          "iframe",
-        ];
-
-        for (const selector of videoContainers) {
-          try {
-            const iframe = await page.$(selector);
-            if (iframe) {
-              const src = await iframe.getAttribute("src");
-              // Normalize protocol-relative URLs (//vidmoly.net/...) to https
-              const normalizedSrc = src && src.startsWith('//') ? 'https:' + src : src;
-              if (normalizedSrc && (normalizedSrc.includes("https") || normalizedSrc.includes("http"))) {
-                streamUrl = normalizedSrc;
-                console.log("✅ Found 9anime iframe:", streamUrl);
-
-                // If Mega or vidmoly is already on the main page, use it directly (no further navigation)
-                if (streamUrl.match(/mega(play|cloud|backup|cdn|stream)/i) || streamUrl.match(/vidmoly\.(biz|net)/i)) {
-                  console.log(
-                    "🎯 Using video URL directly from main page:",
-                    src
-                  );
-                  break;
-                }
-
-                // If it's a gogoanime URL, try to get the actual video source
-                if (
-                  src.includes("gogoanime.me.uk") ||
-                  src.includes("gogoanime")
-                ) {
-                  console.log(
-                    "🔍 Found gogoanime URL, extracting megaplay source..."
-                  );
-
-                  // Method 1: Try to fetch gogoanime page and extract megaplay URL
-                  try {
-                    console.log("📥 Fetching gogoanime page:", src);
-                    const gogoResponse = await axios.get(src, {
-                      headers: {
-                        "User-Agent": this.USER_AGENT,
-                        Accept:
-                          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                        "Accept-Language": "en-US,en;q=0.9",
-                        Referer: "https://9anime.org.lv/",
-                      },
-                      timeout: 15000,
-                      maxRedirects: 5,
-                    });
-
-                    const gogoHtml = gogoResponse.data;
-                    console.log("📄 Gogoanime HTML length:", gogoHtml.length);
-
-                    // Multiple patterns to find megaplay or vidmoly URL
-                    const patterns = [
-                      // Standard iframe src (mega or vidmoly)
-                      /<iframe[^>]*src=["']([^"']*(?:megaplay|vidmoly)[^"']*)["']/gi,
-                      // data-src attribute
-                      /<iframe[^>]*data-src=["']([^"']*(?:megaplay|vidmoly)[^"']*)["']/gi,
-                      // JavaScript variable assignments
-                      /src\s*[=:]\s*["']([^"']*(?:megaplay|vidmoly)[^"']*)["']/gi,
-                      // URL in quotes anywhere
-                      /["']([^"']*(?:megaplay\.buzz|vidmoly\.(?:biz|net))[^"']*)["']/gi,
-                      // Broader pattern for any mega-related URL
-                      /https?:\/\/[^"'\s]*megaplay[^"'\s]*/gi,
-                      // Vidmoly embed pattern (with or without protocol)
-                      /(?:https?:)?\/\/vidmoly\.(?:biz|net)\/embed-[^"'\s]*/gi,
-                    ];
-
-                    for (const pattern of patterns) {
-                      const matches = [...gogoHtml.matchAll(pattern)];
-                      if (matches.length > 0) {
-                        console.log(
-                          `🔍 Found ${matches.length} matches with pattern:`,
-                          pattern.toString().substring(0, 50)
-                        );
-                        for (const match of matches) {
-                          let url = match[1] || match[0];
-                          // Normalize protocol-relative URLs
-                          if (url && url.startsWith('//')) url = 'https:' + url;
-                          if (
-                            url &&
-                            url.startsWith("http") &&
-                            (url.match(/mega(play|cloud|backup|cdn|stream)/i) || url.match(/vidmoly\.(biz|net)/i))
-                          ) {
-                            streamUrl = url.replace(/["']/g, "").trim();
-                            console.log("✅ Found video URL:", streamUrl);
-                            break;
-                          }
-                        }
-                        if (
-                          streamUrl &&
-                          (streamUrl.match(/mega(play|cloud|backup|cdn|stream)/i) || streamUrl.match(/vidmoly\.(biz|net)/i))
-                        )
-                          break;
-                      }
-                    }
-
-                    // Additional fallback: Look for any video player iframe
-                    if (!streamUrl || !(streamUrl.includes("megaplay") || streamUrl.includes("vidmoly."))) {
-                      const anyIframeMatch = gogoHtml.match(
-                        /<iframe[^>]*src=["']([^"']*(?:player|embed|stream)[^"']*)["']/i
-                      );
-                      if (anyIframeMatch && anyIframeMatch[1]) {
-                        streamUrl = anyIframeMatch[1];
-                        console.log(
-                          "✅ Found alternative video player:",
-                          streamUrl
-                        );
-                      }
-                    }
-                  } catch (fetchErr) {
-                    console.log(
-                      "⚠️ Failed to fetch gogoanime page:",
-                      fetchErr.message
-                    );
-                  }
-
-                  // Method 2: Try using Playwright to navigate to gogoanime page
-                  if (
-                    !streamUrl ||
-                    !(streamUrl.match(/mega(play|cloud|backup|cdn|stream)/i) || streamUrl.match(/vidmoly\.(biz|net)/i))
-                  ) {
-                    try {
-                      console.log(
-                        "🌐 Trying Playwright navigation to gogoanime..."
-                      );
-                      const innerFrame = await iframe.contentFrame();
-                      if (innerFrame) {
-                        // Wait for nested iframes
-                        await innerFrame.waitForTimeout(3000);
-
-                        // Try to find any mega-related iframe
-                        const iframeSelectors = [
-                          'iframe[src*="megaplay"]',
-                          'iframe[src*="megacloud"]',
-                          'iframe[src*="megabackup"]',
-                          'iframe[data-src*="mega"]',
-                          'iframe[src*="embed"]',
-                          "iframe",
-                        ];
-
-                        for (const selector of iframeSelectors) {
-                          const nested = await innerFrame
-                            .$(selector)
-                            .catch(() => null);
-                          if (nested) {
-                            let nestedSrc =
-                              (await nested.getAttribute("src")) ||
-                              (await nested.getAttribute("data-src"));
-                            if (!nestedSrc) {
-                              nestedSrc = await nested
-                                .evaluate(
-                                  (el) => el.src || el.getAttribute("data-src")
-                                )
-                                .catch(() => null);
-                            }
-                            if (
-                              nestedSrc &&
-                              (nestedSrc.match(
-                                /mega(play|cloud|backup|cdn|stream)/i
-                              ) ||
-                                nestedSrc.includes("embed"))
-                            ) {
-                              streamUrl = nestedSrc;
-                              console.log(
-                                "✅ Found video source via Playwright:",
-                                streamUrl
-                              );
-                              break;
-                            }
-                          }
-                        }
-                      }
-                    } catch (nestedErr) {
-                      console.log(
-                        "⚠️ Playwright navigation failed:",
-                        nestedErr.message
-                      );
-                    }
-                  }
-
-                  // If we still don't have a mega URL, log what we found
-                  if (
-                    streamUrl &&
-                    !streamUrl.match(/mega(play|cloud|backup|cdn|stream)/i)
-                  ) {
-                    console.log(
-                      "⚠️ Could not find mega URL, using:",
-                      streamUrl
-                    );
-                  }
-                }
-
-                // If it's a 2anime URL, try to get the actual video source
-                if (src.includes("2anime.xyz")) {
-                  console.log(
-                    "🔍 Found 2anime URL, extracting actual video source..."
-                  );
-                  try {
-                    const animeResponse = await axios.get(src, {
-                      headers: { "User-Agent": this.USER_AGENT },
-                      timeout: 10000,
-                    });
-
-                    const animeHtml = animeResponse.data;
-
-                    // Look for various video sources in 2anime pages (including all mega variants)
-                    const videoPatterns = [
-                      /<iframe[^>]+data-src=["']([^"']+)["'][^>]*>/i,
-                      /<iframe[^>]+src=["']([^"']*mega(?:play|cloud|backup|cdn|stream)[^"']*)["'][^>]*>/i,
-                      /<iframe[^>]+src=["']([^"']*stream[^"']*)["'][^>]*>/i,
-                      /<iframe[^>]+src=["']([^"']*2m\.2anime[^"']*)["'][^>]*>/i,
-                      /<video[^>]+src=["']([^"']*)["'][^>]*>/i,
-                      /"file":"([^"]+)"/i,
-                      /"url":"([^"]+)"/i,
-                    ];
-
-                    for (const pattern of videoPatterns) {
-                      const match = animeHtml.match(pattern);
-                      if (match && match[1] && match[1].includes("http")) {
-                        streamUrl = match[1];
-                        console.log(
-                          "✅ Found actual video source from 2anime:",
-                          streamUrl
-                        );
-                        break;
-                      }
-                    }
-                  } catch (e) {
-                    console.log(
-                      "⚠️ Could not extract video source from 2anime:",
-                      e.message
-                    );
-                  }
-                }
-
-                break;
-              }
-            }
-          } catch (e) {
-            // Continue to next selector
-          }
-        }
-      } catch (e) {
-        console.log("No 9anime iframe found, trying other methods...");
-      }
-
-      // Method 2: Look for video elements
-      if (!streamUrl) {
-        try {
-          await page.waitForSelector("video", { timeout: 15000 });
-          const videoSrc = await page.$eval("video", (el) => el.src);
-          if (videoSrc) {
-            streamUrl = videoSrc;
-            console.log("✅ Found video source:", streamUrl);
-          }
-        } catch (e) {
-          console.log("No video element found...");
-        }
-      }
-
-      // Method 3: Extract from page content (9anime specific patterns)
-      if (!streamUrl) {
-        const pageContent = await page.content();
-        console.log("🔍 Searching 9anime page content for video URLs...");
-
-        // 9anime specific patterns
-        const patterns = [
-          /<iframe[^>]+src=["']([^"']*embed[^"']*)["'][^>]*>/gi,
-          /<iframe[^>]+src=["']([^"']*player[^"']*)["'][^>]*>/gi,
-          /iframe\.src\s*=\s*["']([^"']+)["']/gi,
-          /data-src=["']([^"']*embed[^"']*)["']/gi,
-          /src\s*:\s*["']([^"']*embed[^"']*)["']/gi,
-          /"url"\s*:\s*"([^"]*embed[^"]*)"/gi,
-          /"src"\s*:\s*"([^"]*embed[^"]*)"/gi,
-        ];
-
-        for (const pattern of patterns) {
-          const matches = pageContent.match(pattern);
-          if (matches && matches.length > 0) {
-            console.log(`Found ${matches.length} matches with 9anime pattern`);
-            for (const match of matches) {
-              const url = match
-                .replace(/<iframe[^>]+src=["']/, "")
-                .replace(/["'][^>]*>/, "")
-                .replace(/iframe\.src\s*=\s*["']/, "")
-                .replace(/["']/, "")
-                .replace(/data-src=["']/, "")
-                .replace(/["']/, "")
-                .replace(/src\s*:\s*["']/, "")
-                .replace(/["']/, "")
-                .replace(/"url"\s*:\s*"/, "")
-                .replace(/"/, "")
-                .replace(/"src"\s*:\s*"/, "")
-                .replace(/"/, "");
-
-              if (
-                url &&
-                url.includes("http") &&
-                (url.includes("embed") || url.includes("player"))
-              ) {
-                // Decode HTML entities (e.g. &amp; → &)
-                streamUrl = url.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
-                console.log(
-                  "✅ Found 9anime video URL in page content:",
-                  streamUrl
-                );
-                break;
-              }
-            }
-            if (streamUrl) break;
-          }
-        }
-      }
-
-      // Method 3b: If we found a gogoanime URL from page content, extract the megaplay/vidmoly source
-      if (streamUrl && (streamUrl.includes("gogoanime.me.uk") || streamUrl.includes("gogoanime")) && !streamUrl.match(/mega(play|cloud|backup|cdn|stream)/i) && !streamUrl.match(/vidmoly\.(biz|net)/i)) {
-        console.log("🔍 Page content returned gogoanime URL, extracting video source...");
-        try {
-          const gogoResponse = await axios.get(streamUrl, {
-            headers: {
-              "User-Agent": this.USER_AGENT,
-              Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-              "Accept-Language": "en-US,en;q=0.9",
-              Referer: "https://9anime.org.lv/",
-            },
-            timeout: 15000,
-            maxRedirects: 5,
-          });
-
-          const gogoHtml = gogoResponse.data;
-          console.log("📄 Gogoanime HTML length:", gogoHtml.length);
-
-          const megaPatterns = [
-            /<iframe[^>]*src=["']([^"']*(?:megaplay|vidmoly)[^"']*)["']/gi,
-            /<iframe[^>]*data-src=["']([^"']*(?:megaplay|vidmoly)[^"']*)["']/gi,
-            /src\s*[=:]\s*["']([^"']*(?:megaplay|vidmoly)[^"']*)["']/gi,
-            /["']([^"']*(?:megaplay\.buzz|vidmoly\.(?:biz|net))[^"']*)["']/gi,
-            /https?:\/\/[^"'\s]*megaplay[^"'\s]*/gi,
-            /(?:https?:)?\/\/vidmoly\.(?:biz|net)\/embed-[^"'\s]*/gi,
-          ];
-
-          for (const pattern of megaPatterns) {
-            const matches = [...gogoHtml.matchAll(pattern)];
-            if (matches.length > 0) {
-              console.log(`🔍 Found ${matches.length} matches with pattern:`, pattern.toString().substring(0, 50));
-              for (const match of matches) {
-                let url = match[1] || match[0];
-                // Normalize protocol-relative URLs
-                if (url && url.startsWith('//')) url = 'https:' + url;
-                if (url && url.startsWith("http") && (url.match(/mega(play|cloud|backup|cdn|stream)/i) || url.match(/vidmoly\.(biz|net)/i))) {
-                  streamUrl = url.replace(/["']/g, "").trim();
-                  console.log("✅ Found video URL from gogoanime fallback:", streamUrl);
-                  break;
-                }
-              }
-              if (streamUrl && (streamUrl.match(/mega(play|cloud|backup|cdn|stream)/i) || streamUrl.match(/vidmoly\.(biz|net)/i))) break;
-            }
-          }
-        } catch (fetchErr) {
-          console.log("⚠️ Failed to fetch gogoanime page for megaplay extraction:", fetchErr.message);
-        }
-      }
-
-      // Method 4: If no actual stream URL was found, return an error
-      // instead of saving the anime page URL as a fake video source
-      if (!streamUrl) {
-        console.log("❌ Could not extract any video/embed URL from:", animeLink);
-
-        if (context) {
-          await context.close().catch(err => console.warn('Failed to close context:', err));
-        }
-        return {
-          success: false,
-          error: `No video stream found for episode. The anime page loaded but no embeddable player was detected.`,
-        };
-      }
-
-      console.log("🎉 Final 9anime URL:", streamUrl);
-
-      // bysesayeveum.com/e/ URLs are used as-is in sandboxed iframe (blocks ad redirects)
-
-      console.log(
-        "🔍 DEBUG: streamUrl type:",
-        typeof streamUrl,
-        "value:",
-        streamUrl
-      );
-      console.log(
-        "🔍 DEBUG: Is mega URL?",
-        streamUrl.match(/mega(play|cloud|backup|cdn|stream)/i) ? "YES" : "NO"
-      );
-
-      if (context) {
-        await context
-          .close()
-          .catch((err) => console.warn("Failed to close context:", err));
-      }
-
-      const payload = {
-        success: true,
-        streamUrl,
-        episodeData: {
-          animeId,
-          extractedAt: new Date(),
-        },
-      };
-      console.log(
-        "📦 DEBUG: Returning payload with streamUrl:",
-        payload.streamUrl
-      );
-      try {
-        await cacheSet(`stream:${animeId}:${episodeNumber}`, payload, 120_000);
-      } catch {}
-      return payload;
-    } catch (error) {
-      console.error("❌ Error in extractVideoWithPuppeteer:", error.message);
-      if (context) {
-        await context
-          .close()
-          .catch((err) =>
-            console.warn("Failed to close context in catch:", err)
-          );
-      }
-      return { success: false, error: error.message };
-    }
-  }
-
-  static async saveEpisodeToDatabase(episodeData) {
-    try {
-      console.log(
-        "💾 DEBUG: saveEpisodeToDatabase called with videoUrl:",
-        episodeData.videoUrl
-      );
-
-      // Check if a stub already exists (from Jikan import) — if so, only update video_url
-      const { data: existing } = await supabase
-        .from("episodes")
-        .select("id, title, description, thumbnail_url")
-        .eq("anime_id", episodeData.animeId)
-        .eq("episode_number", episodeData.episodeNumber)
-        .maybeSingle();
-
-      if (existing) {
-        // Stub exists — only update video_url and duration, preserve title/description/thumbnail
-        console.log(`💾 Updating existing episode stub (keeping title: "${existing.title}")`);
-        const { error } = await supabase
-          .from("episodes")
-          .update({
-            video_url: episodeData.videoUrl,
-            duration: episodeData.duration,
-          })
-          .eq("id", existing.id);
-
-        if (error) {
-          console.error("❌ DB Error:", error.message);
-          return { success: false, error: error.message };
-        }
-        console.log("🎉 Stream saved to Supabase with URL:", episodeData.videoUrl);
-        return { success: true };
-      }
-
-      // No existing stub — insert full record
-      const dataToSave = {
-        anime_id: episodeData.animeId,
-        episode_number: episodeData.episodeNumber,
-        title: episodeData.title,
-        video_url: episodeData.videoUrl,
-        thumbnail_url: episodeData.thumbnailUrl,
-        duration: episodeData.duration,
-        description: episodeData.description,
-        created_at: episodeData.createdAt.toISOString(),
-      };
-
-      console.log(
-        "💾 DEBUG: Inserting new episode:",
-        JSON.stringify(dataToSave, null, 2)
-      );
-
-      const { error } = await supabase
-        .from("episodes")
-        .upsert(dataToSave, { onConflict: ["anime_id", "episode_number"] });
-
-      if (error) {
-        console.error("❌ DB Error:", error.message);
-        return { success: false, error: error.message };
-      }
-      console.log(
-        "🎉 Stream saved to Supabase with URL:",
-        episodeData.videoUrl
-      );
-      return { success: true };
-    } catch (error) {
-      console.error("❌ Save Error:", error.message);
-      return { success: false, error: error.message };
-    }
-  }
-
-  static async scrapeAndSaveEpisode(
-    animeTitle,
-    animeId,
-    episodeNumber = 1,
-    options = {}
-  ) {
-    try {
-      const scrapeResult = await this.scrapeAnimeEpisode(
-        animeTitle,
-        episodeNumber,
-        { ...options, dbAnimeId: animeId }
-      );
-      console.log("🔍 DEBUG: scrapeResult.streamUrl:", scrapeResult.streamUrl);
-
-      if (scrapeResult.success && scrapeResult.streamUrl) {
-        // Look up the anime's poster from DB to use as thumbnail instead of
-        // a hardcoded AniList URL pattern that produces broken images
-        let thumbnailUrl = null;
-        try {
-          const { data: animeRow } = await supabase
-            .from('anime')
-            .select('poster_url')
-            .eq('id', animeId)
-            .single();
-          thumbnailUrl = animeRow?.poster_url || null;
-        } catch {}
-
-        const episodeData = {
-          animeId: animeId,
-          episodeNumber: episodeNumber,
-          title: `${animeTitle} - Episode ${episodeNumber}`,
-          videoUrl: scrapeResult.streamUrl,
-          thumbnailUrl,
-          duration: 1440, // Default to 24 mins
-          description: `Episode ${episodeNumber} of ${animeTitle}`,
-          createdAt: new Date(),
-        };
-        console.log(
-          "💾 DEBUG: Saving to database with videoUrl:",
-          episodeData.videoUrl
-        );
-
-        const saveResult = await this.saveEpisodeToDatabase(episodeData);
-
-        if (saveResult.success) {
-          return {
-            success: true,
-            streamUrl: scrapeResult.streamUrl,
-            episodeData: episodeData,
-          };
-        } else {
-          return {
-            success: false,
-            error: saveResult.error,
-          };
-        }
-      } else {
-        return scrapeResult;
-      }
-    } catch (error) {
-      return {
-        success: false,
-        error: error.message,
-      };
-    }
-  }
-}
+// Scraper service
+import { NineAnimeScraperService } from "./scrapers/nineanime.js";
+import { ReAnimeScraperService } from "./scrapers/reanime.js";
 
 // Health check endpoint
 // Health check endpoints (use new handlers)
@@ -2487,7 +413,22 @@ async function loadVideo() {
       const hls = new Hls({ enableWorker: true, lowLatencyMode: false, maxBufferLength: 30 });
       hls.loadSource(hlsUrl);
       hls.attachMedia(video);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => { loader.style.display = 'none'; var st = ${startTime}; if (st > 0) video.currentTime = st; video.play().catch(()=>{}); });
+      hls.on(Hls.Events.MANIFEST_PARSED, () => { 
+        loader.style.display = 'none'; 
+        video.play().catch(()=>{}); 
+      });
+      let seeked = false;
+      const seekToStart = () => {
+        if (seeked) return;
+        var st = ${startTime};
+        if (st > 0 && video.readyState >= 2) {
+          video.currentTime = st;
+          seeked = true;
+          console.log('✅ Bulletproof seeked to:', st);
+        }
+      };
+      video.addEventListener('play', seekToStart);
+      video.addEventListener('playing', seekToStart);
       hls.on(Hls.Events.ERROR, (e, d) => {
         if (d.fatal) {
           console.error('HLS fatal error:', d);
@@ -2593,7 +534,22 @@ async function loadVideo() {
       const hls = new Hls({ enableWorker: true, lowLatencyMode: false, maxBufferLength: 30 });
       hls.loadSource(hlsUrl);
       hls.attachMedia(video);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => { loader.style.display = 'none'; var st = ${startTime}; if (st > 0) video.currentTime = st; video.play().catch(()=>{}); });
+      hls.on(Hls.Events.MANIFEST_PARSED, () => { 
+        loader.style.display = 'none'; 
+        video.play().catch(()=>{}); 
+      });
+      let seeked = false;
+      const seekToStart = () => {
+        if (seeked) return;
+        var st = ${startTime};
+        if (st > 0 && video.readyState >= 2) {
+          video.currentTime = st;
+          seeked = true;
+          console.log('✅ Bulletproof seeked to:', st);
+        }
+      };
+      video.addEventListener('play', seekToStart);
+      video.addEventListener('playing', seekToStart);
       hls.on(Hls.Events.ERROR, (e, d) => {
         if (d.fatal) {
           console.error('HLS fatal error:', d);
@@ -2691,7 +647,7 @@ app.get("/api/mega-embed/:host/:id", async (req, res) => {
 </style>
 </head><body>
 <div id="loader"><div class="spinner"></div></div>
-<iframe id="player" src="${megaUrl}?autoplay=1" allow="autoplay; fullscreen; encrypted-media" allowfullscreen sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-presentation"></iframe>
+<iframe id="player" src="${megaUrl}?autoplay=1${startTime > 0 ? `&start=${startTime}&t=${startTime}` : ''}" allow="autoplay; fullscreen; encrypted-media" allowfullscreen sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-presentation"></iframe>
 <script>
 const iframe = document.getElementById('player');
 const loader = document.getElementById('loader');
@@ -2705,17 +661,13 @@ iframe.addEventListener('load', () => {
   setTimeout(() => loader.style.display = 'none', 300);
   started = true;
   watchStart = Date.now();
-  // Focus iframe so keyboard shortcuts (space = play/pause) work immediately
   iframe.focus();
 });
 
-// If the embed URL with /embed/ gets blocked, try /e/
 iframe.addEventListener('error', () => {
-  iframe.src = ${JSON.stringify(megaUrlAlt + '?autoplay=1')};
+  iframe.src = ${JSON.stringify(megaUrlAlt + '?autoplay=1')} + (${startTime} > 0 ? '&start=' + ${startTime} + '&t=' + ${startTime} : '');
 });
 
-// Since we can't read cross-origin iframe video state,
-// use time-based estimation (same approach as IframePlayer's estimated mode)
 setInterval(() => {
   if (!started || document.hidden) return;
   const elapsed = (Date.now() - watchStart) / 1000 + startOffset;
@@ -2819,6 +771,622 @@ app.post("/api/scrape-episode", async (req, res) => {
       success: false,
       error: error.message || "Internal server error",
     });
+  }
+});
+
+// ============================================================
+// SCRAPER URL CACHE — persists resolved watch URLs per anime
+// ============================================================
+
+// GET: Read cached scraper URLs for an anime
+app.get("/api/scraper-cache/:animeId", async (req, res) => {
+  try {
+    const { animeId } = req.params;
+    const { data, error } = await supabase
+      .from("anime")
+      .select("scraper_urls")
+      .eq("id", animeId)
+      .single();
+
+    if (error) {
+      return res.status(404).json({ success: false, error: error.message });
+    }
+
+    res.json({ success: true, scraper_urls: data?.scraper_urls || {} });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST: Save/update a scraper URL for an anime
+app.post("/api/scraper-cache", async (req, res) => {
+  try {
+    const { animeId, scraper, url } = req.body;
+    if (!animeId || !scraper || !url) {
+      return res.status(400).json({ success: false, error: "animeId, scraper, and url are required" });
+    }
+
+    // Read existing cache first, then merge
+    const { data: existing } = await supabase
+      .from("anime")
+      .select("scraper_urls")
+      .eq("id", animeId)
+      .single();
+
+    const merged = { ...(existing?.scraper_urls || {}), [scraper]: url };
+
+    const { error } = await supabase
+      .from("anime")
+      .update({ scraper_urls: merged })
+      .eq("id", animeId);
+
+    if (error) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
+
+    console.log(`💾 Scraper cache saved: anime=${animeId} scraper=${scraper} url=${url}`);
+    cacheInvalidateAnime(animeId);
+    res.json({ success: true, scraper_urls: merged });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// DELETE: Clear a specific scraper's cached URL (or all if no scraper given)
+app.delete("/api/scraper-cache/:animeId", async (req, res) => {
+  try {
+    const { animeId } = req.params;
+    const { scraper } = req.query; // optional: clear only one scraper key
+
+    const { data: existing } = await supabase
+      .from("anime")
+      .select("scraper_urls")
+      .eq("id", animeId)
+      .single();
+
+    let newCache = {};
+    if (scraper && existing?.scraper_urls) {
+      newCache = { ...existing.scraper_urls };
+      delete newCache[scraper];
+    }
+    // If no scraper specified → clear all (newCache stays {})
+
+    const { error } = await supabase
+      .from("anime")
+      .update({ scraper_urls: newCache })
+      .eq("id", animeId);
+
+    if (error) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
+
+    console.log(`🗑️ Scraper cache cleared: anime=${animeId} scraper=${scraper || "ALL"}`);
+    cacheInvalidateAnime(animeId);
+    res.json({ success: true, scraper_urls: newCache });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ============================================================
+// Re:ANIME SCRAPER ENDPOINTS
+// ============================================================
+
+// Single episode Re:ANIME scraping endpoint
+app.post("/api/scrape-reanime-episode", async (req, res) => {
+  try {
+    const {
+      url,
+      watchUrl,
+      animeUrl,
+      episodeNumber = 1,
+      options = {},
+    } = req.body;
+
+    const targetUrl = url || watchUrl || animeUrl;
+    const animeId = req.body.animeId || options.animeId;
+
+    if (!targetUrl) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required field: url, watchUrl, or animeUrl",
+      });
+    }
+
+    console.log(
+      `🎬 API: Scraping Re:ANIME for ${targetUrl} (episode ${episodeNumber})`
+    );
+
+    // ── URL Cache: check if we already know the base watch URL for this anime ──
+    let resolvedInputUrl = targetUrl;
+    const cacheKey = "reanime_watch";
+
+    if (animeId) {
+      try {
+        const { data: cacheRow } = await supabase
+          .from("anime")
+          .select("scraper_urls")
+          .eq("id", animeId)
+          .single();
+
+        const cachedWatchBase = cacheRow?.scraper_urls?.[cacheKey];
+        if (cachedWatchBase) {
+          console.log(`⚡ Re:ANIME cache HIT [${cacheKey}]: ${cachedWatchBase}`);
+          // Scraper sees a /watch/ URL → skips the title search entirely
+          resolvedInputUrl = cachedWatchBase;
+        }
+      } catch (e) {
+        console.warn("⚠️ Re:ANIME cache read failed:", e.message);
+      }
+    }
+
+    const result = await enqueue(() =>
+      ReAnimeScraperService.scrapeAnimeEpisode(resolvedInputUrl, episodeNumber, {
+        timeout: 30000,
+        retries: 2,
+        ...options,
+      })
+    );
+
+    // ── URL Cache: after a fresh resolve, save the base watch URL for next time ──
+    if (result.success && result.watchUrl && animeId) {
+      try {
+        const watchBase = new URL(result.watchUrl);
+        watchBase.searchParams.delete("ep");
+        watchBase.searchParams.delete("lang");
+        const baseWatchUrl = watchBase.toString();
+
+        const { data: existing } = await supabase
+          .from("anime")
+          .select("scraper_urls")
+          .eq("id", animeId)
+          .single();
+
+        const currentCache = existing?.scraper_urls || {};
+        if (currentCache[cacheKey] !== baseWatchUrl) {
+          const merged = { ...currentCache, [cacheKey]: baseWatchUrl };
+          await supabase.from("anime").update({ scraper_urls: merged }).eq("id", animeId);
+          console.log(`💾 Re:ANIME watch URL cached: ${baseWatchUrl}`);
+        }
+      } catch (e) {
+        console.warn("⚠️ Re:ANIME cache save failed:", e.message);
+      }
+    }
+
+    if (result.success && result.streamUrl && animeId) {
+      console.log(`💾 API: Saving single Re:ANIME scraped episode to database for anime ${animeId}`);
+      // Save to database
+      const { data: existingEpisode } = await supabase
+        .from("episodes")
+        .select("id, title")
+        .eq("anime_id", animeId)
+        .eq("episode_number", episodeNumber)
+        .maybeSingle();
+
+      const scrapeLang = options.lang || "sub";
+      const videoServers = (result.episodeData?.sources || []).map(s => ({
+        name: s.label || "Server",
+        url: s.iframeUrl,
+        lang: s.lang || scrapeLang
+      }));
+      
+      if (videoServers.length === 0 && result.streamUrl) {
+        videoServers.push({
+          name: "Re:ANIME active",
+          url: result.streamUrl,
+          lang: scrapeLang
+        });
+      }
+
+      if (existingEpisode) {
+        // Merge with existing servers of other languages to prevent overwriting them
+        const { data: currentEp } = await supabase
+          .from("episodes")
+          .select("video_servers")
+          .eq("id", existingEpisode.id)
+          .single();
+
+        let mergedServers = [...videoServers];
+        if (currentEp && Array.isArray(currentEp.video_servers)) {
+          // Filter out existing servers that have the exact same URL as any of the new servers to avoid duplicates
+          const otherServers = currentEp.video_servers.filter(
+            existS => !videoServers.some(newS => newS.url === existS.url)
+          );
+          mergedServers = [...otherServers, ...videoServers];
+        }
+
+        await supabase
+          .from("episodes")
+          .update({
+            video_url: result.streamUrl,
+            video_servers: mergedServers,
+            duration: 1440,
+          })
+          .eq("id", existingEpisode.id);
+      } else {
+        await supabase
+          .from("episodes")
+          .insert({
+            anime_id: animeId,
+            episode_number: episodeNumber,
+            title: `${targetUrl} - Episode ${episodeNumber}`,
+            video_url: result.streamUrl,
+            video_servers: videoServers,
+            duration: 1440,
+            description: `Scraped from Re:ANIME`,
+            created_at: new Date().toISOString(),
+          });
+      }
+      cacheInvalidateAnime(animeId);
+    }
+
+    res.json(result);
+  } catch (error) {
+    console.error("❌ Re:ANIME scrape error:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message || "Re:ANIME scrape failed",
+    });
+  }
+});
+
+// Streaming batch scrape endpoint for Re:ANIME with real-time progress
+app.post("/api/batch-scrape-reanime-episodes-stream", async (req, res) => {
+  try {
+    const { animeTitle, animeId, episodeNumbers, options = {} } = req.body;
+
+    if (!animeTitle || !animeId || !episodeNumbers) {
+      return res.status(400).json({
+        success: false,
+        error: "Anime title, ID, and episode numbers are required",
+      });
+    }
+
+    // Set headers for Server-Sent Events
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+
+    console.log(
+      `🎬 Streaming Re:ANIME batch scrape for ${episodeNumbers.length} episodes: "${animeTitle}"`
+    );
+
+    // Extract overwrite option
+    const overwrite = req.body.overwrite || options.overwrite || false;
+
+    // Pre-check: skip episodes that already have ALL 4 Re:ANIME server slots present
+    // Required: sub HD-1, sub HD-2, dub HD-1, dub HD-2
+    // If any of those 4 are missing the episode will be re-scraped (even if it has a NineAnime URL).
+    const REQUIRED_REANIME_SERVERS = [
+      { lang: "sub", name: "HD-1" },
+      { lang: "sub", name: "HD-2" },
+      { lang: "dub", name: "HD-1" },
+      { lang: "dub", name: "HD-2" },
+    ];
+
+    /**
+     * Returns true only when video_servers contains every required Re:ANIME slot.
+     * Name matching is case-insensitive.
+     */
+    function hasAllReAnimeServers(videoServers) {
+      if (!Array.isArray(videoServers) || videoServers.length === 0) return false;
+      return REQUIRED_REANIME_SERVERS.every(({ lang, name }) =>
+        videoServers.some(
+          (s) =>
+            (s.lang || "").toLowerCase() === lang &&
+            (s.name || "").toLowerCase() === name.toLowerCase() &&
+            s.url
+        )
+      );
+    }
+
+    let epsToScrape = episodeNumbers;
+    let skippedCount = 0;
+    if (!overwrite) {
+      try {
+        const { data: existing } = await supabase
+          .from("episodes")
+          .select("episode_number, video_servers")
+          .eq("anime_id", animeId)
+          .in("episode_number", episodeNumbers);
+
+        if (existing && existing.length > 0) {
+          const fullyScraped = new Set(
+            existing
+              .filter((e) => hasAllReAnimeServers(e.video_servers))
+              .map((e) => e.episode_number)
+          );
+          epsToScrape = episodeNumbers.filter((n) => !fullyScraped.has(n));
+          skippedCount = fullyScraped.size;
+          if (skippedCount > 0) {
+            console.log(
+              `⏭️ Skipping ${skippedCount} episodes that already have all 4 Re:ANIME servers (sub HD-1/HD-2 + dub HD-1/HD-2)`
+            );
+          }
+          const partial = existing.length - skippedCount;
+          if (partial > 0) {
+            console.log(
+              `🔁 ${partial} episodes have partial servers — will re-scrape to fill missing slots`
+            );
+          }
+        }
+      } catch (e) {
+        console.warn("⚠️ Pre-check failed, scraping all:", e.message);
+      }
+    } else {
+      console.log(`🔄 Re:ANIME Overwrite/Rescrape requested. Scraping all requested episodes regardless of existing URLs.`);
+    }
+
+    let successCount = skippedCount;
+    let errorCount = 0;
+
+    // Send initial progress
+    res.write(
+      `data: ${JSON.stringify({
+        type: "start",
+        total: episodeNumbers.length,
+        toScrape: epsToScrape.length,
+        skipped: skippedCount,
+        animeTitle,
+      })}\n\n`
+    );
+    if (res.flush) res.flush();
+
+    if (epsToScrape.length === 0) {
+      res.write(
+        `data: ${JSON.stringify({
+          type: "complete",
+          successCount,
+          errorCount: 0,
+          total: episodeNumbers.length,
+          skipped: skippedCount,
+          successRate: 100,
+        })}\n\n`
+      );
+      return res.end();
+    }
+
+    // Pre-resolve the watch URL — check DB cache first, fall back to Playwright search.
+    // We use the same cache key as the single-scrape endpoint ("reanime_watch") so both
+    // endpoints share the same cached base URL and never duplicate Playwright searches.
+    const cacheKey = "reanime_watch";
+    let baseWatchUrl = null;
+    let browser = null;
+
+    // 1. Try reading from DB cache
+    try {
+      const { data: cacheRow } = await supabase
+        .from("anime")
+        .select("scraper_urls")
+        .eq("id", animeId)
+        .single();
+
+      if (cacheRow?.scraper_urls?.[cacheKey]) {
+        baseWatchUrl = cacheRow.scraper_urls[cacheKey];
+        console.log(`⚡ Re:ANIME cache HIT [${cacheKey}]: ${baseWatchUrl}`);
+      }
+    } catch (e) {
+      console.warn("⚠️ Re:ANIME cache read failed:", e.message);
+    }
+
+    // 2. If no cache, launch Playwright to resolve + save result
+    if (!baseWatchUrl) {
+      try {
+        browser = await getBrowser();
+        if (browser) {
+          const context = await browser.newContext({
+            userAgent: ReAnimeScraperService.USER_AGENT,
+            viewport: { width: 1280, height: 720 },
+          });
+          const page = await context.newPage();
+          const resolved = await ReAnimeScraperService.resolveWatchUrlWithPage(
+            page,
+            animeTitle,
+            epsToScrape[0],
+            options
+          );
+          if (resolved) {
+            // Strip only the episode param — keep everything else (e.g. lang) intact
+            const urlObj = new URL(resolved);
+            urlObj.searchParams.delete("ep");
+            urlObj.searchParams.delete("lang");
+            baseWatchUrl = urlObj.toString();
+            console.log(`✅ Re:ANIME resolved (fresh): ${baseWatchUrl}`);
+
+            // Save to DB cache for next time (shared with single-scrape endpoint)
+            try {
+              const { data: existing } = await supabase
+                .from("anime")
+                .select("scraper_urls")
+                .eq("id", animeId)
+                .single();
+              const merged = { ...(existing?.scraper_urls || {}), [cacheKey]: baseWatchUrl };
+              await supabase.from("anime").update({ scraper_urls: merged }).eq("id", animeId);
+              console.log(`💾 Re:ANIME cache saved [${cacheKey}]: ${baseWatchUrl}`);
+            } catch (saveErr) {
+              console.warn("⚠️ Re:ANIME cache save failed:", saveErr.message);
+            }
+          }
+          await context.close();
+        }
+      } catch (e) {
+        console.warn("⚠️ Pre-resolve Re:ANIME watch URL failed:", e.message);
+      }
+    }
+
+    let consecutiveFailures = 0;
+    for (let i = 0; i < epsToScrape.length; i++) {
+      const episodeNumber = epsToScrape[i];
+
+      try {
+        res.write(
+          `data: ${JSON.stringify({
+            type: "progress",
+            episode: episodeNumber,
+            current: skippedCount + i + 1,
+            total: episodeNumbers.length,
+            status: "scraping",
+          })}\n\n`
+        );
+        if (res.flush) res.flush();
+
+        // If we resolved the base URL, use it, otherwise pass the animeTitle (which triggers search fallback)
+        const targetSearch = baseWatchUrl || animeTitle;
+
+        const scrapeResult = await enqueue(() =>
+          ReAnimeScraperService.scrapeAnimeEpisode(
+            targetSearch,
+            episodeNumber,
+            {
+              timeout: options.timeout || 30000,
+              retries: options.retries || 2,
+              lang: options.lang || "sub",
+            }
+          )
+        );
+
+        if (scrapeResult.success && scrapeResult.streamUrl) {
+          // Save to database
+          const { data: existingEpisode } = await supabase
+            .from("episodes")
+            .select("id, title")
+            .eq("anime_id", animeId)
+            .eq("episode_number", episodeNumber)
+            .maybeSingle();
+
+          // Standardize alternative video servers for DB storage
+          const scrapeLang = options.lang || "sub";
+          const videoServers = (scrapeResult.episodeData?.sources || []).map(s => ({
+            name: s.label || "Server",
+            url: s.iframeUrl,
+            lang: s.lang || scrapeLang
+          }));
+          
+          if (videoServers.length === 0 && scrapeResult.streamUrl) {
+            videoServers.push({
+              name: "Re:ANIME active",
+              url: scrapeResult.streamUrl,
+              lang: scrapeLang
+            });
+          }
+
+          if (existingEpisode) {
+            // Merge with existing servers of other languages to prevent overwriting them
+            const { data: currentEp } = await supabase
+              .from("episodes")
+              .select("video_servers")
+              .eq("id", existingEpisode.id)
+              .single();
+
+            let mergedServers = [...videoServers];
+            if (currentEp && Array.isArray(currentEp.video_servers)) {
+              // Filter out existing servers that have the exact same URL as any of the new servers to avoid duplicates
+              const otherServers = currentEp.video_servers.filter(
+                existS => !videoServers.some(newS => newS.url === existS.url)
+              );
+              mergedServers = [...otherServers, ...videoServers];
+            }
+
+            // Update
+            await supabase
+              .from("episodes")
+              .update({
+                video_url: scrapeResult.streamUrl,
+                video_servers: mergedServers,
+                duration: 1440,
+              })
+              .eq("id", existingEpisode.id);
+          } else {
+            // Insert
+            await supabase
+              .from("episodes")
+              .insert({
+                anime_id: animeId,
+                episode_number: episodeNumber,
+                title: `${animeTitle} - Episode ${episodeNumber}`,
+                video_url: scrapeResult.streamUrl,
+                video_servers: videoServers,
+                duration: 1440,
+                description: `Scraped from Re:ANIME`,
+                created_at: new Date().toISOString(),
+              });
+          }
+
+          successCount++;
+          consecutiveFailures = 0;
+          res.write(
+            `data: ${JSON.stringify({
+              type: "success",
+              episode: episodeNumber,
+              current: skippedCount + i + 1,
+              total: episodeNumbers.length,
+              url: scrapeResult.streamUrl,
+              title: `Episode ${episodeNumber}`,
+              sources: videoServers,
+            })}\n\n`
+          );
+        } else {
+          throw new Error(scrapeResult.error || "Scraping failed");
+        }
+      } catch (error) {
+        errorCount++;
+        consecutiveFailures++;
+        res.write(
+          `data: ${JSON.stringify({
+            type: "error",
+            episode: episodeNumber,
+            current: skippedCount + i + 1,
+            total: episodeNumbers.length,
+            error: error.message,
+          })}\n\n`
+        );
+
+        if (consecutiveFailures >= 3) {
+          res.write(
+            `data: ${JSON.stringify({
+              type: "error",
+              status: "Consecutive failures threshold met. Aborting.",
+            })}\n\n`
+          );
+          break;
+        }
+      }
+
+      if (res.flush) res.flush();
+      // Sleep slightly between episodes
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+
+    const successRate = Math.round((successCount / episodeNumbers.length) * 100);
+    res.write(
+      `data: ${JSON.stringify({
+        type: "complete",
+        successCount,
+        errorCount,
+        total: episodeNumbers.length,
+        skipped: skippedCount,
+        successRate,
+      })}\n\n`
+    );
+    res.end();
+  } catch (error) {
+    console.error("❌ Batch scrape Re:ANIME error:", error);
+    if (!res.headersSent) {
+      res.status(500).json({
+        success: false,
+        error: error.message,
+      });
+    } else {
+      res.write(
+        `data: ${JSON.stringify({
+          type: "error",
+          error: error.message,
+        })}\n\n`
+      );
+      res.end();
+    }
   }
 });
 
@@ -3115,23 +1683,30 @@ app.post("/api/batch-scrape-episodes", async (req, res) => {
       });
     }
 
-    // Pre-check: skip episodes that already have a video_url in the DB
-    let epsToScrape = episodeNumbers;
-    try {
-      const { data: existing } = await supabase
-        .from('episodes')
-        .select('episode_number')
-        .eq('anime_id', animeId)
-        .not('video_url', 'is', null)
-        .in('episode_number', episodeNumbers);
+    // Extract overwrite option
+    const overwrite = req.body.overwrite || options.overwrite || false;
 
-      if (existing && existing.length > 0) {
-        const alreadyDone = new Set(existing.map(e => e.episode_number));
-        epsToScrape = episodeNumbers.filter(n => !alreadyDone.has(n));
-        console.log(`⏭️ Skipping ${existing.length} episodes that already have stream URLs`);
+    // Pre-check: skip episodes that already have a video_url in the DB (only if overwrite is false)
+    let epsToScrape = episodeNumbers;
+    if (!overwrite) {
+      try {
+        const { data: existing } = await supabase
+          .from('episodes')
+          .select('episode_number')
+          .eq('anime_id', animeId)
+          .not('video_url', 'is', null)
+          .in('episode_number', episodeNumbers);
+
+        if (existing && existing.length > 0) {
+          const alreadyDone = new Set(existing.map(e => e.episode_number));
+          epsToScrape = episodeNumbers.filter(n => !alreadyDone.has(n));
+          console.log(`⏭️ Skipping ${existing.length} episodes that already have stream URLs`);
+        }
+      } catch (e) {
+        console.warn('⚠️ Pre-check failed, scraping all:', e.message);
       }
-    } catch (e) {
-      console.warn('⚠️ Pre-check failed, scraping all:', e.message);
+    } else {
+      console.log(`🔄 HiAnime/9Anime Overwrite/Rescrape requested. Scraping all requested episodes regardless of existing URLs.`);
     }
 
     console.log(
@@ -3157,18 +1732,52 @@ app.post("/api/batch-scrape-episodes", async (req, res) => {
     let successCount = 0;
     let errorCount = 0;
 
-    // Resolve the anime slug once before scraping episodes
+    // Resolve the anime slug once — check DB cache first, fall back to search
     let resolvedSlug = null;
+
+    // 1. Try DB cache
     try {
-      const slugResult = await NineAnimeScraperService.searchAnimeWithCheerio(
-        animeTitle, 1, animeId
-      );
-      if (slugResult.success) {
-        resolvedSlug = slugResult.animeId; // This is the slug
-        console.log(`✅ Resolved slug once: ${resolvedSlug}`);
+      const { data: cacheRow } = await supabase
+        .from("anime")
+        .select("scraper_urls")
+        .eq("id", animeId)
+        .single();
+
+      if (cacheRow?.scraper_urls?.nineanime) {
+        resolvedSlug = cacheRow.scraper_urls.nineanime;
+        console.log(`⚡ 9Anime cache HIT: ${resolvedSlug}`);
       }
     } catch (e) {
-      console.warn('⚠️ Pre-resolve slug failed, will resolve per-episode:', e.message);
+      console.warn("⚠️ 9Anime cache read failed:", e.message);
+    }
+
+    // 2. If no cache, search then save
+    if (!resolvedSlug) {
+      try {
+        const slugResult = await NineAnimeScraperService.searchAnimeWithCheerio(
+          animeTitle, 1, animeId
+        );
+        if (slugResult.success) {
+          resolvedSlug = slugResult.animeId;
+          console.log(`✅ 9Anime resolved slug (fresh): ${resolvedSlug}`);
+
+          // Save to DB cache
+          try {
+            const { data: existing } = await supabase
+              .from("anime")
+              .select("scraper_urls")
+              .eq("id", animeId)
+              .single();
+            const merged = { ...(existing?.scraper_urls || {}), nineanime: resolvedSlug };
+            await supabase.from("anime").update({ scraper_urls: merged }).eq("id", animeId);
+            console.log(`💾 9Anime slug cache saved`);
+          } catch (saveErr) {
+            console.warn("⚠️ 9Anime cache save failed:", saveErr.message);
+          }
+        }
+      } catch (e) {
+        console.warn("⚠️ Pre-resolve slug failed, will resolve per-episode:", e.message);
+      }
     }
 
     // Scrape each episode (stop early on consecutive failures — episodes are sequential)
@@ -3301,25 +1910,32 @@ app.post("/api/batch-scrape-episodes-stream", async (req, res) => {
       `🎬 Streaming batch scrape for ${episodeNumbers.length} episodes: "${animeTitle}"`
     );
 
-    // Pre-check: skip episodes that already have a video_url
+    // Extract overwrite option
+    const overwrite = req.body.overwrite || options.overwrite || false;
+
+    // Pre-check: skip episodes that already have a video_url (only if overwrite is false)
     let epsToScrape = episodeNumbers;
     let skippedCount = 0;
-    try {
-      const { data: existing } = await supabase
-        .from('episodes')
-        .select('episode_number')
-        .eq('anime_id', animeId)
-        .not('video_url', 'is', null)
-        .in('episode_number', episodeNumbers);
+    if (!overwrite) {
+      try {
+        const { data: existing } = await supabase
+          .from('episodes')
+          .select('episode_number')
+          .eq('anime_id', animeId)
+          .not('video_url', 'is', null)
+          .in('episode_number', episodeNumbers);
 
-      if (existing && existing.length > 0) {
-        const alreadyDone = new Set(existing.map(e => e.episode_number));
-        epsToScrape = episodeNumbers.filter(n => !alreadyDone.has(n));
-        skippedCount = existing.length;
-        console.log(`⏭️ Skipping ${skippedCount} episodes that already have stream URLs`);
+        if (existing && existing.length > 0) {
+          const alreadyDone = new Set(existing.map(e => e.episode_number));
+          epsToScrape = episodeNumbers.filter(n => !alreadyDone.has(n));
+          skippedCount = existing.length;
+          console.log(`⏭️ Skipping ${skippedCount} episodes that already have stream URLs`);
+        }
+      } catch (e) {
+        console.warn('⚠️ Pre-check failed, scraping all:', e.message);
       }
-    } catch (e) {
-      console.warn('⚠️ Pre-check failed, scraping all:', e.message);
+    } else {
+      console.log(`🔄 HiAnime/9Anime Overwrite/Rescrape requested. Scraping all requested episodes regardless of existing URLs.`);
     }
 
     let successCount = skippedCount;
@@ -3351,18 +1967,51 @@ app.post("/api/batch-scrape-episodes-stream", async (req, res) => {
       return res.end();
     }
 
-    // Resolve the anime slug once before scraping episodes
+    // Resolve the anime slug once — check DB cache first, fall back to search
     let resolvedSlug = null;
+
+    // 1. Try DB cache
     try {
-      const slugResult = await NineAnimeScraperService.searchAnimeWithCheerio(
-        animeTitle, 1, animeId
-      );
-      if (slugResult.success) {
-        resolvedSlug = slugResult.animeId;
-        console.log(`✅ Resolved slug once: ${resolvedSlug}`);
+      const { data: cacheRow } = await supabase
+        .from("anime")
+        .select("scraper_urls")
+        .eq("id", animeId)
+        .single();
+
+      if (cacheRow?.scraper_urls?.nineanime) {
+        resolvedSlug = cacheRow.scraper_urls.nineanime;
+        console.log(`⚡ 9Anime cache HIT: ${resolvedSlug}`);
       }
     } catch (e) {
-      console.warn('⚠️ Pre-resolve slug failed:', e.message);
+      console.warn("⚠️ 9Anime cache read failed:", e.message);
+    }
+
+    // 2. If no cache, search then save
+    if (!resolvedSlug) {
+      try {
+        const slugResult = await NineAnimeScraperService.searchAnimeWithCheerio(
+          animeTitle, 1, animeId
+        );
+        if (slugResult.success) {
+          resolvedSlug = slugResult.animeId;
+          console.log(`✅ 9Anime resolved slug (fresh): ${resolvedSlug}`);
+
+          try {
+            const { data: existing } = await supabase
+              .from("anime")
+              .select("scraper_urls")
+              .eq("id", animeId)
+              .single();
+            const merged = { ...(existing?.scraper_urls || {}), nineanime: resolvedSlug };
+            await supabase.from("anime").update({ scraper_urls: merged }).eq("id", animeId);
+            console.log(`💾 9Anime slug cache saved`);
+          } catch (saveErr) {
+            console.warn("⚠️ 9Anime cache save failed:", saveErr.message);
+          }
+        }
+      } catch (e) {
+        console.warn("⚠️ Pre-resolve slug failed:", e.message);
+      }
     }
 
     // Scrape each episode (stop early on consecutive failures)
@@ -3650,26 +2299,58 @@ app.post("/api/add-scraped-episode", async (req, res) => {
       });
     }
 
-    // Check if episode already exists
     const { data: existingEpisode, error: checkError } = await supabase
       .from("episodes")
-      .select("id")
+      .select("id, title")
       .eq("anime_id", animeId)
       .eq("episode_number", episodeData.number)
-      .maybeSingle(); // Use maybeSingle() to avoid errors when no record found
+      .maybeSingle();
 
     let data, error;
+
+    // Standardize video servers and map languages properly
+    const scrapeLang = episodeData.lang || (episodeData.streamUrl && episodeData.streamUrl.toLowerCase().includes('dub') ? 'dub' : 'sub');
+    const newServers = (episodeData.servers || (episodeData.streamUrl ? [{ name: "Server 1", url: episodeData.streamUrl }] : [])).map(s => ({
+      name: s.name || s.label || "Server",
+      url: s.url || s.iframeUrl,
+      lang: s.lang || scrapeLang
+    }));
 
     if (existingEpisode && !checkError) {
       // Episode exists, update it
       console.log(
         `📝 Updating existing episode ${episodeData.number} for anime ${animeId}`
       );
+
+      // Preserve existing beautiful title if it exists and is not generic "Episode X"
+      const hasBeautifulTitle = existingEpisode.title && 
+                                !existingEpisode.title.toLowerCase().startsWith("episode") &&
+                                existingEpisode.title.trim() !== String(episodeData.number);
+
+      const titleToUpdate = hasBeautifulTitle ? existingEpisode.title : episodeData.title;
+
+      // Merge with existing servers of other languages to prevent overwriting them
+      const { data: currentEp } = await supabase
+        .from("episodes")
+        .select("video_servers")
+        .eq("id", existingEpisode.id)
+        .single();
+
+      let mergedServers = [...newServers];
+      if (currentEp && Array.isArray(currentEp.video_servers)) {
+        // Filter out existing servers that have the exact same URL as any of the new servers to avoid duplicates
+        const otherServers = currentEp.video_servers.filter(
+          existS => !newServers.some(newS => newS.url === existS.url)
+        );
+        mergedServers = [...otherServers, ...newServers];
+      }
+
       const updateResult = await supabase
         .from("episodes")
         .update({
-          title: episodeData.title,
+          title: titleToUpdate,
           video_url: episodeData.streamUrl,
+          video_servers: mergedServers,
           duration: episodeData.duration || 1440, // Default to 24 minutes if not provided
           description: `Scraped from 9anime.org.lv - ${
             episodeData.embeddingProtected
@@ -3696,6 +2377,7 @@ app.post("/api/add-scraped-episode", async (req, res) => {
           episode_number: episodeData.number,
           title: episodeData.title,
           video_url: episodeData.streamUrl,
+          video_servers: newServers,
           duration: episodeData.duration || 1440, // Default to 24 minutes (1440 seconds) if not provided
           thumbnail_url: null,
           description: `Scraped from 9anime.org.lv - ${
@@ -4292,6 +2974,100 @@ app.get("/api/image-proxy", async (req, res) => {
       success: false,
       error: "Failed to proxy image",
     });
+  }
+});
+
+// Stream proxy endpoint for HLS manifests and segments.
+// Mirrors the Vercel edge function so local dev can load proxied m3u8 URLs.
+app.get("/api/stream-proxy", async (req, res) => {
+  try {
+    const { url } = req.query;
+
+    if (!url || typeof url !== "string") {
+      return res.status(400).json({ error: "url param required" });
+    }
+
+    let targetUrl;
+    try {
+      targetUrl = new URL(decodeURIComponent(url));
+    } catch {
+      return res.status(400).json({ error: "Invalid URL" });
+    }
+
+    const allowedHosts = [
+      "megacloud.tv",
+      "megaplay.buzz",
+      "megacloud.bloggy.click",
+      "rapidcloud.cc",
+      "streamsb.net",
+      "streamtape.com",
+      "hianime.to",
+      "cdn.videas.fr",
+    ];
+
+    const isAllowed = allowedHosts.some((host) => targetUrl.hostname.includes(host));
+    if (!isAllowed) {
+      return res.status(403).json({ error: `Host not allowed: ${targetUrl.hostname}` });
+    }
+
+    const upstream = await axios.get(targetUrl.toString(), {
+      responseType: "arraybuffer",
+      timeout: 15000,
+      maxRedirects: 5,
+      headers: {
+        Referer: "https://hianime.to/",
+        Origin: "https://hianime.to",
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        Accept: "*/*",
+      },
+    });
+
+    const contentType = upstream.headers["content-type"] || "";
+    const isM3U8 =
+      targetUrl.pathname.includes(".m3u8") ||
+      contentType.includes("mpegurl") ||
+      contentType.includes("x-mpegURL");
+
+    if (isM3U8) {
+      const text = Buffer.from(upstream.data).toString("utf-8");
+      const baseUrl = targetUrl.toString().substring(0, targetUrl.toString().lastIndexOf("/") + 1);
+      const proxyBase = `${req.protocol}://${req.get("host")}/api/stream-proxy?url=`;
+
+      const rewritten = text
+        .split("\n")
+        .map((line) => {
+          const trimmed = line.trim();
+          if (trimmed.startsWith("#") || trimmed === "") return line;
+
+          if (trimmed.startsWith("http")) {
+            return `${proxyBase}${encodeURIComponent(trimmed)}`;
+          }
+
+          return `${proxyBase}${encodeURIComponent(baseUrl + trimmed)}`;
+        })
+        .join("\n");
+
+      return res
+        .status(200)
+        .set({
+          "Content-Type": "application/vnd.apple.mpegurl",
+          "Access-Control-Allow-Origin": "*",
+          "Cache-Control": "no-cache",
+        })
+        .send(rewritten);
+    }
+
+    res.set({
+      "Content-Type": contentType || "video/mp2t",
+      "Access-Control-Allow-Origin": "*",
+      "Cache-Control": "public, max-age=3600",
+    });
+
+    return res.send(Buffer.from(upstream.data));
+  } catch (error) {
+    console.error("[StreamProxy] Error fetching stream", error.message);
+    return res.status(502).json({ error: "Failed to proxy stream", details: error.message });
   }
 });
 
