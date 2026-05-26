@@ -328,6 +328,9 @@ app.get("/api/resolve-stream", async (req, res) => {
     if (!url || !url.includes("bysesayeveum.com/e/")) {
       return res.status(400).json({ error: "Invalid bysesayeveum URL" });
     }
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
     console.log("🔄 Resolving stream for:", url);
     const hlsUrl = await NineAnimeScraperService.extractBysesayeveumHLS(url);
     if (hlsUrl) {
@@ -347,6 +350,9 @@ app.get("/api/resolve-vidmoly-stream", async (req, res) => {
     if (!url || !url.match(/vidmoly\.(biz|net)/)) {
       return res.status(400).json({ error: "Invalid vidmoly URL" });
     }
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
     console.log("🔄 Resolving vidmoly stream for:", url);
     const hlsUrl = await NineAnimeScraperService.extractVidmolyHLS(url);
     if (hlsUrl) {
@@ -648,7 +654,7 @@ app.get("/api/mega-embed/:host/:id", async (req, res) => {
 </style>
 </head><body>
 <div id="loader"><div class="spinner"></div></div>
-<iframe id="player" src="${megaUrl}?autoplay=1${startTime > 0 ? `&start=${startTime}&t=${startTime}` : ''}" allow="autoplay; fullscreen; encrypted-media" allowfullscreen sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-presentation"></iframe>
+<iframe id="player" src="${megaUrl}?autoplay=1${startTime > 0 ? `&start=${startTime}&t=${startTime}` : ''}" allow="autoplay; fullscreen; encrypted-media" allowfullscreen sandbox="allow-scripts allow-same-origin allow-forms allow-presentation"></iframe>
 <script>
 const iframe = document.getElementById('player');
 const loader = document.getElementById('loader');
@@ -2628,7 +2634,7 @@ app.post("/api/batch-scrape-episodes-stream", async (req, res) => {
 
 // Optimized anime list endpoints with Redis caching
 // Featured anime (highest rated)
-app.get("/api/anime/featured", cacheMiddleware(300_000), async (req, res) => {
+app.get("/api/anime/featured", cacheMiddleware(120_000), async (req, res) => {
   try {
     const limit = parseInt(req.query.limit || "5", 10);
     const { data, error } = await supabase
@@ -2651,7 +2657,7 @@ app.get("/api/anime/featured", cacheMiddleware(300_000), async (req, res) => {
 });
 
 // Trending anime (recently added with good rating)
-app.get("/api/anime/trending", cacheMiddleware(300_000), async (req, res) => {
+app.get("/api/anime/trending", cacheMiddleware(120_000), async (req, res) => {
   try {
     const limit = parseInt(req.query.limit || "10", 10);
     const thirtyDaysAgo = new Date(
@@ -2691,7 +2697,7 @@ app.get("/api/anime/trending", cacheMiddleware(300_000), async (req, res) => {
 });
 
 // Popular anime (highest rated)
-app.get("/api/anime/popular", cacheMiddleware(300_000), async (req, res) => {
+app.get("/api/anime/popular", cacheMiddleware(120_000), async (req, res) => {
   try {
     const limit = parseInt(req.query.limit || "12", 10);
     const { data, error } = await supabase
@@ -2714,7 +2720,7 @@ app.get("/api/anime/popular", cacheMiddleware(300_000), async (req, res) => {
 });
 
 // Recent anime (newest first)
-app.get("/api/anime/recent", cacheMiddleware(120_000), async (req, res) => {
+app.get("/api/anime/recent", cacheMiddleware(60_000), async (req, res) => {
   try {
     const limit = parseInt(req.query.limit || "6", 10);
     const { data, error } = await supabase
@@ -2738,7 +2744,7 @@ app.get("/api/anime/recent", cacheMiddleware(120_000), async (req, res) => {
 // Get episodes for an anime
 app.get(
   "/api/anime/:animeId/episodes",
-  cacheMiddleware(30_000),
+  cacheMiddleware(5_000),
   async (req, res) => {
     try {
       const { animeId } = req.params;
@@ -3114,7 +3120,7 @@ app.post("/api/start-large-scrape", async (req, res) => {
 // Get scraping progress
 app.get(
   "/api/scraping-progress/:animeId",
-  cacheMiddleware(15_000),
+  cacheMiddleware(3_000),
   async (req, res) => {
     try {
       const { animeId } = req.params;
@@ -3443,6 +3449,12 @@ app.get("/api/image-proxy", async (req, res) => {
     res.send(buffer);
   } catch (error) {
     console.error("❌ Image proxy error:", error.message);
+
+    // Fallback: let the browser load the original image directly if proxying fails.
+    // This avoids broken posters/avatars when the proxy or upstream host is slow/down.
+    if (url && typeof url === "string") {
+      return res.redirect(302, url);
+    }
 
     if (error.code === "ECONNABORTED" || error.code === "ETIMEDOUT") {
       return res.status(504).json({

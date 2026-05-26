@@ -24,7 +24,7 @@ export function useCache<T>(
   options: CacheOptions = {}
 ) {
   const {
-    ttl = 5 * 60 * 1000, // 5 minutes default
+    ttl = 2 * 60 * 1000, // 2 minutes default
     dedupe = true,
     staleWhileRevalidate = false
   } = options;
@@ -141,7 +141,7 @@ export function useCache<T>(
 
 export function useAnimeCache(animeId: string, fetchFn: () => Promise<any>) {
   return useCache(`anime_${animeId}`, fetchFn, {
-    ttl: 10 * 60 * 1000, // 10 minutes for anime details
+    ttl: 3 * 60 * 1000, // 3 minutes for anime details
     staleWhileRevalidate: true
   });
 }
@@ -152,14 +152,14 @@ export function useAnimeListCache(
 ) {
   const key = `anime_list_${JSON.stringify(params)}`;
   return useCache(key, fetchFn, {
-    ttl: 2 * 60 * 1000, // 2 minutes for anime lists
+    ttl: 45 * 1000, // 45 seconds for anime lists
     staleWhileRevalidate: true
   });
 }
 
 export function useUserDataCache(userId: string, fetchFn: () => Promise<any>) {
   return useCache(`user_${userId}`, fetchFn, {
-    ttl: 1 * 60 * 1000, // 1 minute for user data
+    ttl: 30 * 1000, // 30 seconds for user data
     staleWhileRevalidate: true
   });
 }
@@ -167,7 +167,7 @@ export function useUserDataCache(userId: string, fetchFn: () => Promise<any>) {
 export function useSearchCache(query: string, fetchFn: () => Promise<any>) {
   const key = `search_${query}`;
   return useCache(key, fetchFn, {
-    ttl: 3 * 60 * 1000, // 3 minutes for search results
+    ttl: 60 * 1000, // 1 minute for search results
     staleWhileRevalidate: true
   });
 }

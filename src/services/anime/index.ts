@@ -14,7 +14,7 @@ export interface AnimeWithEpisodes extends Anime {
 
 // Cache for frequently accessed data
 const cache = new Map<string, { data: any; timestamp: number }>()
-const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes
+const CACHE_DURATION = 2 * 60 * 1000 // 2 minutes
 
 // Cache utility functions
 const getCacheKey = (method: string, params: any) => 

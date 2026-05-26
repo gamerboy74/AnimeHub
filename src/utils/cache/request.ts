@@ -16,7 +16,7 @@ interface RequestOptions {
 class RequestCache {
   private cache = new Map<string, CacheEntry>();
   private pendingRequests = new Map<string, Promise<any>>();
-  private defaultTTL = 5 * 60 * 1000; // 5 minutes
+  private defaultTTL = 2 * 60 * 1000; // 2 minutes
 
   /**
    * Get cached data or execute request
@@ -164,7 +164,7 @@ export const cacheAnimeList = async <T>(
   requestFn: () => Promise<T>
 ): Promise<T> => {
   const key = `anime_list_${JSON.stringify(params)}`;
-  return requestCache.get(key, requestFn, { ttl: 2 * 60 * 1000 }); // 2 minutes
+  return requestCache.get(key, requestFn, { ttl: 45 * 1000 }); // 45 seconds
 };
 
 /**
@@ -175,7 +175,7 @@ export const cacheAnimeDetails = async <T>(
   requestFn: () => Promise<T>
 ): Promise<T> => {
   const key = `anime_details_${animeId}`;
-  return requestCache.get(key, requestFn, { ttl: 10 * 60 * 1000 }); // 10 minutes
+  return requestCache.get(key, requestFn, { ttl: 3 * 60 * 1000 }); // 3 minutes
 };
 
 /**
@@ -186,7 +186,7 @@ export const cacheUserProgress = async <T>(
   requestFn: () => Promise<T>
 ): Promise<T> => {
   const key = `user_progress_${userId}`;
-  return requestCache.get(key, requestFn, { ttl: 1 * 60 * 1000 }); // 1 minute
+  return requestCache.get(key, requestFn, { ttl: 30 * 1000 }); // 30 seconds
 };
 
 /**
@@ -198,7 +198,7 @@ export const cacheSearchResults = async <T>(
   requestFn: () => Promise<T>
 ): Promise<T> => {
   const key = `search_${query}_${JSON.stringify(filters)}`;
-  return requestCache.get(key, requestFn, { ttl: 3 * 60 * 1000 }); // 3 minutes
+  return requestCache.get(key, requestFn, { ttl: 60 * 1000 }); // 1 minute
 };
 
 /**

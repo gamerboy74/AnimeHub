@@ -36,7 +36,7 @@ class ServiceWorkerManager {
       enableCaching: true,
       enableOfflineSupport: true,
       enableBackgroundSync: true,
-      cacheVersion: 'v1',
+      cacheVersion: 'v4',
       ...config
     };
   }
@@ -48,7 +48,17 @@ class ServiceWorkerManager {
     }
 
     try {
-      this.registration = await navigator.serviceWorker.register('/sw.js', {
+      const versionedSwUrl = `/sw.js?v=${encodeURIComponent(this.config.cacheVersion)}`;
+
+      if ('caches' in window) {
+        const storedVersion = localStorage.getItem('animehub-sw-version');
+        if (storedVersion !== this.config.cacheVersion) {
+          await this.clearCaches();
+          localStorage.setItem('animehub-sw-version', this.config.cacheVersion);
+        }
+      }
+
+      this.registration = await navigator.serviceWorker.register(versionedSwUrl, {
         scope: '/'
       });
 
@@ -61,6 +71,9 @@ class ServiceWorkerManager {
           newWorker.addEventListener('statechange', () => {
             if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
               // New service worker available
+              if ('caches' in window) {
+                void this.clearCaches();
+              }
               this.showUpdateNotification();
             }
           });

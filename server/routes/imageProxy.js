@@ -71,7 +71,10 @@ router.get('/', async (req, res) => {
 
   } catch (error) {
     console.error(`[ImageProxy] Error fetching image ${decodedUrl}:`, error.message);
-    res.status(502).json({ error: 'Failed to proxy image', details: error.message });
+
+    // Fallback: send the browser to the original image URL if the proxy fails.
+    // This keeps images visible even when the server proxy is unavailable.
+    return res.redirect(302, decodedUrl);
   }
 });
 

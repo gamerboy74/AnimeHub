@@ -1,10 +1,10 @@
 // Service Worker for AnimeHub
 // Implements caching strategies for better performance and offline support
 
-const CACHE_NAME = 'animehub-v3';
-const STATIC_CACHE = 'animehub-static-v3';
-const DYNAMIC_CACHE = 'animehub-dynamic-v3';
-const API_CACHE = 'animehub-api-v3';
+const CACHE_NAME = 'animehub-v4';
+const STATIC_CACHE = 'animehub-static-v4';
+const DYNAMIC_CACHE = 'animehub-dynamic-v4';
+const API_CACHE = 'animehub-api-v4';
 
 // Cache strategies
 const CACHE_STRATEGIES = {
@@ -69,6 +69,23 @@ self.addEventListener('fetch', (event) => {
   // Bypass streaming/video segment and HLS manifests
   const lowerPath = url.pathname.toLowerCase();
   if (lowerPath.endsWith('.m3u8') || lowerPath.endsWith('.mpd') || lowerPath.endsWith('.ts')) {
+    return;
+  }
+
+  // Let the browser handle stylesheet/script/font caching directly so we never
+  // serve a mixed CSS/JS bundle from the Service Worker cache.
+  if (
+    request.destination === 'style' ||
+    request.destination === 'script' ||
+    request.destination === 'font' ||
+    lowerPath.endsWith('.css') ||
+    lowerPath.endsWith('.js') ||
+    lowerPath.endsWith('.mjs') ||
+    lowerPath.endsWith('.woff') ||
+    lowerPath.endsWith('.woff2') ||
+    lowerPath.endsWith('.ttf') ||
+    lowerPath.endsWith('.otf')
+  ) {
     return;
   }
   
