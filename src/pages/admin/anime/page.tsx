@@ -11,6 +11,7 @@ import EditEpisodeModal from '../../../components/admin/EditEpisodeModal';
 import { EnhancedAnimeImporter } from '../../../components/admin/EnhancedAnimeImporter';
 import { NineAnimeScraperComponent } from '../../../components/admin/NineAnimeScraperComponent';
 import { ReAnimeScraperComponent } from '../../../components/admin/ReAnimeScraperComponent';
+import { SanjiAnimeScraperComponent } from '../../../components/admin/SanjiAnimeScraperComponent';
 import { ScrapedEpisodesModal } from '../../../components/admin/ScrapedEpisodesModal';
 import LargeAnimeScraper from '../../../components/admin/LargeAnimeScraper';
 import { SparkleLoadingSpinner } from '../../../components/base/LoadingSpinner';
@@ -49,7 +50,7 @@ export default function AnimeManagement() {
   const [selectedAnimeForEdit, setSelectedAnimeForEdit] = useState<any>(null);
   const [showImporter, setShowImporter] = useState(false);
   const [showScraper, setShowScraper] = useState(false);
-  const [activeScraperTab, setActiveScraperTab] = useState<'9anime' | 'reanime'>('9anime');
+  const [activeScraperTab, setActiveScraperTab] = useState<'9anime' | 'reanime' | 'sanjianime'>('9anime');
   const [showScrapedEpisodesModal, setShowScrapedEpisodesModal] = useState(false);
   const [scrapedEpisodes, setScrapedEpisodes] = useState<any[]>([]);
   const [failedEpisodes, setFailedEpisodes] = useState<any[]>([]);
@@ -1585,12 +1586,12 @@ This action cannot be undone.`,
                   activeScraperTab === 'reanime' ? 'animate-pulse' : ''
                 }`}>
                   <i className={`text-white text-2xl transition-all duration-300 ${
-                    activeScraperTab === '9anime' ? 'ri-search-line' : 'ri-fire-line'
+                    activeScraperTab === '9anime' ? 'ri-search-line' : activeScraperTab === 'reanime' ? 'ri-fire-line' : 'ri-play-circle-line'
                   }`}></i>
                 </div>
                 <div>
                   <h2 className="text-2xl font-bold text-white drop-shadow">
-                    {activeScraperTab === '9anime' ? '9Anime Scraper' : 'Re:ANIME Scraper'}
+                    {activeScraperTab === '9anime' ? '9Anime Scraper' : activeScraperTab === 'reanime' ? 'Re:ANIME Scraper' : 'Sanji Anime Scraper'}
                   </h2>
                   <p className="text-white/80 text-sm">Streamed progress with SSE</p>
                 </div>
@@ -1620,6 +1621,17 @@ This action cannot be undone.`,
                   <i className="ri-fire-line"></i>
                   Re:ANIME
                 </button>
+                <button
+                  onClick={() => setActiveScraperTab('sanjianime')}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-300 flex items-center gap-1.5 ${
+                    activeScraperTab === 'sanjianime'
+                      ? 'bg-white text-cyan-700 shadow-md scale-105'
+                      : 'text-white/80 hover:text-white hover:bg-white/10'
+                  }`}
+                >
+                  <i className="ri-play-circle-line"></i>
+                  Sanji Anime
+                </button>
               </div>
 
               <button
@@ -1636,8 +1648,10 @@ This action cannot be undone.`,
               <div className="rounded-2xl border border-white/15 bg-white/10 p-4 shadow-lg">
                 {activeScraperTab === '9anime' ? (
                   <NineAnimeScraperComponent initialSelectedAnime={selectedAnimeForScraping} />
-                ) : (
+                ) : activeScraperTab === 'reanime' ? (
                   <ReAnimeScraperComponent initialSelectedAnime={selectedAnimeForScraping} />
+                ) : (
+                  <SanjiAnimeScraperComponent initialSelectedAnime={selectedAnimeForScraping} />
                 )}
               </div>
             </div>

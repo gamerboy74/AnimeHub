@@ -883,46 +883,46 @@ export default function SmartVideoPlayer({
       </div>
 
       {/* Elegant, high-end server switcher directly below the player - matching the Animehub light glassmorphism teal theme */}
-      <div className="bg-white/95 backdrop-blur-md border border-teal-100/80 rounded-2xl p-5 md:p-6 mt-6 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-6 transition-all duration-300 hover:shadow-2xl hover:border-teal-200/80">
+      <div className="bg-white/95 backdrop-blur-md border border-teal-100/80 rounded-2xl p-3 sm:p-4 md:p-6 mt-4 sm:mt-6 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4 sm:gap-5 md:gap-6 transition-all duration-300 hover:shadow-2xl hover:border-teal-200/80">
         {/* Left Info Column */}
-        <div className="flex-1">
+        <div className="flex-1 min-w-0">
           <span className="text-teal-600 text-[10px] font-extrabold uppercase tracking-widest mb-1 block">
             YOU ARE WATCHING
           </span>
-          <h4 className="text-teal-900 text-base md:text-lg font-extrabold tracking-wide flex items-center gap-2">
+          <h4 className="text-teal-900 text-sm sm:text-base md:text-lg font-extrabold tracking-wide flex flex-wrap items-center gap-1 sm:gap-2">
             Episode {episodeNumber}
             {title && (
               <>
                 <span className="text-teal-200 font-normal">|</span>
-                <span className="text-teal-700 font-semibold text-sm md:text-base line-clamp-1">
+                <span className="text-teal-700 font-semibold text-xs sm:text-sm md:text-base line-clamp-1 break-words">
                   {title.replace(/.*- Episode \d+\s*-?\s*/i, '') || title}
                 </span>
               </>
             )}
           </h4>
-          <p className="text-slate-500 text-xs mt-2 flex items-center gap-1.5 font-medium">
+          <p className="text-slate-500 text-[11px] sm:text-xs mt-2 flex items-start gap-1.5 font-medium">
             <i className="ri-information-line text-teal-500 text-sm"></i>
             If current server doesn't work please try other servers beside.
           </p>
         </div>
 
         {/* Right Switchers Column */}
-        <div className="flex flex-col gap-3 min-w-[280px]">
+        <div className="flex flex-col gap-2 sm:gap-3 w-full md:min-w-[280px]">
           {/* SUB Row */}
           {subSources.length > 0 && (
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1.5 min-w-[80px] text-teal-800 text-xs font-black tracking-wider">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+              <div className="flex items-center gap-1.5 text-teal-800 text-[11px] sm:text-xs font-black tracking-wider min-w-0">
                 <i className="ri-closed-captioning-line text-teal-600 text-base"></i>
                 <span>SUB:</span>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-1.5 sm:gap-2">
                 {subSources.map((source, index) => {
                   const isActive = playerState.currentSource?.url === source.url;
                   return (
                     <button
                       key={`sub-${index}-${source.quality}`}
                       onClick={() => selectSource(source)}
-                      className={`px-4 py-1.5 rounded-lg text-xs font-black tracking-wide transition-all duration-300 shadow-md active:scale-95 cursor-pointer ${
+                      className={`px-3 py-1.5 sm:px-4 rounded-lg text-[11px] sm:text-xs font-black tracking-wide transition-all duration-300 shadow-md active:scale-95 cursor-pointer ${
                         isActive
                           ? 'bg-gradient-to-r from-teal-500 to-emerald-600 hover:from-teal-600 hover:to-emerald-700 text-white font-extrabold shadow-[0_4px_12px_rgba(20,184,166,0.3)] border border-transparent'
                           : 'bg-teal-50/60 hover:bg-teal-100/80 text-teal-800 border border-teal-200/50 hover:border-teal-300/60'
@@ -938,19 +938,19 @@ export default function SmartVideoPlayer({
 
           {/* DUB Row */}
           {dubSources.length > 0 && (
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1.5 min-w-[80px] text-teal-800 text-xs font-black tracking-wider">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+              <div className="flex items-center gap-1.5 text-teal-800 text-[11px] sm:text-xs font-black tracking-wider min-w-0">
                 <i className="ri-mic-line text-teal-600 text-base"></i>
                 <span>DUB:</span>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-1.5 sm:gap-2">
                 {dubSources.map((source, index) => {
                   const isActive = playerState.currentSource?.url === source.url;
                   return (
                     <button
                       key={`dub-${index}-${source.quality}`}
                       onClick={() => selectSource(source)}
-                      className={`px-4 py-1.5 rounded-lg text-xs font-black tracking-wide transition-all duration-300 shadow-md active:scale-95 cursor-pointer ${
+                      className={`px-3 py-1.5 sm:px-4 rounded-lg text-[11px] sm:text-xs font-black tracking-wide transition-all duration-300 shadow-md active:scale-95 cursor-pointer ${
                         isActive
                           ? 'bg-gradient-to-r from-teal-500 to-emerald-600 hover:from-teal-600 hover:to-emerald-700 text-white font-extrabold shadow-[0_4px_12px_rgba(20,184,166,0.3)] border border-transparent'
                           : 'bg-teal-50/60 hover:bg-teal-100/80 text-teal-800 border border-teal-200/50 hover:border-teal-300/60'
@@ -1004,6 +1004,7 @@ function HLSVideoPlayer({
   const containerRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const hlsSeekedRef = useRef(false);
+  const controlsHideTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -1013,6 +1014,7 @@ function HLSVideoPlayer({
   const [captionsEnabled, setCaptionsEnabled] = useState(false);
   const [hasCaptions, setHasCaptions] = useState(false);
   const [isSeeking, setIsSeeking] = useState(false);
+  const [controlsVisible, setControlsVisible] = useState(true);
 
   const formatTime = useCallback((timeInSeconds: number) => {
     if (!Number.isFinite(timeInSeconds) || timeInSeconds < 0) return '0:00';
@@ -1076,6 +1078,26 @@ function HLSVideoPlayer({
     }
   }, []);
 
+  const clearControlsHideTimer = useCallback(() => {
+    if (controlsHideTimerRef.current) {
+      clearTimeout(controlsHideTimerRef.current);
+      controlsHideTimerRef.current = null;
+    }
+  }, []);
+
+  const showControls = useCallback((shouldAutoHide = false) => {
+    setControlsVisible(true);
+    clearControlsHideTimer();
+
+    if (!shouldAutoHide) return;
+
+    controlsHideTimerRef.current = setTimeout(() => {
+      const video = videoRef.current;
+      if (!video || video.paused || video.ended || isSeeking) return;
+      setControlsVisible(false);
+    }, 3000);
+  }, [clearControlsHideTimer, isSeeking]);
+
   const toggleFullscreen = useCallback(async () => {
     const video = videoRef.current;
     const container = containerRef.current;
@@ -1134,6 +1156,7 @@ function HLSVideoPlayer({
 
   useEffect(() => {
     hlsSeekedRef.current = false;
+    clearControlsHideTimer();
     setIsPlaying(false);
     setCurrentTime(0);
     setDuration(0);
@@ -1142,7 +1165,19 @@ function HLSVideoPlayer({
     setQualityLevels([]);
     setCaptionsEnabled(false);
     setHasCaptions(false);
-  }, [src]);
+    setControlsVisible(true);
+  }, [src, clearControlsHideTimer]);
+
+  useEffect(() => {
+    if (isPlaying && !isSeeking) {
+      showControls(true);
+    } else {
+      clearControlsHideTimer();
+      setControlsVisible(true);
+    }
+
+    return clearControlsHideTimer;
+  }, [isPlaying, isSeeking, showControls, clearControlsHideTimer]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -1235,15 +1270,23 @@ function HLSVideoPlayer({
     return () => {
       video.removeEventListener('play', handlePlay);
       video.removeEventListener('playing', handlePlaying);
+      clearControlsHideTimer();
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
       }
     };
-  }, [src, startTime]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [src, startTime, clearControlsHideTimer, seekToStartTime]);
 
   return (
-    <div ref={containerRef} className="relative w-full h-full bg-black overflow-hidden group">
+    <div
+      ref={containerRef}
+      className="relative w-full h-full bg-black overflow-hidden group"
+      onMouseMove={() => showControls(isPlaying)}
+      onMouseEnter={() => showControls(isPlaying)}
+      onTouchStart={() => showControls(isPlaying)}
+      onClick={() => showControls(isPlaying)}
+    >
       <video
         ref={videoRef}
         className="w-full h-full object-contain bg-black"
@@ -1265,14 +1308,17 @@ function HLSVideoPlayer({
           seekToStartTime(event.currentTarget);
           const video = event.currentTarget;
           setIsMuted(video.muted);
+          showControls(true);
         }}
         onPause={() => {
           setIsPlaying(false);
           onPause?.();
+          showControls(false);
         }}
         onEnded={() => {
           setIsPlaying(false);
           onEnded?.();
+          showControls(false);
         }}
         onVolumeChange={(event) => {
           const video = event.currentTarget;
@@ -1307,8 +1353,8 @@ function HLSVideoPlayer({
         }}
       />
 
-      <div className="absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/90 via-black/60 to-transparent px-3 py-3 sm:px-4 sm:py-4">
-        <div className="mb-3 flex items-center gap-3">
+      <div className={`absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/90 via-black/60 to-transparent px-2 py-1.5 sm:px-3 sm:py-3 md:px-4 md:py-4 transition-opacity duration-300 ${controlsVisible || !isPlaying ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+        <div className="mb-1.5 sm:mb-3 flex items-center gap-2 sm:gap-3">
           <span className="hidden text-[10px] font-semibold uppercase tracking-[0.2em] text-white/60 sm:inline">Seek</span>
           <input
             type="range"
@@ -1327,41 +1373,41 @@ function HLSVideoPlayer({
           />
         </div>
 
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-2 sm:gap-3">
+        <div className="flex items-center justify-between gap-2 sm:gap-3">
+          <div className="flex min-w-0 items-center gap-1 sm:gap-3">
             <button
               type="button"
               onClick={() => seekBy(-10)}
-              className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20"
+              className="inline-flex h-8 w-8 sm:h-10 sm:w-10 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20"
               aria-label="Skip backward 10 seconds"
             >
-              <i className="ri-rewind-mini-line text-lg" />
+              <i className="ri-rewind-mini-line text-base sm:text-lg" />
             </button>
 
             <button
               type="button"
               onClick={togglePlay}
-              className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-emerald-500 text-black transition hover:bg-emerald-400"
+              className="inline-flex h-9 w-9 sm:h-11 sm:w-11 items-center justify-center rounded-full bg-emerald-500 text-black transition hover:bg-emerald-400"
               aria-label={isPlaying ? 'Pause' : 'Play'}
             >
-              <i className={`text-xl ${isPlaying ? 'ri-pause-fill' : 'ri-play-fill'}`} />
+              <i className={`text-lg sm:text-xl ${isPlaying ? 'ri-pause-fill' : 'ri-play-fill'}`} />
             </button>
 
             <button
               type="button"
               onClick={() => seekBy(10)}
-              className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20"
+              className="inline-flex h-8 w-8 sm:h-10 sm:w-10 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20"
               aria-label="Skip forward 10 seconds"
             >
-              <i className="ri-speed-mini-line text-lg" />
+              <i className="ri-speed-mini-line text-base sm:text-lg" />
             </button>
 
-            <span className="hidden text-xs font-medium text-white/75 sm:inline">
+            <span className="hidden text-[11px] font-medium text-white/75 sm:inline sm:text-xs">
               {formatTime(currentTime)} / {formatTime(duration)}
             </span>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+          <div className="flex shrink-0 items-center gap-1 sm:gap-2 sm:justify-end">
             <button
               type="button"
               onClick={() => {
@@ -1370,10 +1416,10 @@ function HLSVideoPlayer({
                 video.muted = !video.muted;
                 setIsMuted(video.muted);
               }}
-              className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/20"
+              className="inline-flex h-8 items-center gap-1 rounded-full bg-white/10 px-2 text-[11px] sm:h-auto sm:px-2.5 sm:py-2 sm:text-xs font-semibold text-white transition hover:bg-white/20"
               aria-label={isMuted ? 'Unmute' : 'Mute'}
             >
-              <i className={isMuted ? 'ri-volume-mute-line' : 'ri-volume-up-line'} />
+              <i className={`${isMuted ? 'ri-volume-mute-line' : 'ri-volume-up-line'} text-sm`} />
               <span className="hidden sm:inline">{isMuted ? 'Muted' : 'Sound'}</span>
             </button>
 
@@ -1381,19 +1427,19 @@ function HLSVideoPlayer({
               type="button"
               onClick={toggleCaptions}
               disabled={!hasCaptions}
-              className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex h-8 items-center gap-1 rounded-full bg-white/10 px-2 text-[11px] sm:h-auto sm:px-2.5 sm:py-2 sm:text-xs font-semibold text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
               aria-label={captionsEnabled ? 'Turn captions off' : 'Turn captions on'}
             >
-              <i className="ri-closed-captioning-line" />
+              <i className="ri-closed-captioning-line text-sm" />
               <span className="hidden sm:inline">{captionsEnabled ? 'CC On' : 'CC Off'}</span>
             </button>
 
-            <label className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/20">
-              <i className="ri-settings-3-line" />
+            <label className="inline-flex h-8 items-center gap-1 rounded-full bg-white/10 px-2 text-[11px] sm:h-auto sm:px-2.5 sm:py-2 sm:text-xs font-semibold text-white transition hover:bg-white/20">
+              <i className="ri-settings-3-line hidden text-sm sm:inline" />
               <select
                 value={selectedQuality}
                 onChange={(event) => changeQuality(event.target.value)}
-                className="min-w-[92px] appearance-none rounded-md border border-white/10 bg-transparent px-2 py-1 text-xs text-white outline-none"
+                className="min-w-[60px] sm:min-w-[92px] appearance-none rounded-md border border-white/10 bg-transparent px-1 py-0.5 text-[11px] sm:px-1.5 sm:py-1 sm:text-xs text-white outline-none"
                 aria-label="Select quality"
               >
                 {qualityLevels.length === 0 ? (
@@ -1411,10 +1457,10 @@ function HLSVideoPlayer({
             <button
               type="button"
               onClick={() => { void toggleFullscreen(); }}
-              className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/20"
+              className="inline-flex h-8 items-center gap-1 rounded-full bg-white/10 px-2 text-[11px] sm:h-auto sm:px-2.5 sm:py-2 sm:text-xs font-semibold text-white transition hover:bg-white/20"
               aria-label="Toggle fullscreen"
             >
-              <i className="ri-fullscreen-line" />
+              <i className="ri-fullscreen-line text-sm" />
               <span className="hidden sm:inline">Fullscreen</span>
             </button>
           </div>

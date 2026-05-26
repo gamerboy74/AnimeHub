@@ -52,6 +52,12 @@ export class VideoService {
         lowerUrl.includes('2anime.xyz') ||
         lowerUrl.includes('2m.2anime.xyz') ||
         lowerUrl.includes('hianime.do') ||
+      lowerUrl.includes('sanjianime.com') ||
+      lowerUrl.includes('app.videas.fr') ||
+      lowerUrl.includes('player.apnshare.org') ||
+      lowerUrl.includes('player.fairuseonly.xyz') ||
+      lowerUrl.includes('animexyz.upns.online') ||
+      lowerUrl.includes('archive.org/items') ||
         lowerUrl.includes('crunchyroll.com') ||
         lowerUrl.includes('bloggy.click') ||     // megacloud.bloggy.click
         lowerUrl.includes('bysesayeveum.com') ||  // 9anime alternate embed host
