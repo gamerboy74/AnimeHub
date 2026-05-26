@@ -640,7 +640,22 @@ export default function SmartVideoPlayer({
         controls
         autoPlay={autoPlay}
         crossOrigin="anonymous"
-        onTimeUpdate={handleTimeUpdate}
+        onTimeUpdate={(e) => {
+          const video = e.currentTarget;
+          seekToStartTimeDirect(video);
+          if (onTimeUpdate) {
+            onTimeUpdate(video.currentTime, video.duration || 0);
+          }
+        }}
+        onLoadedMetadata={(e) => {
+          seekToStartTimeDirect(e.currentTarget);
+        }}
+        onCanPlay={(e) => {
+          seekToStartTimeDirect(e.currentTarget);
+        }}
+        onDurationChange={(e) => {
+          seekToStartTimeDirect(e.currentTarget);
+        }}
         onPlay={(e) => {
           handlePlay();
           seekToStartTimeDirect(e.currentTarget);
@@ -1305,6 +1320,7 @@ function HLSVideoPlayer({
           setCurrentTime(video.currentTime);
           setDuration(video.duration || 0);
           onTimeUpdate?.(event);
+          seekToStartTime(video);
         }}
         onPlay={(event) => {
           setIsPlaying(true);
@@ -1313,6 +1329,9 @@ function HLSVideoPlayer({
           const video = event.currentTarget;
           setIsMuted(video.muted);
           showControls(true);
+        }}
+        onPlaying={(event) => {
+          seekToStartTime(event.currentTarget);
         }}
         onPause={() => {
           setIsPlaying(false);
@@ -1329,16 +1348,26 @@ function HLSVideoPlayer({
           setIsMuted(video.muted);
         }}
         onDurationChange={(event) => {
-          setDuration(event.currentTarget.duration || 0);
+          const video = event.currentTarget;
+          setDuration(video.duration || 0);
+          seekToStartTime(video);
         }}
         onLoadedMetadata={(event) => {
-          setDuration(event.currentTarget.duration || 0);
+          const video = event.currentTarget;
+          setDuration(video.duration || 0);
+          seekToStartTime(video);
+        }}
+        onCanPlay={(event) => {
+          seekToStartTime(event.currentTarget);
         }}
         onLoadStart={() => {
           onLoadStart?.();
           optimizeBuffer?.();
         }}
-        onLoadedData={onLoadedData}
+        onLoadedData={(event) => {
+          onLoadedData?.();
+          seekToStartTime(event.currentTarget);
+        }}
         onProgress={onProgress}
         onWaiting={onProgress}
         onError={(e) => {
