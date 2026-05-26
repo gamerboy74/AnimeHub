@@ -883,46 +883,50 @@ export default function SmartVideoPlayer({
       </div>
 
       {/* Elegant, high-end server switcher directly below the player - matching the Animehub light glassmorphism teal theme */}
-      <div className="bg-white/95 backdrop-blur-md border border-teal-100/80 rounded-2xl p-3 sm:p-4 md:p-6 mt-4 sm:mt-6 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4 sm:gap-5 md:gap-6 transition-all duration-300 hover:shadow-2xl hover:border-teal-200/80">
+      <div className="bg-white/95 backdrop-blur-md border border-teal-100/80 rounded-2xl p-3 sm:p-4 md:p-5 mt-3 sm:mt-4 shadow-xl flex flex-col lg:flex-row lg:items-start justify-between gap-3 sm:gap-4 md:gap-5 transition-all duration-300 hover:shadow-2xl hover:border-teal-200/80">
         {/* Left Info Column */}
-        <div className="flex-1 min-w-0">
-          <span className="text-teal-600 text-[10px] font-extrabold uppercase tracking-widest mb-1 block">
+        <div className="flex-1 min-w-0 space-y-1.5">
+          <span className="hidden sm:block text-teal-600 text-[10px] font-extrabold uppercase tracking-widest">
             YOU ARE WATCHING
           </span>
-          <h4 className="text-teal-900 text-sm sm:text-base md:text-lg font-extrabold tracking-wide flex flex-wrap items-center gap-1 sm:gap-2">
-            Episode {episodeNumber}
+          <h4 className="flex flex-wrap items-center gap-1 sm:gap-2 text-teal-900 text-sm sm:text-base md:text-lg font-extrabold tracking-wide leading-tight">
+            <span className="sm:hidden text-[10px] font-extrabold uppercase tracking-[0.18em] text-teal-500">
+              Watching
+            </span>
+            <span className="sm:hidden text-teal-200 font-normal">|</span>
+            <span>Episode {episodeNumber}</span>
             {title && (
               <>
                 <span className="text-teal-200 font-normal">|</span>
-                <span className="text-teal-700 font-semibold text-xs sm:text-sm md:text-base line-clamp-1 break-words">
+                <span className="min-w-0 text-teal-700 font-semibold text-xs sm:text-sm md:text-base line-clamp-1 break-words">
                   {title.replace(/.*- Episode \d+\s*-?\s*/i, '') || title}
                 </span>
               </>
             )}
           </h4>
-          <p className="text-slate-500 text-[11px] sm:text-xs mt-2 flex items-start gap-1.5 font-medium">
+          <p className="hidden sm:flex text-slate-500 text-[11px] sm:text-xs items-start gap-1.5 font-medium max-w-2xl">
             <i className="ri-information-line text-teal-500 text-sm"></i>
             If current server doesn't work please try other servers beside.
           </p>
         </div>
 
         {/* Right Switchers Column */}
-        <div className="flex flex-col gap-2 sm:gap-3 w-full md:min-w-[280px]">
+        <div className="flex flex-col gap-1.5 sm:gap-2 w-full lg:min-w-[280px] lg:max-w-[520px]">
           {/* SUB Row */}
           {subSources.length > 0 && (
-            <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
-              <div className="flex items-center gap-1.5 text-teal-800 text-[11px] sm:text-xs font-black tracking-wider min-w-0">
+            <div className="flex flex-row items-center gap-2 sm:gap-3">
+              <div className="hidden sm:flex items-center gap-1.5 text-teal-800 text-[11px] sm:text-xs font-black tracking-wider min-w-0 shrink-0">
                 <i className="ri-closed-captioning-line text-teal-600 text-base"></i>
                 <span>SUB:</span>
               </div>
-              <div className="flex flex-wrap gap-1.5 sm:gap-2">
+              <div className="flex flex-nowrap overflow-x-auto max-w-full gap-1.5 sm:gap-2 pb-1 sm:pb-0 no-scrollbar">
                 {subSources.map((source, index) => {
                   const isActive = playerState.currentSource?.url === source.url;
                   return (
                     <button
                       key={`sub-${index}-${source.quality}`}
                       onClick={() => selectSource(source)}
-                      className={`px-3 py-1.5 sm:px-4 rounded-lg text-[11px] sm:text-xs font-black tracking-wide transition-all duration-300 shadow-md active:scale-95 cursor-pointer ${
+                      className={`shrink-0 px-2.5 py-1.5 sm:px-4 rounded-lg text-[10px] sm:text-xs font-black tracking-wide transition-all duration-300 shadow-md active:scale-95 cursor-pointer ${
                         isActive
                           ? 'bg-gradient-to-r from-teal-500 to-emerald-600 hover:from-teal-600 hover:to-emerald-700 text-white font-extrabold shadow-[0_4px_12px_rgba(20,184,166,0.3)] border border-transparent'
                           : 'bg-teal-50/60 hover:bg-teal-100/80 text-teal-800 border border-teal-200/50 hover:border-teal-300/60'
@@ -938,19 +942,19 @@ export default function SmartVideoPlayer({
 
           {/* DUB Row */}
           {dubSources.length > 0 && (
-            <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
-              <div className="flex items-center gap-1.5 text-teal-800 text-[11px] sm:text-xs font-black tracking-wider min-w-0">
+            <div className="flex flex-row items-center gap-2 sm:gap-3">
+              <div className="hidden sm:flex items-center gap-1.5 text-teal-800 text-[11px] sm:text-xs font-black tracking-wider min-w-0 shrink-0">
                 <i className="ri-mic-line text-teal-600 text-base"></i>
                 <span>DUB:</span>
               </div>
-              <div className="flex flex-wrap gap-1.5 sm:gap-2">
+              <div className="flex flex-nowrap overflow-x-auto max-w-full gap-1.5 sm:gap-2 pb-1 sm:pb-0 no-scrollbar">
                 {dubSources.map((source, index) => {
                   const isActive = playerState.currentSource?.url === source.url;
                   return (
                     <button
                       key={`dub-${index}-${source.quality}`}
                       onClick={() => selectSource(source)}
-                      className={`px-3 py-1.5 sm:px-4 rounded-lg text-[11px] sm:text-xs font-black tracking-wide transition-all duration-300 shadow-md active:scale-95 cursor-pointer ${
+                      className={`shrink-0 px-2.5 py-1.5 sm:px-4 rounded-lg text-[10px] sm:text-xs font-black tracking-wide transition-all duration-300 shadow-md active:scale-95 cursor-pointer ${
                         isActive
                           ? 'bg-gradient-to-r from-teal-500 to-emerald-600 hover:from-teal-600 hover:to-emerald-700 text-white font-extrabold shadow-[0_4px_12px_rgba(20,184,166,0.3)] border border-transparent'
                           : 'bg-teal-50/60 hover:bg-teal-100/80 text-teal-800 border border-teal-200/50 hover:border-teal-300/60'
