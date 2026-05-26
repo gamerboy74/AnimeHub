@@ -452,17 +452,22 @@ export default function SmartVideoPlayer({
     });
 
     return (
-      <iframe
-        ref={iframeRef}
+      <IframePlayer
         src={embedUrl}
         title={title}
-        className="w-full h-full"
-        allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
-        loading="lazy"
+        width="100%"
+        height="100%"
+        animeId={animeId}
+        episodeNumber={episodeNumber}
+        estimatedDuration={1440}
+        onProgressUpdate={onProgressUpdate}
+        onTimeUpdate={onTimeUpdate}
+        startTime={startTime}
         onLoad={() => {
           handleYouTubeReady();
           setPlayerState(prev => ({ ...prev, isLoading: false }));
         }}
+        className="w-full h-full"
       />
     );
   };

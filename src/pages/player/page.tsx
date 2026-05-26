@@ -47,6 +47,9 @@ export default function PlayerPage() {
     return sourceType === 'iframe';
   }, [sources]);
 
+  const lastSavedProgressRef = useRef<number>(0);
+  const lastSavedTimeRef = useRef<number>(0);
+
   // Handle player events
   const handleTimeUpdate = (currentTime: number, _duration: number) => {
     setCurrentTime(currentTime);
@@ -55,6 +58,24 @@ export default function PlayerPage() {
   // Handle progress updates from embedded players with accuracy information
   const handleProgressUpdate = async (progress: number, accuracy: 'accurate' | 'estimated' | 'manual') => {
     if (!animeId || !episode) return;
+
+    const now = Date.now();
+    const progressDiff = Math.abs(progress - lastSavedProgressRef.current);
+    const timeDiff = now - lastSavedTimeRef.current;
+
+    // Only save progress to database if:
+    // 1. Accuracy is 'manual' (milestone override)
+    // 2. Or, at least 5 seconds have elapsed since last DB save AND progress has changed by at least 3 seconds
+    if (accuracy !== 'manual' && timeDiff < 5000 && progressDiff < 3) {
+      // Synchronously write to localStorage for instant backup
+      const key = `watch_progress_${animeId}_${episode}`;
+      localStorage.setItem(key, Math.floor(progress).toString());
+      localStorage.setItem(`${key}_accuracy`, accuracy);
+      return;
+    }
+
+    lastSavedProgressRef.current = progress;
+    lastSavedTimeRef.current = now;
 
     try {
       switch (accuracy) {

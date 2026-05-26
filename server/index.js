@@ -416,6 +416,30 @@ async function loadVideo() {
     if (!data.success || !data.hlsUrl) throw new Error(data.error || 'No stream URL returned');
     const hlsUrl = data.hlsUrl;
     console.log('✅ Got HLS:', hlsUrl.substring(0, 80));
+    
+    let seeked = false;
+    const seekToStart = () => {
+      if (seeked) return;
+      var st = ${startTime};
+      if (st > 0 && video.readyState >= 2) {
+        const duration = video.duration;
+        if (duration && !isNaN(duration) && duration > 0) {
+          video.currentTime = Math.min(st, duration - 1);
+          seeked = true;
+          console.log('✅ Bulletproof seeked to:', st, 'duration:', duration);
+        } else {
+          console.log('⏳ player ready but duration is not resolved yet:', duration);
+        }
+      }
+    };
+    video.addEventListener('play', seekToStart);
+    video.addEventListener('playing', seekToStart);
+    video.addEventListener('loadedmetadata', seekToStart);
+    video.addEventListener('loadeddata', seekToStart);
+    video.addEventListener('canplay', seekToStart);
+    video.addEventListener('durationchange', seekToStart);
+    video.addEventListener('timeupdate', seekToStart);
+
     if (Hls.isSupported()) {
       const hls = new Hls({ enableWorker: true, lowLatencyMode: false, maxBufferLength: 30 });
       hls.loadSource(hlsUrl);
@@ -424,18 +448,6 @@ async function loadVideo() {
         loader.style.display = 'none'; 
         video.play().catch(()=>{}); 
       });
-      let seeked = false;
-      const seekToStart = () => {
-        if (seeked) return;
-        var st = ${startTime};
-        if (st > 0 && video.readyState >= 2) {
-          video.currentTime = st;
-          seeked = true;
-          console.log('✅ Bulletproof seeked to:', st);
-        }
-      };
-      video.addEventListener('play', seekToStart);
-      video.addEventListener('playing', seekToStart);
       hls.on(Hls.Events.ERROR, (e, d) => {
         if (d.fatal) {
           console.error('HLS fatal error:', d);
@@ -445,7 +457,11 @@ async function loadVideo() {
       });
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = hlsUrl;
-      video.addEventListener('loadedmetadata', () => { loader.style.display = 'none'; var st = ${startTime}; if (st > 0) video.currentTime = st; video.play().catch(()=>{}); });
+      video.addEventListener('loadedmetadata', () => { 
+        loader.style.display = 'none'; 
+        seekToStart();
+        video.play().catch(()=>{}); 
+      });
     } else {
       showError('HLS not supported in this browser');
     }
@@ -537,6 +553,30 @@ async function loadVideo() {
     if (!data.success || !data.hlsUrl) throw new Error(data.error || 'No stream URL returned');
     const hlsUrl = data.hlsUrl;
     console.log('✅ Got HLS:', hlsUrl.substring(0, 80));
+    
+    let seeked = false;
+    const seekToStart = () => {
+      if (seeked) return;
+      var st = ${startTime};
+      if (st > 0 && video.readyState >= 2) {
+        const duration = video.duration;
+        if (duration && !isNaN(duration) && duration > 0) {
+          video.currentTime = Math.min(st, duration - 1);
+          seeked = true;
+          console.log('✅ Bulletproof seeked to:', st, 'duration:', duration);
+        } else {
+          console.log('⏳ player ready but duration is not resolved yet:', duration);
+        }
+      }
+    };
+    video.addEventListener('play', seekToStart);
+    video.addEventListener('playing', seekToStart);
+    video.addEventListener('loadedmetadata', seekToStart);
+    video.addEventListener('loadeddata', seekToStart);
+    video.addEventListener('canplay', seekToStart);
+    video.addEventListener('durationchange', seekToStart);
+    video.addEventListener('timeupdate', seekToStart);
+
     if (Hls.isSupported()) {
       const hls = new Hls({ enableWorker: true, lowLatencyMode: false, maxBufferLength: 30 });
       hls.loadSource(hlsUrl);
@@ -545,18 +585,6 @@ async function loadVideo() {
         loader.style.display = 'none'; 
         video.play().catch(()=>{}); 
       });
-      let seeked = false;
-      const seekToStart = () => {
-        if (seeked) return;
-        var st = ${startTime};
-        if (st > 0 && video.readyState >= 2) {
-          video.currentTime = st;
-          seeked = true;
-          console.log('✅ Bulletproof seeked to:', st);
-        }
-      };
-      video.addEventListener('play', seekToStart);
-      video.addEventListener('playing', seekToStart);
       hls.on(Hls.Events.ERROR, (e, d) => {
         if (d.fatal) {
           console.error('HLS fatal error:', d);
@@ -566,7 +594,11 @@ async function loadVideo() {
       });
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = hlsUrl;
-      video.addEventListener('loadedmetadata', () => { loader.style.display = 'none'; var st = ${startTime}; if (st > 0) video.currentTime = st; video.play().catch(()=>{}); });
+      video.addEventListener('loadedmetadata', () => { 
+        loader.style.display = 'none'; 
+        seekToStart();
+        video.play().catch(()=>{}); 
+      });
     } else {
       showError('HLS not supported in this browser');
     }

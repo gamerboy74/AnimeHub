@@ -84,17 +84,90 @@ export const IframePlayer: React.FC<IframePlayerProps> = ({
         console.warn('Received message from unknown origin:', origin);
       }
 
-      // Handle different message formats from embedded players
-      if (event.data && typeof event.data === 'object') {
-        // Video.js format
-        if (event.data.type === 'videojs' || event.data.event === 'timeupdate') {
-          const currentTime = event.data.currentTime || event.data.time || 0;
-          const duration = event.data.duration || estimatedDuration;
-          
+      // Try parsing stringified JSON payloads (common for some embedded players like Vimeo/JWPlayer)
+      let data = event.data;
+      if (typeof data === 'string') {
+        try {
+          data = JSON.parse(data);
+        } catch (e) {
+          // Check for query-string style key/value message format or custom comma-separated fields
+          if (data.includes('timeupdate') || data.includes('currentTime')) {
+            const match = data.match(/(?:timeupdate|currentTime)[\s,:=]+([0-9.]+)/i);
+            if (match) {
+              data = { event: 'timeupdate', currentTime: parseFloat(match[1]) };
+            }
+          }
+        }
+      }
+
+      if (data && typeof data === 'object') {
+        let isMatch = false;
+        let currentTime = 0;
+        let duration = estimatedDuration;
+        let paused = false;
+
+        // 1. Try to find the event name/type (case-insensitive)
+        const eventName = (data.event || data.type || data.method || data.msg || '').toLowerCase();
+
+        // 2. Try standard / videojs keys first, checking multiple paths and handling strings/numbers
+        let ct = data.currentTime ?? data.currentTimeSeconds ?? data.time ?? data.videoTime ?? data.position ?? data.seconds ?? data.value;
+        if (ct === undefined && data.data && typeof data.data === 'object') {
+          ct = data.data.currentTime ?? data.data.time ?? data.data.position ?? data.data.seconds;
+        }
+        if (ct === undefined && data.payload && typeof data.payload === 'object') {
+          ct = data.payload.currentTime ?? data.payload.time ?? data.payload.position;
+        }
+
+        const parsedTime = ct !== undefined ? parseFloat(String(ct)) : NaN;
+        const isValidTime = !isNaN(parsedTime) && parsedTime >= 0;
+
+        // 3. Try standard duration keys, checking multiple paths
+        let dur = data.duration ?? data.videoDuration ?? data.totalTime ?? data.length;
+        if (dur === undefined && data.data && typeof data.data === 'object') {
+          dur = data.data.duration ?? data.data.length;
+        }
+        if (dur === undefined && data.payload && typeof data.payload === 'object') {
+          dur = data.payload.duration;
+        }
+        const parsedDuration = dur !== undefined ? parseFloat(String(dur)) : NaN;
+
+        // 4. Try standard paused keys, checking multiple paths
+        let ps = data.paused ?? data.isPaused;
+        if (ps === undefined && data.data && typeof data.data === 'object') {
+          ps = data.data.paused;
+        }
+
+        // Determine if it matches any known timeupdate structure or has explicit active tracking numbers
+        if (
+          eventName.includes('timeupdate') || 
+          eventName.includes('progress') || 
+          eventName.includes('playback') ||
+          data.type === 'videojs' ||
+          (isValidTime && parsedTime > 0)
+        ) {
+          isMatch = true;
+          currentTime = parsedTime || 0;
+          duration = !isNaN(parsedDuration) && parsedDuration > 0 ? parsedDuration : estimatedDuration;
+          paused = ps === true || ps === 'true';
+        }
+
+        if (isMatch) {
+          // Prevent premature progress overwriting
+          const isInitialSeekPending = startTime > 5 && !hasSeekedRef.current;
+          if (isInitialSeekPending && currentTime < startTime - 5) {
+            console.log(`⏳ Ignoring pre-seek postMessage: ${currentTime}s (initial seek to ${startTime}s pending)`);
+            return;
+          }
+
+          if (startTime > 5 && !hasSeekedRef.current && currentTime >= startTime - 5) {
+            console.log(`🎯 Initial seek resolved via postMessage playback at ${currentTime}s (start: ${startTime}s)`);
+            hasSeekedRef.current = true;
+          }
+
           setVideoState({
             currentTime,
             duration,
-            paused: event.data.paused || false,
+            paused,
             source: 'postmessage'
           });
           
@@ -102,26 +175,6 @@ export const IframePlayer: React.FC<IframePlayerProps> = ({
           onTimeUpdate?.(currentTime, duration);
           
           // Update progress with accurate data
-          if (currentTime > 0 && onProgressUpdate) {
-            onProgressUpdate(currentTime, 'accurate');
-          }
-        }
-        
-        // Generic video player format
-        if (event.data.currentTime !== undefined || event.data.videoTime !== undefined) {
-          const currentTime = event.data.currentTime || event.data.videoTime || 0;
-          const duration = event.data.duration || event.data.videoDuration || estimatedDuration;
-          
-          setVideoState({
-            currentTime,
-            duration,
-            paused: event.data.paused || false,
-            source: 'postmessage'
-          });
-          
-          setHasReceivedPostMessage(true); // Mark that we received postMessage data
-          onTimeUpdate?.(currentTime, duration);
-          
           if (currentTime > 0 && onProgressUpdate) {
             onProgressUpdate(currentTime, 'accurate');
           }
@@ -134,7 +187,7 @@ export const IframePlayer: React.FC<IframePlayerProps> = ({
     return () => {
       window.removeEventListener('message', handleMessage);
     };
-  }, [estimatedDuration, onProgressUpdate, onTimeUpdate]);
+  }, [estimatedDuration, onProgressUpdate, onTimeUpdate, startTime]);
 
   // Request video state from embedded player via postMessage
   const requestVideoState = useCallback(() => {
