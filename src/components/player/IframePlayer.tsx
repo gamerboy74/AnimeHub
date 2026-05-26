@@ -229,9 +229,12 @@ export const IframePlayer: React.FC<IframePlayerProps> = ({
         if (videoElement) {
           // Auto-Resume: Seek to start time on load once, checking readyState to avoid browser discard
           if (!hasSeekedRef.current && startTime && startTime > 0 && videoElement.readyState >= 2) {
-            console.log(`🚀 Resuming same-origin iframe HTML5 video to saved progress: ${startTime}s (readyState: ${videoElement.readyState})`);
-            videoElement.currentTime = startTime;
-            hasSeekedRef.current = true;
+            const duration = videoElement.duration;
+            if (duration && !isNaN(duration) && duration > 0) {
+              console.log(`🚀 Resuming same-origin iframe HTML5 video to saved progress: ${startTime}s (readyState: ${videoElement.readyState}, duration: ${duration}s)`);
+              videoElement.currentTime = Math.min(startTime, duration - 1);
+              hasSeekedRef.current = true;
+            }
           }
 
           // Tracking: Retrieve current time and state

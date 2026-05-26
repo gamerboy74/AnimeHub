@@ -82,9 +82,14 @@ export default function SmartVideoPlayer({
   const seekToStartTimeDirect = useCallback((video: HTMLVideoElement) => {
     if (!directSeekedRef.current && startTime && startTime > 0) {
       if (video.readyState >= 2) { // readyState >= 2 (HAVE_CURRENT_DATA) is required for browser seek to succeed
-        console.log(`🚀 Executing robust direct HTML5 seek to: ${startTime}s (readyState: ${video.readyState})`);
-        video.currentTime = startTime;
-        directSeekedRef.current = true;
+        const duration = video.duration;
+        if (duration && !isNaN(duration) && duration > 0) {
+          console.log(`🚀 Executing robust direct HTML5 seek to: ${startTime}s (readyState: ${video.readyState}, duration: ${duration}s)`);
+          video.currentTime = Math.min(startTime, duration - 1);
+          directSeekedRef.current = true;
+        } else {
+          console.log(`⏳ Direct HTML5 player readyState is ${video.readyState} but duration is ${duration} (not seekable yet)`);
+        }
       } else {
         console.log(`⏳ Direct HTML5 player not ready for seek yet (readyState: ${video.readyState})`);
       }
@@ -1143,9 +1148,14 @@ function HLSVideoPlayer({
 
   const seekToStartTime = useCallback((video: HTMLVideoElement) => {
     if (!hlsSeekedRef.current && startTime && startTime > 0 && video.readyState >= 2) {
-      console.log(`🚀 Executing robust HLS seek to: ${startTime}s (readyState: ${video.readyState})`);
-      video.currentTime = startTime;
-      hlsSeekedRef.current = true;
+      const duration = video.duration;
+      if (duration && !isNaN(duration) && duration > 0) {
+        console.log(`🚀 Executing robust HLS seek to: ${startTime}s (readyState: ${video.readyState}, duration: ${duration}s)`);
+        video.currentTime = Math.min(startTime, duration - 1);
+        hlsSeekedRef.current = true;
+      } else {
+        console.log(`⏳ HLS player readyState is ${video.readyState} but duration is ${duration} (not seekable yet)`);
+      }
     }
   }, [startTime]);
 
