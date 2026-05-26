@@ -26,19 +26,29 @@ export class VideoService {
     
     const lowerUrl = url.toLowerCase();
     
-    // YouTube detection
+    // 1. YouTube detection
     if (lowerUrl.includes('youtube.com') || lowerUrl.includes('youtu.be')) {
       return 'youtube';
     }
 
-    // Re:ANIME/Flixcloud embeds should be treated as iframe sources
+    // 2. Direct media file checks (highest priority after YouTube)
+    // Check HLS streams first (.m3u8 manifest files)
+    if (lowerUrl.includes('.m3u8') || lowerUrl.match(/\.m3u8(?:\?|$|#)/)) {
+      return 'hls';
+    }
+    
+    // Check direct progressive video files
+    if (lowerUrl.match(/\.(?:mp4|webm|avi|mkv|mov|flv)(?:\?|$|#)/i) || lowerUrl.endsWith('.mp4') || lowerUrl.endsWith('.webm')) {
+      return 'direct';
+    }
+
+    // 3. Specific Embed / Iframe sites
     if (lowerUrl.includes('flixcloud.cc') ||
         lowerUrl.includes('reanime.to/watch') ||
         lowerUrl.includes('reanime.to/anime')) {
       return 'iframe';
     }
     
-    // Anime streaming sites that require iframe embedding
     if (lowerUrl.includes('anikai.to') || 
         lowerUrl.includes('9anime') || 
         lowerUrl.includes('zoro.to') ||
@@ -52,12 +62,12 @@ export class VideoService {
         lowerUrl.includes('2anime.xyz') ||
         lowerUrl.includes('2m.2anime.xyz') ||
         lowerUrl.includes('hianime.do') ||
-      lowerUrl.includes('sanjianime.com') ||
-      lowerUrl.includes('app.videas.fr') ||
-      lowerUrl.includes('player.apnshare.org') ||
-      lowerUrl.includes('player.fairuseonly.xyz') ||
-      lowerUrl.includes('animexyz.upns.online') ||
-      lowerUrl.includes('archive.org/items') ||
+        lowerUrl.includes('sanjianime.com') ||
+        lowerUrl.includes('app.videas.fr') ||
+        lowerUrl.includes('player.apnshare.org') ||
+        lowerUrl.includes('player.fairuseonly.xyz') ||
+        lowerUrl.includes('animexyz.upns.online') ||
+        lowerUrl.includes('archive.org') ||
         lowerUrl.includes('crunchyroll.com') ||
         lowerUrl.includes('bloggy.click') ||     // megacloud.bloggy.click
         lowerUrl.includes('bysesayeveum.com') ||  // 9anime alternate embed host
@@ -67,17 +77,9 @@ export class VideoService {
       return 'iframe';
     }
     
-    // HLS detection - enhanced for better .m3u8 recognition
-    if (lowerUrl.includes('.m3u8') || 
-        lowerUrl.includes('hls') || 
-        lowerUrl.includes('stream') ||
-        lowerUrl.match(/\.m3u8(\?|$|#)/)) {
+    // 4. Loose fallback checks for HLS or stream paths
+    if (lowerUrl.includes('hls') || lowerUrl.includes('stream')) {
       return 'hls';
-    }
-    
-    // Direct video detection
-    if (lowerUrl.match(/\.(mp4|webm|avi|mkv|mov|flv)$/i)) {
-      return 'direct';
     }
     
     return 'unknown';
