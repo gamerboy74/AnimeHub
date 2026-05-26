@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { getProxiedImageUrl } from '../../utils/media/imageProxy';
+import { getProxiedImageUrl, getDirectImageUrl } from '../../utils/media/imageProxy';
 
 // Interfaces for type safety
 import { useCurrentUser } from '../../hooks/auth/selectors';
@@ -178,11 +178,16 @@ const AnimeCard = React.memo(function AnimeCard(props: AnimeCardProps) {
   }, [props.description, props.title, props.genres, props.totalEpisodes, props.rating, props.year]);
 
   // Optimize badge rendering
-  const badges = [
-    props.showTrendingBadge && { label: '🔥 Trending', className: 'bg-red-500/90' },
-    props.showNewBadge && { label: '✨ New', className: 'bg-green-500/90' },
-    props.status.toLowerCase() === 'ongoing' && { label: 'Ongoing', className: 'bg-blue-500/90' },
-  ].filter(Boolean);
+  const badges: { label: string; className: string }[] = [];
+  if (props.showTrendingBadge) {
+    badges.push({ label: '🔥 Trending', className: 'bg-red-500/90' });
+  }
+  if (props.showNewBadge) {
+    badges.push({ label: '✨ New', className: 'bg-green-500/90' });
+  }
+  if (props.status.toLowerCase() === 'ongoing') {
+    badges.push({ label: 'Ongoing', className: 'bg-blue-500/90' });
+  }
 
   // Optimize Framer Motion animations
   const cardVariants = {
@@ -214,7 +219,21 @@ const AnimeCard = React.memo(function AnimeCard(props: AnimeCardProps) {
               width={300}
               height={400}
               decoding="async"
-              onError={(e) => (e.currentTarget.src = fallbackImage)}
+              onError={(e) => {
+                const target = e.currentTarget;
+                if (target.dataset.failed) return;
+                target.dataset.failed = 'true';
+                const directUrl = getDirectImageUrl(target.src);
+                if (directUrl && target.src !== directUrl) {
+                  target.srcset = '';
+                  target.src = directUrl;
+                } else if (props.cover) {
+                  target.srcset = '';
+                  target.src = props.cover;
+                } else {
+                  target.src = fallbackImage;
+                }
+              }}
             />
 
             {/* Badges */}
@@ -366,7 +385,19 @@ const AnimeCard = React.memo(function AnimeCard(props: AnimeCardProps) {
                   height={192}
                   loading="lazy"
                   decoding="async"
-                  onError={(e) => (e.currentTarget.src = fallbackImage)}
+                  onError={(e) => {
+                    const target = e.currentTarget;
+                    if (target.dataset.failed) return;
+                    target.dataset.failed = 'true';
+                    const directUrl = getDirectImageUrl(target.src);
+                    if (directUrl && target.src !== directUrl) {
+                      target.src = directUrl;
+                    } else if (props.cover) {
+                      target.src = props.cover;
+                    } else {
+                      target.src = fallbackImage;
+                    }
+                  }}
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent rounded-t-2xl" />
                 <button

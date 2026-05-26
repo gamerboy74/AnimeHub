@@ -11,7 +11,7 @@ import { useCurrentUser } from '../../hooks/auth/selectors';
 import ErrorBoundary from '../../components/common/ErrorBoundary';
 import { SectionError, ContentError } from '../../components/common/ErrorFallbacks';
 import Footer from '../../components/feature/Footer';
-import { getProxiedImageUrl } from '../../utils/media/imageProxy';
+import { getProxiedImageUrl, getDirectImageUrl } from '../../utils/media/imageProxy';
 
 // Interfaces for type safety
 interface Anime {
@@ -80,6 +80,21 @@ const ContinueWatchingCard = memo(function ContinueWatchingCard({ item }: Contin
           alt={item.title}
           className="w-full h-full object-cover object-top transition-transform duration-500 group-hover:scale-110 animate-fade-in"
           loading="lazy"
+          onError={(e) => {
+            const target = e.currentTarget;
+            if (target.dataset.failed) return;
+            target.dataset.failed = 'true';
+            const directUrl = getDirectImageUrl(target.src);
+            if (directUrl && target.src !== directUrl) {
+              target.srcset = '';
+              target.src = directUrl;
+            } else if (item.poster_url) {
+              target.srcset = '';
+              target.src = item.poster_url;
+            } else {
+              target.src = fallbackPoster;
+            }
+          }}
         />
         
         {/* Subtle Dark Gradient Overlay */}

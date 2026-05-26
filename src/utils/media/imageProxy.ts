@@ -17,7 +17,7 @@ export function getProxiedImageUrl(url: string | null | undefined): string | und
   // In dev, Vite's proxy config forwards /api → http://localhost:3001.
   // In prod, VITE_API_URL can override to an absolute backend URL if needed.
   if (url.startsWith('http')) {
-    const API_URL = import.meta.env.VITE_API_URL;
+    const API_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_BACKEND_URL;
     
     if (API_URL) {
       const cleanApiUrl = API_URL.endsWith('/') ? API_URL.slice(0, -1) : API_URL;
