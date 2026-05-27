@@ -312,7 +312,13 @@ export class AnimeService {
         .from('anime')
         .select(`
           *,
-          episodes (*)
+          episodes (
+            id,
+            episode_number,
+            title,
+            duration,
+            video_url
+          )
         `)
         .eq('id', animeId)
         .single()

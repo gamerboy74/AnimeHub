@@ -1,5 +1,6 @@
 
 import { Link } from 'react-router-dom';
+import BrandMark from '../common/BrandMark';
 
 
 
@@ -12,9 +13,9 @@ export default function Footer() {
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
               <div>
-                <h3 className="text-xl font-bold mb-4" style={{ fontFamily: '"Pacifico", serif' }}>
-                  AnimeHub
-                </h3>
+                <Link to="/" className="inline-flex items-center mb-4 text-white" aria-label="AnimeHub home">
+                  <BrandMark showWordmark />
+                </Link>
                 <p className="text-teal-200 leading-relaxed">
                   Your magical gateway to the world of anime. Discover, watch, and fall in love with stories that inspire.
                 </p>

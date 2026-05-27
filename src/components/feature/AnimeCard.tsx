@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
+import { queryClient } from '../../utils/query';
+import { queryKeys } from '../../hooks/queryKeys';
+import { AnimeService } from '../../services/anime';
 import { getProxiedImageUrl, getDirectImageUrl } from '../../utils/media/imageProxy';
 import { useWatchlist } from '../../hooks/user/watchlist';
 import { useFavorites } from '../../hooks/user/favorites';
@@ -8,6 +11,7 @@ import { useUserAnimeProgress } from '../../hooks/user';
 
 // Interfaces for type safety
 import { useCurrentUser } from '../../hooks/auth/selectors';
+import { prefetchRoute } from '../../router/helpers/prefetch';
 interface Anime {
   _id: string;
   title: string;
@@ -142,6 +146,17 @@ const AnimeCard = React.memo(function AnimeCard(props: AnimeCardProps) {
     e.stopPropagation();
     setShowMoreInfo(!showMoreInfo);
   };
+
+  const prefetchAnimeDetail = () => {
+    void prefetchRoute(`/anime/${props._id}`);
+
+    const userId = user?.id ?? null;
+    void queryClient.prefetchQuery({
+      queryKey: queryKeys.anime.byId(props._id, userId),
+      queryFn: () => AnimeService.getAnimeById(props._id, userId ?? undefined),
+      staleTime: 10 * 60 * 1000,
+    });
+  };
   const handleCloseModal = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) setShowMoreInfo(false);
   };
@@ -196,7 +211,7 @@ const AnimeCard = React.memo(function AnimeCard(props: AnimeCardProps) {
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
       >
-        <Link to={`/anime/${props._id}`} className="block">
+        <Link to={`/anime/${props._id}`} className="block" onMouseEnter={prefetchAnimeDetail} onFocus={prefetchAnimeDetail}>
           {/* Image Container */}
           <div className="relative aspect-[3/4] overflow-hidden">
             <img

@@ -13,11 +13,13 @@ import SeasonTabs from '../../components/feature/SeasonTabs';
 import { useWatchlist } from '../../hooks/user/watchlist';
 import { useFavorites } from '../../hooks/user/favorites';
 import { useUserAnimeProgress } from '../../hooks/user';
+import { useAnimePlayer } from '../../hooks/anime/player';
 import { generatePlayerUrl } from '../../utils/media/player';
 import { getProxiedImageUrl, getDirectImageUrl } from '../../utils/media/imageProxy';
 import ErrorBoundary from '../../components/common/ErrorBoundary';
 import { SectionError, ContentError } from '../../components/common/ErrorFallbacks';
 import Footer from '../../components/feature/Footer';
+import { prefetchOnHover } from '../../router/helpers/prefetch';
 
 
 export default function AnimeDetailPage() {
@@ -76,6 +78,17 @@ export default function AnimeDetailPage() {
   }, [anime, animeLoading]);
 
   const { getProgress, updateProgressLocal } = useUserAnimeProgress();
+  const { getEpisodeSources } = useAnimePlayer();
+
+  useEffect(() => {
+    if (!anime?.id) return;
+
+    const firstEpisodeNumber = anime.episodes?.[0]?.episode_number || 1;
+
+    void getEpisodeSources(anime.id, firstEpisodeNumber).catch(() => {
+      // Best-effort warmup only; the player still works without this cache.
+    });
+  }, [anime?.id, anime?.episodes, getEpisodeSources]);
 
   useEffect(() => {
     const checkUserData = async () => {
@@ -300,6 +313,8 @@ export default function AnimeDetailPage() {
               </Link>
             </div>
           </div>
+                        onMouseEnter={() => prefetchOnHover(`/player/${animeId}/${ep.number}`)}
+                        onFocus={() => prefetchOnHover(`/player/${animeId}/${ep.number}`)}
         </div>
       </div>
     );

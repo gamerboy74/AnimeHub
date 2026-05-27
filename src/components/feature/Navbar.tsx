@@ -7,6 +7,7 @@ import NotificationCenter from './NotificationCenter';
 import SearchBar from '../search/SearchBar';
 import { useCurrentUser, useSignOut } from '../../hooks/auth/selectors';
 import { useAdmin } from '../../hooks/admin';
+import BrandMark from '../common/BrandMark';
 
 import { prefetchOnHover } from '../../router/helpers/prefetch';
 
@@ -74,13 +75,8 @@ export default function Navbar() {
       <div className="w-full px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           {/* Logo */}
-          <Link to="/" className="flex items-center space-x-2 flex-shrink-0">
-            <div className="w-8 h-8 bg-teal-700 rounded-lg flex items-center justify-center">
-              <i className="ri-play-fill text-white"></i>
-            </div>
-            <span className="text-xl font-bold text-teal-800 font-pacifico">
-              AnimeHub
-            </span>
+          <Link to="/" className="flex items-center space-x-2 flex-shrink-0 text-teal-800">
+            <BrandMark compact showWordmark />
           </Link>
 
           {/* Desktop Navigation */}

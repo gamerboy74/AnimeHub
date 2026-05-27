@@ -1,0 +1,23 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="AnimeHub logo">
+  <defs>
+    <linearGradient id="bg" x1="96" y1="64" x2="416" y2="448" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#151338"/>
+      <stop offset="1" stop-color="#0B0A1F"/>
+    </linearGradient>
+    <linearGradient id="aFill" x1="128" y1="96" x2="384" y2="416" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F61B3F"/>
+      <stop offset="1" stop-color="#B10025"/>
+    </linearGradient>
+    <linearGradient id="aStroke" x1="128" y1="96" x2="384" y2="416" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFE66B"/>
+      <stop offset="1" stop-color="#FFB800"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="96" fill="url(#bg)"/>
+  <path d="M256 72L424 440H373L330 344H182L139 440H88L256 72Z" fill="url(#aFill)" stroke="url(#aStroke)" stroke-width="8" stroke-linejoin="round"/>
+  <path d="M256 170L302 268H210L256 170Z" fill="#150F2C" fill-opacity="0.55"/>
+  <circle cx="144" cy="112" r="4" fill="#FFFFFF" fill-opacity="0.7"/>
+  <circle cx="386" cy="102" r="3" fill="#FFFFFF" fill-opacity="0.6"/>
+  <circle cx="420" cy="160" r="2.5" fill="#FFFFFF" fill-opacity="0.45"/>
+  <circle cx="104" cy="190" r="2.5" fill="#FFFFFF" fill-opacity="0.45"/>
+</svg>

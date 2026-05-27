@@ -227,6 +227,17 @@ export default function SmartVideoPlayer({
     const sourceType = VideoService.detectVideoSource(source.url);
     if (sourceType !== 'iframe') { setResolvedHls(null); return; }
 
+    // Megaplay-style embeds already have a fast iframe/proxy path below.
+    // Skip the universal HLS resolver so playback can start immediately.
+    const isMegaSource = !!(source.url.match(/mega(play|cloud|backup|cdn|stream)/i) || source.url.includes('mega.'));
+    const isByseSource = source.url.includes('bysesayeveum.com/e/');
+    const isCleanProxySource = source.url.startsWith('/api/mega-embed/') || source.url.startsWith('/api/vidmoly-embed/') || source.url.startsWith('/api/video-embed/');
+    if (isMegaSource || isByseSource || isCleanProxySource) {
+      setResolvedHls(null);
+      setHlsResolving(false);
+      return;
+    }
+
     // Streaming site pages (9anime, etc.) skip directly to iframe
     if (VideoService.isStreamingSitePage(source.url) && !source.url.toLowerCase().includes('hianime.do')) {
       setResolvedHls(null);

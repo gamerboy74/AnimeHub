@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../hooks/auth';
 import { motion } from 'framer-motion';
+import BrandMark from '../../components/common/BrandMark';
 
 export default function Register() {
   const [username, setUsername] = useState('');
@@ -39,9 +40,7 @@ export default function Register() {
         className="bg-white/90 backdrop-blur-sm p-8 rounded-2xl shadow-xl border border-white/30 w-full max-w-md"
       >
         <div className="flex flex-col items-center mb-8">
-          <div className="w-14 h-14 bg-gradient-to-br from-teal-500 to-teal-700 rounded-2xl flex items-center justify-center mb-4 shadow-lg">
-            <i className="ri-user-add-line text-2xl text-white"></i>
-          </div>
+          <BrandMark showWordmark className="mb-4 justify-center text-teal-800" />
           <h2 className="text-2xl font-bold text-teal-800">Create Account</h2>
           <p className="text-teal-500 text-sm mt-1">Join AnimeHub today</p>
         </div>
