@@ -12,31 +12,13 @@ import { useAnimeById, useAnime, useRelatedSeasons } from '../../hooks/useAnime'
 import SeasonTabs from '../../components/feature/SeasonTabs';
 import { useWatchlist } from '../../hooks/user/watchlist';
 import { useFavorites } from '../../hooks/user/favorites';
+import { useUserAnimeProgress } from '../../hooks/user';
 import { generatePlayerUrl } from '../../utils/media/player';
 import { getProxiedImageUrl, getDirectImageUrl } from '../../utils/media/imageProxy';
 import ErrorBoundary from '../../components/common/ErrorBoundary';
 import { SectionError, ContentError } from '../../components/common/ErrorFallbacks';
 import Footer from '../../components/feature/Footer';
 
-// Interface for type safety
-interface Anime {
-  id: string;
-  title: string;
-  poster_url?: string | null;
-  banner_url?: string | null;
-  rating?: number | null;
-  year?: number | null;
-  total_episodes?: number | null;
-  episodes?: any[] | null;
-  genres?: string[] | null;
-  status?: 'ongoing' | 'completed' | 'upcoming' | null;
-  description?: string | null;
-  type?: 'tv' | 'movie' | 'ova' | 'ona' | 'special' | null;
-  studios?: string[] | null;
-  trailer_url?: string | null;
-  user_progress?: any[] | null;
-  duration?: number | null;
-}
 
 export default function AnimeDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -93,6 +75,8 @@ export default function AnimeDetailPage() {
     }
   }, [anime, animeLoading]);
 
+  const { getProgress, updateProgressLocal } = useUserAnimeProgress();
+
   useEffect(() => {
     const checkUserData = async () => {
       if (!anime || animeLoading) return;
@@ -117,6 +101,27 @@ export default function AnimeDetailPage() {
                 setWatchProgress(episode.episode_number);
                 setProgressSeconds(recentProgress.progress_seconds);
               }
+            } else {
+              // If all started episodes are completed, find the max episode number from user_progress
+              let maxEpNum = 0;
+              anime.user_progress.forEach((p: any) => {
+                const ep = anime.episodes?.find((e: any) => e.id === p.episode_id);
+                if (ep && ep.episode_number > maxEpNum) {
+                  maxEpNum = ep.episode_number;
+                }
+              });
+              setWatchProgress(maxEpNum);
+              setProgressSeconds(0);
+            }
+          } else {
+            // DB has no progress, check local storage in case they just watched or logged in
+            const localEp = getProgress(anime.id);
+            setWatchProgress(localEp);
+            if (localEp > 0) {
+              const localSaved = localStorage.getItem(`watch_progress_${anime.id}_${localEp}`);
+              setProgressSeconds(localSaved ? parseInt(localSaved) : 0);
+            } else {
+              setProgressSeconds(0);
             }
           }
         } else {
@@ -125,6 +130,16 @@ export default function AnimeDetailPage() {
           const savedWatchlist = JSON.parse(localStorage.getItem('watchlist') || '[]');
           setFavoriteStatus(savedFavorites.some((item: any) => item.id === anime.id));
           setWatchlistStatus(savedWatchlist.some((item: any) => item.id === anime.id));
+
+          // Load watchProgress and progressSeconds from localStorage for guest
+          const localEp = getProgress(anime.id);
+          setWatchProgress(localEp);
+          if (localEp > 0) {
+            const localSaved = localStorage.getItem(`watch_progress_${anime.id}_${localEp}`);
+            setProgressSeconds(localSaved ? parseInt(localSaved) : 0);
+          } else {
+            setProgressSeconds(0);
+          }
         }
       } catch (error) {
         console.error('Error checking user data:', error);
@@ -133,7 +148,7 @@ export default function AnimeDetailPage() {
     };
 
     checkUserData();
-  }, [anime, user, checkWatchlist, checkFavorites, animeLoading]);
+  }, [anime, user, checkWatchlist, checkFavorites, animeLoading, getProgress]);
 
   // Toast notification handler
   const showToastMessage = useCallback((message: string) => {
@@ -209,14 +224,12 @@ export default function AnimeDetailPage() {
       startTransition(() => {
         setSelectedEpisode(episodeNumber);
         if (anime) {
-          const savedProgress = JSON.parse(localStorage.getItem('watchProgress') || '{}');
-          const newProgress = Math.max(savedProgress[anime.id] || 0, episodeNumber);
-          localStorage.setItem('watchProgress', JSON.stringify({ ...savedProgress, [anime.id]: newProgress }));
-          setWatchProgress(newProgress);
+          updateProgressLocal(anime.id, episodeNumber);
+          setWatchProgress((prev) => Math.max(prev, episodeNumber));
         }
       });
     },
-    [anime]
+    [anime, updateProgressLocal]
   );
 
   // Memoized episodes
@@ -738,7 +751,7 @@ export default function AnimeDetailPage() {
             fallback={<SectionError title="Related Anime Error" message="Couldn't load related anime. Please try again." retry={refetch} />}
           >
             <Suspense fallback={<div className="h-96 bg-teal-100 rounded-2xl animate-pulse" aria-hidden="true" />}>
-              <LazyRelatedAnime animeId={anime.id} currentTitle={anime.title} currentGenres={anime.genres || []} />
+              <LazyRelatedAnime animeId={anime.id} currentTitle={anime.title} currentGenres={anime.genres || []} currentYear={anime.year} />
             </Suspense>
           </ErrorBoundary>
 

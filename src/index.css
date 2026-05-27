@@ -24,3 +24,45 @@ button, a, [role="button"] {
 input, textarea, select {
   cursor: text;
 }
+
+/* ── Custom range (seek + volume) ───────────────────────────── */
+input[type="range"] {
+  cursor: pointer;
+}
+/* Chrome / Safari / Edge */
+input[type="range"]::-webkit-slider-runnable-track {
+  background: transparent;
+  border-radius: 9999px;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #34d399;   /* emerald-400 */
+  border: 2px solid #fff;
+  box-shadow: 0 0 4px rgba(0,0,0,.5);
+  cursor: pointer;
+  margin-top: -6px;   /* vertical centering for horizontal tracks */
+}
+/* Firefox */
+input[type="range"]::-moz-range-track {
+  background: transparent;
+  border-radius: 9999px;
+  height: 8px;
+}
+input[type="range"]::-moz-range-thumb {
+  border: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #34d399;
+  border: 2px solid #fff;
+  box-shadow: 0 0 4px rgba(0,0,0,.5);
+  cursor: pointer;
+}
+/* Vertical slider (volume) – Firefox needs orient attr handled via writing-mode */
+input[type="range"][style*="vertical"] {
+  writing-mode: vertical-lr;
+}

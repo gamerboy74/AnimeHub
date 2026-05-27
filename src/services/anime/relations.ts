@@ -40,7 +40,22 @@ export class AnimeRelationsService {
     try {
       let query = supabase
         .from('anime_relations')
-        .select('*')
+        .select(`
+          *,
+          related_anime:anime!anime_relations_related_anime_id_fkey (
+            id,
+            title,
+            title_japanese,
+            poster_url,
+            banner_url,
+            year,
+            type,
+            status,
+            total_episodes,
+            rating,
+            genres
+          )
+        `)
         .eq('anime_id', animeId)
 
       if (relationTypes && relationTypes.length > 0) {

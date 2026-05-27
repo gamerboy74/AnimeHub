@@ -31,6 +31,7 @@ import {
 } from "./middleware/security.js";
 import { getHealthHandler, getDetailedHealthHandler } from "./routes/health.js";
 import imageProxyRouter from "./routes/imageProxy.js";
+import { extractHlsFromEmbed } from "./utils/universalHlsExtractor.js";
 
 // Get the directory name of the current module (for ES modules)
 const __filename = fileURLToPath(import.meta.url);
@@ -42,9 +43,18 @@ dotenv.config({ path: join(__dirname, "..", ".env") });
 // Apply stealth plugin to avoid detection
 chromium.use(StealthPlugin());
 
+const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+if (!serviceKey) {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('SUPABASE_SERVICE_ROLE_KEY is required in production to bypass RLS.');
+  } else {
+    console.warn('⚠️ WARNING: SUPABASE_SERVICE_ROLE_KEY is missing. Falling back to VITE_SUPABASE_ANON_KEY. Row Level Security will apply and may cause database failures.');
+  }
+}
+
 export const supabase = createClient(
   process.env.VITE_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY
+  serviceKey || process.env.VITE_SUPABASE_ANON_KEY
 );
 
 const app = express();
@@ -343,7 +353,86 @@ app.get("/api/resolve-stream", async (req, res) => {
   }
 });
 
-// Resolve vidmoly embed URL → fresh HLS stream (called by vidmoly embed page at playback time)
+// Resolve vidmoly video ID → HLS URL for direct frontend player (bypasses iframe, enables custom controls)
+app.get("/api/resolve-vidmoly-hls/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id || !/^[a-zA-Z0-9]+$/.test(id)) {
+      return res.status(400).json({ success: false, error: "Invalid vidmoly video ID" });
+    }
+    const vidmolyUrl = `https://vidmoly.biz/embed-${id}.html`;
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    console.log("🔄 [resolve-vidmoly-hls] Resolving HLS for vidmoly ID:", id);
+    const hlsUrl = await NineAnimeScraperService.extractVidmolyHLS(vidmolyUrl);
+    if (hlsUrl) {
+      console.log("✅ [resolve-vidmoly-hls] Resolved:", hlsUrl.substring(0, 80));
+      return res.json({ success: true, hlsUrl });
+    }
+    return res.status(502).json({ success: false, error: "Could not extract HLS from vidmoly" });
+  } catch (e) {
+    console.error("❌ resolve-vidmoly-hls error:", e.message);
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ─── Universal dynamic HLS resolver ─────────────────────────────────────────
+// Accepts any embed URL and returns an HLS .m3u8 stream URL.
+// No per-host configuration needed — just POST/GET the embed URL.
+// Strategies: HTML scrape → AJAX probe → Playwright network intercept.
+//
+// Cache for resolve-hls requests to avoid launching browser for duplicate/failed URLs
+const hlsResolutionCache = new Map(); // key: url, value: { hlsUrl, error, expiresAt }
+const CACHE_TTL_SUCCESS = 12 * 60 * 60 * 1000; // 12 hours
+const CACHE_TTL_FAILURE = 10 * 60 * 1000;      // 10 minutes
+
+app.get("/api/resolve-hls", async (req, res) => {
+  try {
+    const { url } = req.query;
+    if (!url) return res.status(400).json({ success: false, error: "Missing ?url= parameter" });
+
+    // Basic sanity check — must be http(s)
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      return res.status(400).json({ success: false, error: "URL must start with http(s)://" });
+    }
+
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+
+    // Check memory cache
+    const cached = hlsResolutionCache.get(url);
+    if (cached && cached.expiresAt > Date.now()) {
+      if (cached.error) {
+        console.log("⚡ [resolve-hls] [Cache Hit (Failure)] for:", url);
+        return res.status(502).json({ success: false, error: cached.error, cached: true });
+      }
+      console.log("⚡ [resolve-hls] [Cache Hit (Success)] for:", url);
+      return res.json({ success: true, hlsUrl: cached.hlsUrl, cached: true });
+    }
+
+    console.log("🔄 [resolve-hls] Universal resolve request for:", url);
+
+    const hlsUrl = await extractHlsFromEmbed(url);
+    if (hlsUrl) {
+      hlsResolutionCache.set(url, {
+        hlsUrl,
+        expiresAt: Date.now() + CACHE_TTL_SUCCESS
+      });
+      return res.json({ success: true, hlsUrl });
+    }
+
+    hlsResolutionCache.set(url, {
+      error: "Could not extract HLS from embed",
+      expiresAt: Date.now() + CACHE_TTL_FAILURE
+    });
+    return res.status(502).json({ success: false, error: "Could not extract HLS from embed" });
+  } catch (e) {
+    console.error("❌ [resolve-hls] error:", e.message);
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+
 app.get("/api/resolve-vidmoly-stream", async (req, res) => {
   try {
     const { url } = req.query;
@@ -480,7 +569,7 @@ video.addEventListener('timeupdate', () => {
       currentTime: video.currentTime,
       duration: video.duration || 0,
       paused: video.paused
-    }, '*');
+    }, window.location.origin);
   }
 });
 video.addEventListener('ended', () => {
@@ -491,7 +580,7 @@ video.addEventListener('ended', () => {
       currentTime: video.duration || 0,
       duration: video.duration || 0,
       paused: true
-    }, '*');
+    }, window.location.origin);
   }
 });
 
@@ -618,7 +707,7 @@ video.addEventListener('timeupdate', () => {
       currentTime: video.currentTime,
       duration: video.duration || 0,
       paused: video.paused
-    }, '*');
+    }, window.location.origin);
   }
 });
 video.addEventListener('ended', () => {
@@ -629,7 +718,7 @@ video.addEventListener('ended', () => {
       currentTime: video.duration || 0,
       duration: video.duration || 0,
       paused: true
-    }, '*');
+    }, window.location.origin);
   }
 });
 
@@ -667,8 +756,7 @@ app.get("/api/mega-embed/:host/:id", async (req, res) => {
   console.log("🎬 Serving clean mega embed for:", megaUrl, "start:", startTime);
 
   res.removeHeader("X-Frame-Options");
-  res.removeHeader("Content-Security-Policy");
-  res.setHeader("Content-Security-Policy", "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; frame-src *; media-src * blob:; worker-src blob:;");
+  res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; frame-src *;");
   res.removeHeader("Cross-Origin-Opener-Policy");
 
   res.setHeader("Content-Type", "text/html");
@@ -717,7 +805,7 @@ setInterval(() => {
       currentTime: elapsed,
       duration: estimatedDuration,
       paused: false
-    }, '*');
+    }, window.location.origin);
   }
 }, 5000);
 
@@ -733,7 +821,7 @@ function checkEnded() {
         currentTime: estimatedDuration,
         duration: estimatedDuration,
         paused: true
-      }, '*');
+      }, window.location.origin);
     }
   }
 }
@@ -754,7 +842,7 @@ window.addEventListener('message', (e) => {
           currentTime: ct,
           duration: dur,
           paused: e.data.paused || false
-        }, '*');
+        }, window.location.origin);
       }
     }
   }

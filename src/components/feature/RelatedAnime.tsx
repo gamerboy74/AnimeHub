@@ -1,59 +1,110 @@
-import React, { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Link } from 'react-router-dom'
 import { useAnimeRelations, useAnimeByTitleSimilarity } from '../../hooks/anime/relations'
-
-interface RelatedAnimeItem {
-  id: string
-  title: string
-  title_japanese?: string
-  poster_url?: string
-  year: number
-  type: string
-  status: string
-  total_episodes?: number
-  rating?: number
-  genres: string[]
-  relation_type?: string
-}
 
 interface RelatedAnimeProps {
   animeId: string
   currentTitle: string
   currentGenres: string[]
+  currentYear?: number | null
 }
 
-export default function RelatedAnime({ animeId, currentTitle, currentGenres }: RelatedAnimeProps) {
-  const [activeTab, setActiveTab] = useState<'similar' | 'sequels' | 'prequels' | 'ovas'>('similar')
+export default function RelatedAnime({ animeId, currentTitle, currentGenres: _currentGenres, currentYear }: RelatedAnimeProps) {
+  const [activeTab, setActiveTab] = useState<'similar' | 'sequels' | 'prequels' | 'ovas'>('sequels')
   
   // Use the real backend services
-  const { relatedAnime, similarAnime, loading, error } = useAnimeRelations(animeId)
+  const { relatedAnime, similarAnime, loading } = useAnimeRelations(animeId)
   const { anime: titleSimilarAnime, loading: titleLoading } = useAnimeByTitleSimilarity(currentTitle, animeId, 8)
 
 
   const getFilteredAnime = () => {
+    const yearToCompare = currentYear ?? new Date().getFullYear();
+
     switch (activeTab) {
-      case 'sequels':
-        // Get sequels from related anime and title similar anime
+      case 'sequels': {
         const sequelRelations = relatedAnime.filter(rel => rel.relation_type === 'sequel')
-        const sequelAnime = sequelRelations.map(rel => rel.related_anime).filter(Boolean)
-        return [...sequelAnime, ...titleSimilarAnime.filter(anime => 
-          anime.year > new Date().getFullYear() - 5
-        )].slice(0, 8)
+        const sequelAnime = sequelRelations
+          .map(rel => rel.related_anime)
+          .filter((item): item is NonNullable<typeof item> => !!item)
+        
+        // Find franchise series that are sequels (released after the current anime)
+        // We compile a list of all franchise TV series/ONAs (excluding the current one)
+        const franchiseSeries = titleSimilarAnime.filter(anime => 
+          !['ova', 'movie', 'special', 'ona'].includes(anime.type?.toLowerCase())
+        )
+        
+        // Include current anime in the sorting logic to calculate position
+        const currentAnimeDummy = { id: animeId, title: currentTitle, year: yearToCompare }
+        const allSeries = [currentAnimeDummy, ...franchiseSeries]
+        
+        // Sort chronologically
+        allSeries.sort((a, b) => {
+          const yearDiff = (a.year || 0) - (b.year || 0)
+          if (yearDiff !== 0) return yearDiff
+          return a.title.localeCompare(b.title)
+        })
+        
+        const currentIndex = allSeries.findIndex(item => item.id === animeId)
+        
+        // Sequels are all franchise series that appear after the current one
+        const similarSequels = currentIndex !== -1 
+          ? allSeries.slice(currentIndex + 1).filter(item => item.id !== animeId)
+          : franchiseSeries.filter(anime => (anime.year || 0) >= yearToCompare)
+
+        const combined = [...sequelAnime, ...similarSequels]
+        return Array.from(new Map(combined.map(item => [item.id, item])).values()).slice(0, 8)
+      }
       
-      case 'prequels':
-        // Get prequels from related anime
+      case 'prequels': {
         const prequelRelations = relatedAnime.filter(rel => rel.relation_type === 'prequel')
-        const prequelAnime = prequelRelations.map(rel => rel.related_anime).filter(Boolean)
-        return [...prequelAnime, ...titleSimilarAnime.filter(anime => 
-          anime.year < new Date().getFullYear() - 5
-        )].slice(0, 8)
+        const prequelAnime = prequelRelations
+          .map(rel => rel.related_anime)
+          .filter((item): item is NonNullable<typeof item> => !!item)
+        
+        // Find franchise series that are prequels (released before the current anime)
+        const franchiseSeries = titleSimilarAnime.filter(anime => 
+          !['ova', 'movie', 'special', 'ona'].includes(anime.type?.toLowerCase())
+        )
+        
+        // Include current anime in the sorting logic to calculate position
+        const currentAnimeDummy = { id: animeId, title: currentTitle, year: yearToCompare }
+        const allSeries = [currentAnimeDummy, ...franchiseSeries]
+        
+        // Sort chronologically
+        allSeries.sort((a, b) => {
+          const yearDiff = (a.year || 0) - (b.year || 0)
+          if (yearDiff !== 0) return yearDiff
+          return a.title.localeCompare(b.title)
+        })
+        
+        const currentIndex = allSeries.findIndex(item => item.id === animeId)
+        
+        // Prequels are all franchise series that appear before the current one
+        const similarPrequels = currentIndex !== -1 
+          ? allSeries.slice(0, currentIndex).filter(item => item.id !== animeId)
+          : franchiseSeries.filter(anime => (anime.year || 0) <= yearToCompare)
+
+        const combined = [...prequelAnime, ...similarPrequels]
+        return Array.from(new Map(combined.map(item => [item.id, item])).values()).slice(0, 8)
+      }
       
-      case 'ovas':
-        // Get OVAs and movies from similar anime
-        return similarAnime.filter(anime => 
-          ['ova', 'movie', 'special'].includes(anime.type)
-        ).slice(0, 8)
+      case 'ovas': {
+        // Get OVAs, movies, specials, and ONAs from related anime relations
+        const relatedOvas = relatedAnime
+          .map(rel => rel.related_anime)
+          .filter((item): item is NonNullable<typeof item> => !!item)
+          .filter(anime => ['ova', 'movie', 'special', 'ona'].includes(anime.type?.toLowerCase()))
+        
+        // And from title-similar anime (franchise matches)
+        const titleSimilarOvas = titleSimilarAnime.filter(anime =>
+          ['ova', 'movie', 'special', 'ona'].includes(anime.type?.toLowerCase())
+        )
+
+        // Combine them and ensure uniqueness by ID
+        const combined = [...relatedOvas, ...titleSimilarOvas]
+        return Array.from(new Map(combined.map(item => [item.id, item])).values()).slice(0, 8)
+      }
       
       default:
         // Return similar anime by genres
@@ -110,10 +161,10 @@ export default function RelatedAnime({ animeId, currentTitle, currentGenres }: R
       {/* Tab Navigation */}
       <div className="flex flex-wrap gap-2 mb-6">
         {[
-          { key: 'similar', label: 'Similar', icon: 'ri-compass-3-line' },
           { key: 'sequels', label: 'Sequels', icon: 'ri-arrow-right-line' },
           { key: 'prequels', label: 'Prequels', icon: 'ri-arrow-left-line' },
-          { key: 'ovas', label: 'OVAs & Movies', icon: 'ri-movie-line' }
+          { key: 'ovas', label: 'OVAs & Movies', icon: 'ri-movie-line' },
+          { key: 'similar', label: 'Similar', icon: 'ri-compass-3-line' }
         ].map((tab) => (
           <button
             key={tab.key}

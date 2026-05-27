@@ -336,28 +336,20 @@ export class AnimeService {
       // Fetch user-specific data in parallel if userId is provided
       if (userId) {
         try {
-          const episodeIds = playableEpisodes.map((e: any) => e.id)
-          
-          // Batch episode IDs to avoid URL length limits for anime with many episodes
-          const BATCH_SIZE = 50
-          const progressPromises: any[] = []
-          for (let i = 0; i < episodeIds.length; i += BATCH_SIZE) {
-            const batch = episodeIds.slice(i, i + BATCH_SIZE)
-            progressPromises.push(
-              supabase
-                .from('user_watch_progress_detailed')
-                .select('*')
-                .eq('user_id', userId)
-                .in('episode_id', batch)
-            )
-          }
-
-          const [progressResults, favoritesResult, watchlistResult] = await Promise.all([
-            episodeIds.length > 0
-              ? Promise.all(progressPromises).then(results =>
-                  results.flatMap(r => r.data || [])
-                )
-              : Promise.resolve([]),
+          const [progressResult, favoritesResult, watchlistResult] = await Promise.all([
+            supabase
+              .from('user_progress')
+              .select(`
+                id,
+                user_id,
+                episode_id,
+                progress_seconds,
+                is_completed,
+                last_watched,
+                episodes!inner(anime_id)
+              `)
+              .eq('user_id', userId)
+              .eq('episodes.anime_id', animeId),
             
             supabase
               .from('user_favorites')
@@ -374,8 +366,8 @@ export class AnimeService {
               .maybeSingle()
           ])
 
-          result.user_progress = (progressResults || []).map((row: any) => ({
-            id: row.progress_id,
+          result.user_progress = (progressResult.data || []).map((row: any) => ({
+            id: row.id,
             user_id: row.user_id,
             episode_id: row.episode_id,
             progress_seconds: row.progress_seconds,
@@ -444,16 +436,27 @@ export class AnimeService {
 
   static async getGenres(): Promise<string[]> {
     try {
-      const { data, error } = await supabase
+      // Try to use the optimized RPC function first
+      const { data, error } = await supabase.rpc('get_distinct_genres')
+
+      if (!error && data) {
+        return (data as any[] || [])
+          .map(row => typeof row === 'object' ? (row.genre || '') : row)
+          .filter(Boolean)
+          .sort()
+      }
+
+      // Fallback if RPC fails/doesn't exist
+      const { data: selectData, error: selectError } = await supabase
         .from('anime')
         .select('genres')
 
-      if (error) {
-        console.error('Genres fetch error:', error)
-        throw new Error(`Failed to fetch genres: ${error.message}`)
+      if (selectError) {
+        console.error('Genres fallback fetch error:', selectError)
+        throw new Error(`Failed to fetch genres: ${selectError.message}`)
       }
 
-      const allGenres = data?.flatMap(anime => anime.genres || []) || []
+      const allGenres = selectData?.flatMap(anime => anime.genres || []) || []
       const uniqueGenres = [...new Set(allGenres)].sort()
       
       return uniqueGenres
@@ -470,6 +473,31 @@ export class AnimeService {
     sortBy?: string
   }) {
     try {
+      const hasMultipleGenres = filters?.genres && filters.genres.length > 1;
+      const sortByTitle = filters?.sortBy === 'title';
+
+      // Use the optimized search function when filters are compatible
+      if (!hasMultipleGenres && !sortByTitle) {
+        const { data, error } = await supabase.rpc('search_anime_optimized', {
+          search_term: query || '',
+          genre_filter: filters?.genres && filters.genres.length === 1 ? filters.genres[0] : null,
+          year_filter: filters?.year ? parseInt(filters.year) : null,
+          status_filter: filters?.status || null,
+          type_filter: null,
+          rating_min: null,
+          limit_count: limit,
+          offset_count: 0
+        })
+
+        if (!error && data) {
+          return data
+        }
+        if (error) {
+          console.warn('search_anime_optimized RPC failed, falling back to standard query:', error.message)
+        }
+      }
+
+      // Standard query fallback
       let searchQuery = supabase
         .from('anime')
         .select('*')
@@ -485,7 +513,7 @@ export class AnimeService {
       }
       
       if (filters?.year) {
-        searchQuery = searchQuery.eq('release_year', parseInt(filters.year))
+        searchQuery = searchQuery.eq('year', parseInt(filters.year))
       }
       
       if (filters?.status) {
@@ -498,7 +526,7 @@ export class AnimeService {
           searchQuery = searchQuery.order('rating', { ascending: false })
           break
         case 'year':
-          searchQuery = searchQuery.order('release_year', { ascending: false })
+          searchQuery = searchQuery.order('year', { ascending: false })
           break
         case 'title':
           searchQuery = searchQuery.order('title', { ascending: true })
@@ -556,7 +584,7 @@ export class AnimeService {
    * shortens the title to find the franchise root.
    */
   static async getRelatedSeasons(
-    animeId: string,
+    _animeId: string,
     title: string,
     titleEnglish?: string | null,
   ): Promise<Array<{ id: string; title: string; title_english: string | null; poster_url: string | null; total_episodes: number | null; type: string | null }>> {
@@ -571,37 +599,36 @@ export class AnimeService {
       // Generate candidate search terms: full base title, then progressively shorter
       const searchCandidates = this.generateFranchisePrefixes(baseTitle)
 
-      for (const candidate of searchCandidates) {
-        if (candidate.length < 3) continue
-
+      const validCandidates = searchCandidates.filter(c => c.length >= 3);
+      
+      const queryPromises = validCandidates.map(async (candidate) => {
         const escapedBase = candidate.replace(/[%_]/g, '\\$&')
-
         const { data, error } = await supabase
           .from('anime')
           .select('id, title, title_english, poster_url, total_episodes, type')
           .or(`title.ilike.%${escapedBase}%,title_english.ilike.%${escapedBase}%`)
           .order('title', { ascending: true })
-
         if (error) {
-          console.error('Get related seasons error:', error)
-          continue
+          console.error('Get related seasons query error:', error)
+          return null
         }
+        return data || []
+      })
 
-        // If we found 2+ results, we've likely found the franchise
+      const results = await Promise.all(queryPromises)
+
+      // Find the first result set with 2+ entries (ordered by longest search candidate first)
+      for (const data of results) {
         if (data && data.length >= 2) {
           return data
         }
       }
 
       // Fallback: return just the single result from the full base title search
-      const escapedBase = baseTitle.replace(/[%_]/g, '\\$&')
-      const { data } = await supabase
-        .from('anime')
-        .select('id, title, title_english, poster_url, total_episodes, type')
-        .or(`title.ilike.%${escapedBase}%,title_english.ilike.%${escapedBase}%`)
-        .order('title', { ascending: true })
-
-      return data || []
+      if (results.length > 0 && results[0]) {
+        return results[0]
+      }
+      return []
     } catch (error) {
       console.error('Get related seasons service error:', error)
       return []
@@ -646,10 +673,6 @@ export class AnimeService {
    */
   static async getContinueWatching(userId: string, limit: number = 10) {
     try {
-      const cacheKey = getCacheKey('continueWatching', { userId, limit })
-      const cached = getCachedData(cacheKey)
-      if (cached) return cached
-
       // Fetch recent unfinished progress entries from detailed view
       const { data, error } = await supabase
         .from('user_watch_progress_detailed')
@@ -698,7 +721,6 @@ export class AnimeService {
         .filter(Boolean)
         .slice(0, limit)
 
-      setCachedData(cacheKey, results)
       return results
     } catch (error) {
       console.error('Continue watching service error:', error)

@@ -141,11 +141,11 @@ export class AnimeImporterService {
   private static readonly ANILIST_BASE_URL = 'https://graphql.anilist.co'
   
   // Search anime from Jikan API
-  static async searchJikanAnime(query: string, limit: number = 20): Promise<JikanAnime[]> {
+  static async searchJikanAnime(query: string, limit: number = 20, page: number = 1): Promise<JikanAnime[]> {
     try {
       // Jikan API has a maximum limit of 25 for search requests
       const safeLimit = Math.min(limit, 25)
-      const response = await fetch(`${this.JIKAN_BASE_URL}/anime?q=${encodeURIComponent(query)}&limit=${safeLimit}`)
+      const response = await fetch(`${this.JIKAN_BASE_URL}/anime?q=${encodeURIComponent(query)}&limit=${safeLimit}&page=${page}`)
       
       if (!response.ok) {
         if (response.status === 400) {
@@ -163,11 +163,11 @@ export class AnimeImporterService {
   }
 
   // Search anime from AniList API
-  static async searchAniListAnime(query: string, limit: number = 20): Promise<AniListAnime[]> {
+  static async searchAniListAnime(query: string, limit: number = 20, page: number = 1): Promise<AniListAnime[]> {
     try {
       const graphqlQuery = `
-        query ($search: String, $perPage: Int) {
-          Page(perPage: $perPage) {
+        query ($search: String, $perPage: Int, $page: Int) {
+          Page(page: $page, perPage: $perPage) {
             media(search: $search, type: ANIME) {
               id
               idMal
@@ -175,7 +175,6 @@ export class AnimeImporterService {
                 romaji
                 english
                 native
-                userPreferred
               }
               description
               format
@@ -234,7 +233,7 @@ export class AnimeImporterService {
                     id
                     idMal
                     title {
-                      romaji
+                          media(search: $search, type: ANIME, page: 1) {
                       english
                       native
                     }
@@ -308,7 +307,8 @@ export class AnimeImporterService {
           query: graphqlQuery,
           variables: {
             search: query,
-            perPage: limit
+            perPage: limit,
+            page
           }
         })
       })
@@ -901,20 +901,6 @@ export class AnimeImporterService {
     }
   }
 
-  // Helper function to get watch URL (for external links)
-  private static formatTrailerWatchUrl(id: string, site?: string): string {
-    switch (site?.toLowerCase()) {
-      case 'youtube':
-        return `https://www.youtube.com/watch?v=${id}`
-      case 'dailymotion':
-        return `https://www.dailymotion.com/video/${id}`
-      case 'vimeo':
-        return `https://vimeo.com/${id}`
-      default:
-        return `https://www.youtube.com/watch?v=${id}`
-    }
-  }
-
   // Test function to debug trailer data
   static async testTrailerData(query: string = "Attack on Titan"): Promise<void> {
     try {
@@ -949,9 +935,9 @@ export class AnimeImporterService {
   }
 
   // Get trending anime from Jikan
-  static async getTrendingJikanAnime(limit: number = 10): Promise<JikanAnime[]> {
+  static async getTrendingJikanAnime(limit: number = 10, page: number = 1): Promise<JikanAnime[]> {
     try {
-      const response = await fetch(`${this.JIKAN_BASE_URL}/top/anime?limit=${limit}`)
+      const response = await fetch(`${this.JIKAN_BASE_URL}/top/anime?limit=${limit}&page=${page}`)
       
       if (!response.ok) {
         throw new Error(`Jikan API error: ${response.status}`)
@@ -966,9 +952,9 @@ export class AnimeImporterService {
   }
 
   // Get seasonal anime from Jikan
-  static async getSeasonalJikanAnime(year: number, season: string, limit: number = 20): Promise<JikanAnime[]> {
+  static async getSeasonalJikanAnime(year: number, season: string, limit: number = 20, page: number = 1): Promise<JikanAnime[]> {
     try {
-      const response = await fetch(`${this.JIKAN_BASE_URL}/seasons/${year}/${season}?limit=${limit}`)
+      const response = await fetch(`${this.JIKAN_BASE_URL}/seasons/${year}/${season}?limit=${limit}&page=${page}`)
       
       if (!response.ok) {
         throw new Error(`Jikan API error: ${response.status}`)
@@ -983,11 +969,11 @@ export class AnimeImporterService {
   }
 
   // Get trending anime from AniList
-  static async getTrendingAniListAnime(limit: number = 10): Promise<AniListAnime[]> {
+  static async getTrendingAniListAnime(limit: number = 10, page: number = 1): Promise<AniListAnime[]> {
     try {
       const query = `
-        query GetTrendingAnime($perPage: Int) {
-          Page(perPage: $perPage) {
+        query GetTrendingAnime($perPage: Int, $page: Int) {
+          Page(page: $page, perPage: $perPage) {
             media(sort: TRENDING_DESC, type: ANIME, status_in: [RELEASING, FINISHED]) {
               id
               idMal
@@ -1108,7 +1094,7 @@ export class AnimeImporterService {
         },
         body: JSON.stringify({
           query,
-          variables: { perPage: limit }
+          variables: { perPage: limit, page }
         })
       })
 
@@ -1125,20 +1111,11 @@ export class AnimeImporterService {
   }
 
   // Get seasonal anime from AniList
-  static async getSeasonalAniListAnime(year: number, season: string, limit: number = 20): Promise<AniListAnime[]> {
+  static async getSeasonalAniListAnime(year: number, season: string, limit: number = 20, page: number = 1): Promise<AniListAnime[]> {
     try {
-      const seasonMap: { [key: string]: number } = {
-        'winter': 1,
-        'spring': 2,
-        'summer': 3,
-        'fall': 4
-      }
-
-      const seasonNumber = seasonMap[season.toLowerCase()] || 1
-
       const query = `
-        query GetSeasonalAnime($year: Int, $season: MediaSeason, $perPage: Int) {
-          Page(perPage: $perPage) {
+        query GetSeasonalAnime($year: Int, $season: MediaSeason, $perPage: Int, $page: Int) {
+          Page(page: $page, perPage: $perPage) {
             media(season: $season, seasonYear: $year, type: ANIME, sort: POPULARITY_DESC) {
               id
               idMal
@@ -1262,7 +1239,8 @@ export class AnimeImporterService {
           variables: { 
             year,
             season: season.toUpperCase(),
-            perPage: limit 
+            perPage: limit,
+            page 
           }
         })
       })
@@ -1306,8 +1284,8 @@ export class AnimeImporterService {
             // Skip if titles are completely different (no common words)
             const currentWords = currentAnimeTitle.toLowerCase().split(/\s+/)
             const relatedWords = relatedTitle.toLowerCase().split(/\s+/)
-            const hasCommonWords = currentWords.some(word => 
-              word.length > 2 && relatedWords.some(rWord => rWord.includes(word) || word.includes(rWord))
+            const hasCommonWords = currentWords.some((word: string) => 
+              word.length > 2 && relatedWords.some((rWord: string) => rWord.includes(word) || word.includes(rWord))
             )
             
             // For SEQUEL/PREQUEL relations, require some similarity

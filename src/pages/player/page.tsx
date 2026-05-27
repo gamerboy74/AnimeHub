@@ -27,8 +27,10 @@ export default function PlayerPage() {
   const [currentTime, setCurrentTime] = useState(0);
   const [initialTime, setInitialTime] = useState(0);
   const [initialTimeResolved, setInitialTimeResolved] = useState(false);
+  const [episodeId, setEpisodeId] = useState<string | null>(null);
+  const [episodeDuration, setEpisodeDuration] = useState<number | null>(null);
 
-  const { getEpisodeSources, updateWatchProgress, updateWatchProgressManual, updateWatchProgressEstimated, getWatchProgress } = useAnimePlayer();
+  const { getEpisodeSources, updateWatchProgress, getWatchProgress } = useAnimePlayer();
   const { anime, loading: animeLoading } = useAnimeById(animeId || '', user?.id);
   
   // Memoize genres to prevent infinite loops
@@ -78,17 +80,15 @@ export default function PlayerPage() {
     lastSavedTimeRef.current = now;
 
     try {
-      switch (accuracy) {
-        case 'accurate':
-          await updateWatchProgress(animeId, parseInt(episode), Math.floor(progress), 'accurate');
-          break;
-        case 'estimated':
-          await updateWatchProgressEstimated(animeId, parseInt(episode), Math.floor(progress));
-          break;
-        case 'manual':
-          await updateWatchProgressManual(animeId, parseInt(episode), Math.floor(progress));
-          break;
-      }
+      await updateWatchProgress(
+        animeId,
+        parseInt(episode),
+        Math.floor(progress),
+        accuracy,
+        episodeId || undefined,
+        user?.id || undefined,
+        episodeDuration || undefined
+      );
     } catch (error) {
       console.warn('Failed to update progress:', error);
     }
@@ -101,16 +101,30 @@ export default function PlayerPage() {
   const handlePause = () => {
     console.log('Video paused');
     if (currentTimeRef.current > 0 && animeId && episode) {
-      updateWatchProgress(animeId, parseInt(episode), Math.floor(currentTimeRef.current), 'accurate')
-        .catch(console.error);
+      updateWatchProgress(
+        animeId,
+        parseInt(episode),
+        Math.floor(currentTimeRef.current),
+        'accurate',
+        episodeId || undefined,
+        user?.id || undefined,
+        episodeDuration || undefined
+      ).catch(console.error);
     }
   };
 
   const handleEnded = () => {
     console.log('Video ended');
     if (animeId && episode) {
-      updateWatchProgress(animeId, parseInt(episode), Math.floor(currentTimeRef.current), 'accurate')
-        .catch(console.error);
+      updateWatchProgress(
+        animeId,
+        parseInt(episode),
+        Math.floor(currentTimeRef.current),
+        'accurate',
+        episodeId || undefined,
+        user?.id || undefined,
+        episodeDuration || undefined
+      ).catch(console.error);
     }
   };
 
@@ -177,6 +191,8 @@ export default function PlayerPage() {
         
         if (episodeData.sources && episodeData.sources.length > 0) {
           setSources(episodeData.sources);
+          setEpisodeId(episodeData.id || null);
+          setEpisodeDuration(episodeData.duration || null);
           setSourcesError(null);
         } else {
           throw new Error('No video sources available for this episode');
@@ -221,8 +237,15 @@ export default function PlayerPage() {
     const progressInterval = setInterval(() => {
       console.log('⏰ [WatchProgress] Checking current playhead time:', currentTimeRef.current);
       if (currentTimeRef.current > 0) {
-        updateWatchProgress(animeId, parseInt(episode), Math.floor(currentTimeRef.current), 'accurate')
-          .catch(console.error);
+        updateWatchProgress(
+          animeId,
+          parseInt(episode),
+          Math.floor(currentTimeRef.current),
+          'accurate',
+          episodeId || undefined,
+          user?.id || undefined,
+          episodeDuration || undefined
+        ).catch(console.error);
       }
     }, 5000); // Save every 5 seconds for responsive tracking
 
@@ -232,11 +255,18 @@ export default function PlayerPage() {
       // Immediately save progress when interval is cleared (unmounting or switching episodes)
       if (currentTimeRef.current > 0 && animeId && episode) {
         console.log('📤 [WatchProgress] Executing immediate unmount/switch progress save at:', currentTimeRef.current);
-        updateWatchProgress(animeId, parseInt(episode), Math.floor(currentTimeRef.current), 'accurate')
-          .catch(console.error);
+        updateWatchProgress(
+          animeId,
+          parseInt(episode),
+          Math.floor(currentTimeRef.current),
+          'accurate',
+          episodeId || undefined,
+          user?.id || undefined,
+          episodeDuration || undefined
+        ).catch(console.error);
       }
     };
-  }, [animeId, episode, isEmbeddedPlayer, updateWatchProgress]); // removed currentTime — use ref instead
+  }, [animeId, episode, isEmbeddedPlayer, updateWatchProgress, episodeId, user?.id, episodeDuration]); // removed currentTime — use ref instead
 
   // Generate episodes for navigation with fallback
   const episodes = useMemo(() => {

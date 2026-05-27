@@ -27,8 +27,6 @@ export const LazyNotificationCenter = lazy(() => import('../feature/Notification
 
 // Player Components - Load when video is needed
 export const LazySmartVideoPlayer = lazy(() => import('../player/SmartVideoPlayer'));
-export const LazyIframePlayer = lazy(() => import('../player/IframePlayer'));
-export const LazyYouTubePlayer = lazy(() => import('../player/YouTubePlayer'));
 
 // Auth Components - Load when authentication is needed
 export const LazyLoginModal = lazy(() => import('../auth/LoginModal'));

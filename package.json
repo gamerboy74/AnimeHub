@@ -57,7 +57,7 @@
     "vite": "^7.0.3",
     "vitest": "^4.0.4"
   },
-  "name": "react",
+  "name": "animehub",
   "private": true,
   "scripts": {
     "build": "vite build",

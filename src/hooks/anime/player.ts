@@ -1,4 +1,5 @@
 import { useCallback, useRef } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { VideoService } from '../../services/media/video';
 import type { VideoSource } from '../../services/media/video';
 import { AnimeService } from '../../services/anime';
@@ -8,6 +9,8 @@ interface AnimeEpisode {
   number: number;
   sources: VideoSource[];
   title: string;
+  id?: string;
+  duration?: number;
 }
 
 interface WatchProgress {
@@ -21,6 +24,7 @@ const episodeSourcesCache = new Map<string, { data: AnimeEpisode; ts: number }>(
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 export const useAnimePlayer = () => {
+  const queryClient = useQueryClient();
 
   const normalizeLang = (lang?: string | null): 'sub' | 'dub' | undefined => {
     const normalized = lang?.toLowerCase();
@@ -86,7 +90,9 @@ export const useAnimePlayer = () => {
       const result: AnimeEpisode = {
         number: episodeNumber,
         sources,
-        title: episode.title || `Episode ${episodeNumber}`
+        title: episode.title || `Episode ${episodeNumber}`,
+        id: episode.id,
+        duration: episode.duration || undefined
       };
 
       // Store in cache
@@ -103,18 +109,33 @@ export const useAnimePlayer = () => {
     animeId: string, 
     episodeNumber: number, 
     timestamp: number,
-    accuracy: 'accurate' | 'estimated' | 'manual' = 'accurate'
+    accuracy: 'accurate' | 'estimated' | 'manual' = 'accurate',
+    episodeId?: string,
+    userId?: string,
+    duration?: number
   ): Promise<void> => {
-    console.log('⏳ [WatchProgress] Triggering progress save...', { animeId, episodeNumber, timestamp, accuracy });
+    console.log('⏳ [WatchProgress] Triggering progress save...', { animeId, episodeNumber, timestamp, accuracy, episodeId, userId });
     try {
-      // Get current user
-      const { data: { user } } = await supabase.auth.getUser();
-      console.log('👤 [WatchProgress] Auth status:', user ? `Logged in as ${user.email}` : 'Not logged in');
+      // Get user ID
+      let activeUserId = userId;
+      if (!activeUserId) {
+        const { data: { user } } = await supabase.auth.getUser();
+        activeUserId = user?.id;
+      }
       
       // Always save to localStorage as backup
       const key = `watch_progress_${animeId}_${episodeNumber}`;
       localStorage.setItem(key, timestamp.toString());
       localStorage.setItem(`${key}_accuracy`, accuracy);
+      
+      // Update overall watchProgress object mapping in localStorage
+      try {
+        const savedProgress = JSON.parse(localStorage.getItem('watchProgress') || '{}');
+        savedProgress[animeId] = Math.max(savedProgress[animeId] || 0, episodeNumber);
+        localStorage.setItem('watchProgress', JSON.stringify(savedProgress));
+      } catch (err) {
+        console.error('Error updating watchProgress in localStorage:', err);
+      }
       
       // Clear previous localStorage saves for other episodes of the same anime
       const keysToRemove = [];
@@ -128,58 +149,42 @@ export const useAnimePlayer = () => {
       }
       keysToRemove.forEach(k => localStorage.removeItem(k));
       
-      if (!user) {
+      if (!activeUserId) {
         console.log('💾 [WatchProgress] Saving to localStorage only (Not logged in)');
         return; // For non-authenticated users, only use localStorage
       }
 
-      // Get episode ID
-      const { data: episode, error: episodeError } = await supabase
-        .from('episodes')
-        .select('id, duration')
-        .eq('anime_id', animeId)
-        .eq('episode_number', episodeNumber)
-        .single();
+      // Get episode ID and duration
+      let activeEpisodeId = episodeId;
+      let activeDuration = duration;
 
-      if (episodeError || !episode) {
-        console.warn('⚠️ [WatchProgress] Episode not found in database for progress:', episodeError);
-        return; // localStorage backup is already saved
-      }
-      console.log('📺 [WatchProgress] Found DB Episode ID:', episode.id);
+      if (!activeEpisodeId) {
+        const { data: episode, error: episodeError } = await supabase
+          .from('episodes')
+          .select('id, duration')
+          .eq('anime_id', animeId)
+          .eq('episode_number', episodeNumber)
+          .single();
 
-      // Clear previous database progress for other episodes of the same anime
-      const { data: otherEpisodes, error: otherError } = await supabase
-        .from('episodes')
-        .select('id')
-        .eq('anime_id', animeId)
-        .neq('episode_number', episodeNumber);
-
-      if (!otherError && otherEpisodes && otherEpisodes.length > 0) {
-        const otherEpisodeIds = otherEpisodes.map(ep => ep.id);
-        const { error: deleteError } = await supabase
-          .from('user_progress')
-          .delete()
-          .eq('user_id', user.id)
-          .in('episode_id', otherEpisodeIds);
-        
-        if (deleteError) {
-          console.warn('Error clearing previous watch progress from database:', deleteError);
-        } else {
-          console.log(`Cleared database watch progress for other episodes of anime ${animeId}`);
+        if (episodeError || !episode) {
+          console.warn('⚠️ [WatchProgress] Episode not found in database for progress:', episodeError);
+          return; // localStorage backup is already saved
         }
+        activeEpisodeId = episode.id;
+        activeDuration = episode.duration || undefined;
       }
 
-      // Determine if episode is completed (90%+ watched or manual complete)
-      const duration = episode.duration || 1440; // Default 24 minutes
-      const isCompleted = accuracy === 'manual' && timestamp >= duration * 0.9 || timestamp >= duration * 0.9;
+      // Determine if episode is completed (90%+ watched)
+      const finalDuration = activeDuration || 1440; // Default 24 minutes
+      const isCompleted = timestamp >= finalDuration * 0.9;
 
       // Update or insert watch progress with metadata
       console.log('📤 [WatchProgress] Sending upsert to user_progress base table...');
       const { error } = await supabase
         .from('user_progress')
         .upsert({
-          user_id: user.id,
-          episode_id: episode.id,
+          user_id: activeUserId,
+          episode_id: activeEpisodeId,
           progress_seconds: timestamp,
           is_completed: isCompleted,
           last_watched: new Date().toISOString()
@@ -192,12 +197,18 @@ export const useAnimePlayer = () => {
         // Don't throw error - localStorage backup is already saved
       } else {
         console.log('✅ [WatchProgress] Progress successfully saved to Supabase!');
+        // Clear AnimeService memory cache to ensure that any cached queries are wiped
+        AnimeService.clearCache();
+        // Invalidate cached query data to refresh "Continue Watching", watch progress mapping, and anime details pages
+        queryClient.invalidateQueries({ queryKey: ['user', 'continueWatching', activeUserId] });
+        queryClient.invalidateQueries({ queryKey: ['anime', 'byId', animeId] });
+        queryClient.invalidateQueries({ queryKey: ['user', 'watchProgress', activeUserId] });
       }
     } catch (error) {
       console.error('💥 [WatchProgress] Unexpected error saving progress:', error);
       // Don't throw error for progress updates - they're not critical
     }
-  }, []);
+  }, [queryClient]);
 
   // Manual progress update (user sets milestone)
   const updateWatchProgressManual = useCallback(async (

@@ -223,6 +223,37 @@ export class UserService {
     return data
   }
 
+  // Get user's anime progress map { [animeId]: maxWatchedEpisodeNumber }
+  static async getUserAnimeProgressMap(userId: string): Promise<Record<string, number>> {
+    try {
+      const { data, error } = await supabase
+        .from('user_watch_progress_detailed')
+        .select('anime_id, episode_number, is_completed, progress_seconds')
+        .eq('user_id', userId)
+
+      if (error) {
+        console.warn('Failed to fetch user anime progress map:', error.message)
+        return {}
+      }
+
+      const progressMap: Record<string, number> = {}
+      for (const row of data || []) {
+        const animeId = row.anime_id
+        const epNum = row.episode_number
+        if (animeId && epNum) {
+          // Count as watched if completed or if progress is substantial (e.g. > 10 seconds)
+          if (row.is_completed || (row.progress_seconds && row.progress_seconds > 10)) {
+            progressMap[animeId] = Math.max(progressMap[animeId] || 0, epNum)
+          }
+        }
+      }
+      return progressMap
+    } catch (err) {
+      console.warn('Failed to compute user anime progress map:', err)
+      return {}
+    }
+  }
+
   // Get user's favorites
   static async getUserFavorites(userId: string) {
     try {
@@ -234,10 +265,15 @@ export class UserService {
             id,
             title,
             poster_url,
+            banner_url,
             rating,
             year,
             genres,
-            status
+            status,
+            description,
+            type,
+            studios,
+            total_episodes
           )
         `)
         .eq('user_id', userId)
@@ -299,10 +335,14 @@ export class UserService {
             id,
             title,
             poster_url,
+            banner_url,
             rating,
             year,
             genres,
             status,
+            description,
+            type,
+            studios,
             total_episodes
           )
         `)

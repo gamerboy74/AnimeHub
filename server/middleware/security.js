@@ -18,7 +18,13 @@ function getHelmetConfig() {
         styleSrc: ["'self'", "'unsafe-inline'"], // Tailwind requires unsafe-inline
         scriptSrc: ["'self'", "'unsafe-inline'"], // Allow inline scripts for video players
         imgSrc: ["'self'", "data:", "https:", "blob:"],
-        connectSrc: ["'self'", process.env.VITE_SUPABASE_URL || '', "https:", "wss:"],
+        connectSrc: [
+          "'self'",
+          process.env.VITE_SUPABASE_URL || '',
+          (process.env.VITE_SUPABASE_URL || '').replace(/^http/, 'ws'),
+          "https://graphql.anilist.co",
+          "https://api.jikan.moe"
+        ].filter(Boolean),
         fontSrc: ["'self'", "data:"],
         mediaSrc: ["'self'", "https:", "blob:", "data:"],
         frameSrc: ["'self'", "https:", "http:"], // Allow iframes from any https source

@@ -1,10 +1,9 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import Hls from 'hls.js';
 import { SparkleLoadingSpinner } from '../base/LoadingSpinner';
 import { VideoService, type VideoSource } from '../../services/media/video';
 import { chooseBestQuality } from '../../utils/media/player';
-import IframePlayer from './IframePlayer';
 
 interface SmartVideoPlayerProps {
   sources: VideoSource[];
@@ -68,6 +67,11 @@ export default function SmartVideoPlayer({
   const videoRef = useRef<HTMLVideoElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const directSeekedRef = useRef(false);
+
+  // Universal HLS resolution state — tried for ALL iframe-type sources.
+  // On success, HLSVideoPlayer is used (full controls); on failure, falls back to iframe.
+  const [resolvedHls, setResolvedHls] = useState<string | null>(null);
+  const [hlsResolving, setHlsResolving] = useState(false);
 
   const normalizeLang = useCallback((lang?: string | null): 'sub' | 'dub' | undefined => {
     const normalized = lang?.toLowerCase();
@@ -210,6 +214,108 @@ export default function SmartVideoPlayer({
     initializePlayer();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filteredSources.length, JSON.stringify(filteredSources.map(s => s.url))]);
+
+  // Universal HLS resolver: 3-tier cascade that works even when backend is offline.
+  //
+  //  Tier 1 – Backend /api/resolve-hls  (5s timeout, full Playwright on server)
+  //  Tier 2 – Client-side CORS fetch    (no backend needed, works for permissive hosts)
+  //  Tier 3 – Iframe fallback           (always works — video plays, no custom controls)
+  useEffect(() => {
+    const source = playerState.currentSource;
+    if (!source) { setResolvedHls(null); return; }
+
+    const sourceType = VideoService.detectVideoSource(source.url);
+    if (sourceType !== 'iframe') { setResolvedHls(null); return; }
+
+    // Streaming site pages (9anime, etc.) skip directly to iframe
+    if (VideoService.isStreamingSitePage(source.url) && !source.url.toLowerCase().includes('hianime.do')) {
+      setResolvedHls(null);
+      return;
+    }
+
+    let cancelled = false;
+    setResolvedHls(null);
+    setHlsResolving(true);
+
+    // ── Tier 2 helper: client-side CORS fetch (no backend) ───────────────────
+    const clientSideExtract = async (embedUrl: string): Promise<string | null> => {
+      try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 6000);
+        const resp = await fetch(embedUrl, { signal: ctrl.signal, headers: { Accept: 'text/html,*/*' } });
+        clearTimeout(timer);
+        const html = await resp.text();
+        const patterns = [
+          /sources\s*[=:]\s*\[\s*\{[^}]*?(?:file|src|url)\s*[=:]\s*["']([^"']*\.m3u8[^"']*)/i,
+          /file\s*:\s*["']([^"']*\.m3u8[^"']*)/i,
+          /"(?:file|src|url|hls|stream)"\s*:\s*"([^"]*\.m3u8[^"]*)"/i,
+          /["'](https?:\/\/[^"'\s]*\.m3u8[^"'\s]*?)["']/i,
+          /(https?:\/\/[^\s"'<>]*\.m3u8[^\s"'<>]*)/i,
+        ];
+        for (const re of patterns) {
+          const m = html.match(re);
+          if (m?.[1]) {
+            const url = m[1].replace(/\\u0026/g, '&').replace(/&amp;/g, '&').trim();
+            if (url.startsWith('http')) {
+              console.log('[SmartVideoPlayer] ✅ [Tier 2 - Client] HLS found:', url.substring(0, 60));
+              return url;
+            }
+          }
+        }
+        return null;
+      } catch {
+        return null; // CORS block or network error — expected and safe
+      }
+    };
+
+    // ── Main cascade ──────────────────────────────────────────────────────────
+    const resolve = async () => {
+      const embedUrl = source.url;
+
+      // ── Tier 1: backend with hard 5s abort timeout ───────────────────────
+      try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 5000);
+        const resp = await fetch(`/api/resolve-hls?url=${encodeURIComponent(embedUrl)}`, { signal: ctrl.signal });
+        clearTimeout(timer);
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.success && data.hlsUrl) {
+            if (!cancelled) {
+              console.log('[SmartVideoPlayer] ✅ [Tier 1 - Backend] HLS resolved:', data.hlsUrl.substring(0, 60));
+              setResolvedHls(data.hlsUrl);
+              setHlsResolving(false);
+            }
+            return;
+          }
+        }
+        console.log('[SmartVideoPlayer] ⚠️ [Tier 1] Backend returned no HLS, trying Tier 2...');
+      } catch {
+        console.log('[SmartVideoPlayer] ⚠️ [Tier 1] Backend unreachable (offline/timeout), trying Tier 2...');
+      }
+
+      if (cancelled) return;
+
+      // ── Tier 2: client-side CORS fetch ───────────────────────────────────
+      const clientHls = await clientSideExtract(embedUrl);
+      if (!cancelled && clientHls) {
+        setResolvedHls(clientHls);
+        setHlsResolving(false);
+        return;
+      }
+
+      if (cancelled) return;
+
+      // ── Tier 3: iframe fallback (video always plays) ─────────────────────
+      console.log('[SmartVideoPlayer] ℹ️ [Tier 3] Using iframe fallback');
+      setResolvedHls(null);
+      setHlsResolving(false);
+    };
+
+    resolve();
+    return () => { cancelled = true; };
+  }, [playerState.currentSource?.url]);
+
 
 
 
@@ -425,23 +531,7 @@ export default function SmartVideoPlayer({
     onError?.(error);
   }, [onError]);
 
-  // Change quality
-  const changeQuality = useCallback((quality: string) => {
-    const newSource = filteredSources.find(s => s.quality === quality);
-    if (newSource) {
-      setPlayerState(prev => ({
-        ...prev,
-        currentSource: newSource,
-        quality,
-        isLoading: true
-      }));
-    }
-  }, [filteredSources]);
 
-  // Get available qualities
-  const availableQualities = filteredSources.map(s => s.quality).filter((quality, index, self) => 
-    self.indexOf(quality) === index
-  );
 
   // Render YouTube iframe
   const renderYouTubePlayer = (source: VideoSource) => {
@@ -452,22 +542,17 @@ export default function SmartVideoPlayer({
     });
 
     return (
-      <IframePlayer
+      <iframe
+        ref={iframeRef}
         src={embedUrl}
         title={title}
-        width="100%"
-        height="100%"
-        animeId={animeId}
-        episodeNumber={episodeNumber}
-        estimatedDuration={1440}
-        onProgressUpdate={onProgressUpdate}
-        onTimeUpdate={onTimeUpdate}
-        startTime={startTime}
+        className="w-full h-full"
+        allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+        loading="lazy"
         onLoad={() => {
           handleYouTubeReady();
           setPlayerState(prev => ({ ...prev, isLoading: false }));
         }}
-        className="w-full h-full"
       />
     );
   };
@@ -691,7 +776,7 @@ export default function SmartVideoPlayer({
           
           handleError(errorMessage);
         }}
-        onLoadedData={(e) => {
+        onLoadedData={() => {
           setPlayerState(prev => ({ ...prev, isLoading: false }));
         }}
       >
@@ -803,68 +888,7 @@ export default function SmartVideoPlayer({
     </div>
   );
 
-  // Premium server/source selector dropdown
-  const renderQualitySelector = () => (
-    <div className="absolute top-4 right-4 z-20">
-      <div className="bg-slate-950/80 backdrop-blur-md rounded-xl p-1.5 border border-white/10 shadow-2xl flex items-center gap-2 transition-all hover:border-emerald-500/30">
-        <div className="flex items-center gap-1.5 text-slate-400 px-2 text-[11px] font-semibold tracking-wide uppercase">
-          <i className="ri-server-line text-emerald-400 text-xs"></i>
-          <span>Server</span>
-        </div>
-        <select
-          value={playerState.quality}
-          onChange={(e) => changeQuality(e.target.value)}
-          className="bg-slate-900/90 text-slate-100 text-xs border border-white/10 rounded-lg pl-3 pr-8 py-1.5 focus:ring-2 focus:ring-emerald-500/30 font-medium cursor-pointer outline-none transition-all appearance-none relative"
-          style={{
-            backgroundImage: `url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%2310b981' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3E%3C/svg%3E")`,
-            backgroundPosition: 'right 0.5rem center',
-            backgroundSize: '1.25em 1.25em',
-            backgroundRepeat: 'no-repeat'
-          }}
-        >
-          {availableQualities.map(quality => (
-            <option key={quality} value={quality} className="bg-slate-950 text-slate-200">
-              {quality}
-            </option>
-          ))}
-        </select>
-      </div>
-    </div>
-  );
 
-  // Language selector (Sub / Dub tabs)
-  const renderLangSelector = () => (
-    <div className="absolute top-4 left-4 z-20">
-      <div className="bg-slate-950/80 backdrop-blur-md rounded-xl p-1 border border-white/10 shadow-2xl flex gap-1">
-        {availableLangs.includes('sub') && (
-          <button
-            onClick={() => setActiveLang('sub')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase transition-all flex items-center gap-1 cursor-pointer ${
-              activeLang === 'sub'
-                ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-md'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
-            }`}
-          >
-            <i className="ri-chat-3-line"></i>
-            Sub
-          </button>
-        )}
-        {availableLangs.includes('dub') && (
-          <button
-            onClick={() => setActiveLang('dub')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase transition-all flex items-center gap-1 cursor-pointer ${
-              activeLang === 'dub'
-                ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-md'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
-            }`}
-          >
-            <i className="ri-volume-up-line"></i>
-            Dub
-          </button>
-        )}
-      </div>
-    </div>
-  );
 
   // Main render
   if (playerState.error) {
@@ -884,6 +908,7 @@ export default function SmartVideoPlayer({
   }
 
   const sourceType = VideoService.detectVideoSource(playerState.currentSource.url);
+  const isIframeSource = sourceType === 'iframe';
 
   return (
     <>
@@ -891,6 +916,25 @@ export default function SmartVideoPlayer({
         {/* Video Player */}
         {sourceType === 'youtube' ? (
           renderYouTubePlayer(playerState.currentSource)
+        ) : isIframeSource && resolvedHls ? (
+          // Iframe source resolved to HLS → use HLSVideoPlayer for full custom controls
+          <HLSVideoPlayer
+            src={resolvedHls}
+            autoPlay={autoPlay}
+            startTime={startTime}
+            onTimeUpdate={handleTimeUpdate}
+            onPlay={handlePlay}
+            onPause={handlePause}
+            onEnded={handleEnded}
+            onError={handleError}
+            onLoadStart={() => setPlayerState(prev => ({ ...prev, isLoading: true }))}
+            onLoadedData={() => setPlayerState(prev => ({ ...prev, isLoading: false }))}
+            onProgress={throttledHandleAdaptiveBitrate}
+            optimizeBuffer={optimizeBuffer}
+          />
+        ) : isIframeSource && hlsResolving ? (
+          // Still resolving — show spinner
+          renderLoading()
         ) : sourceType === 'iframe' ? (
           renderIframePlayer(playerState.currentSource)
         ) : sourceType === 'hls' ? (
@@ -900,7 +944,7 @@ export default function SmartVideoPlayer({
         )}
         
         {/* Loading Overlay */}
-        {playerState.isLoading && (
+        {playerState.isLoading && !isIframeSource && (
           <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
             <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
           </div>
@@ -1034,10 +1078,20 @@ function HLSVideoPlayer({
   const hlsRef = useRef<Hls | null>(null);
   const hlsSeekedRef = useRef(false);
   const controlsHideTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // Web Audio API refs for volume boost beyond 100%
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const gainNodeRef = useRef<GainNode | null>(null);
+  const mediaSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
+  // volume: 0-2 where >1 means gain boost (200% max)
+  const [volume, setVolume] = useState(1);
+  const [showVolumeSlider, setShowVolumeSlider] = useState(false);
+  const volumeSliderRef = useRef<HTMLDivElement>(null);
+  // true when slider was explicitly clicked open — hover-leave won't close it
+  const volumePinnedRef = useRef(false);
   const [qualityLevels, setQualityLevels] = useState<Array<{ index: number; label: string }>>([]);
   const [selectedQuality, setSelectedQuality] = useState<'auto' | string>('auto');
   const [captionsEnabled, setCaptionsEnabled] = useState(false);
@@ -1188,6 +1242,45 @@ function HLSVideoPlayer({
     }
   }, []);
 
+  // Lazy Web Audio API initialiser — must be called inside a user gesture
+  const initAudioBoost = useCallback(() => {
+    const video = videoRef.current;
+    if (!video || audioCtxRef.current) return; // already initialised
+    try {
+      const ctx = new AudioContext();
+      const gain = ctx.createGain();
+      gain.gain.value = 1;
+      const source = ctx.createMediaElementSource(video);
+      source.connect(gain);
+      gain.connect(ctx.destination);
+      audioCtxRef.current = ctx;
+      gainNodeRef.current = gain;
+      mediaSourceRef.current = source;
+    } catch (err) {
+      console.warn('[SmartVideoPlayer] Web Audio API init failed:', err);
+    }
+  }, []);
+
+  // Apply volume: 0-1 uses native, 1-2 uses GainNode boost
+  const applyVolume = useCallback((val: number, muted: boolean) => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (muted || val === 0) {
+      video.muted = true;
+      if (gainNodeRef.current) gainNodeRef.current.gain.value = 1;
+      return;
+    }
+    video.muted = false;
+    if (val <= 1) {
+      video.volume = val;
+      if (gainNodeRef.current) gainNodeRef.current.gain.value = 1;
+    } else {
+      // Keep native at 100%, boost with gain node
+      video.volume = 1;
+      if (gainNodeRef.current) gainNodeRef.current.gain.value = val;
+    }
+  }, []);
+
   useEffect(() => {
     hlsSeekedRef.current = false;
     clearControlsHideTimer();
@@ -1195,12 +1288,31 @@ function HLSVideoPlayer({
     setCurrentTime(0);
     setDuration(0);
     setIsMuted(false);
+    setVolume(1);
+    // Reset gain on source change
+    if (gainNodeRef.current) gainNodeRef.current.gain.value = 1;
     setSelectedQuality('auto');
     setQualityLevels([]);
     setCaptionsEnabled(false);
     setHasCaptions(false);
     setControlsVisible(true);
   }, [src, clearControlsHideTimer]);
+
+  // Close volume slider when tapping/clicking outside — handles both mouse and touch
+  useEffect(() => {
+    const handleOutside = (e: MouseEvent | TouchEvent) => {
+      if (volumeSliderRef.current && !volumeSliderRef.current.contains(e.target as Node)) {
+        volumePinnedRef.current = false; // unpin on outside click
+        setShowVolumeSlider(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutside);
+    document.addEventListener('touchstart', handleOutside, { passive: true });
+    return () => {
+      document.removeEventListener('mousedown', handleOutside);
+      document.removeEventListener('touchstart', handleOutside);
+    };
+  }, []);
 
   useEffect(() => {
     if (isPlaying && !isSeeking) {
@@ -1361,6 +1473,7 @@ function HLSVideoPlayer({
         onVolumeChange={(event) => {
           const video = event.currentTarget;
           setIsMuted(video.muted);
+          if (!video.muted) setVolume(video.volume);
         }}
         onDurationChange={(event) => {
           const video = event.currentTarget;
@@ -1404,10 +1517,11 @@ function HLSVideoPlayer({
       <div className={`absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/90 via-black/60 to-transparent px-2 py-1.5 sm:px-3 sm:py-3 md:px-4 md:py-4 transition-opacity duration-300 ${controlsVisible || !isPlaying ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
         <div className="mb-1.5 sm:mb-3 flex items-center gap-2 sm:gap-3">
           <span className="hidden text-[10px] font-semibold uppercase tracking-[0.2em] text-white/60 sm:inline">Seek</span>
+          {/* Seek bar with filled progress */}
           <input
             type="range"
             min="0"
-            max={Math.max(duration, 0)}
+            max={Math.max(duration, 1)}
             step="0.1"
             value={Math.min(currentTime, duration || currentTime)}
             disabled={!duration || Number.isNaN(duration)}
@@ -1416,7 +1530,13 @@ function HLSVideoPlayer({
             onChange={(event) => seekTo(Number(event.target.value))}
             onMouseUp={() => setIsSeeking(false)}
             onTouchEnd={() => setIsSeeking(false)}
-            className="h-2 w-full cursor-pointer appearance-none rounded-full bg-white/15 accent-emerald-400"
+            className="h-2 w-full cursor-pointer appearance-none rounded-full"
+            style={{
+              background: (() => {
+                const pct = duration > 0 ? (Math.min(currentTime, duration) / duration) * 100 : 0;
+                return `linear-gradient(to right, #34d399 0%, #34d399 ${pct}%, rgba(255,255,255,0.15) ${pct}%, rgba(255,255,255,0.15) 100%)`;
+              })()
+            }}
             aria-label="Seek video"
           />
         </div>
@@ -1456,20 +1576,104 @@ function HLSVideoPlayer({
           </div>
 
           <div className="flex shrink-0 items-center gap-1 sm:gap-2 sm:justify-end">
-            <button
-              type="button"
-              onClick={() => {
-                const video = videoRef.current;
-                if (!video) return;
-                video.muted = !video.muted;
-                setIsMuted(video.muted);
+            {/* Volume control: mute button + expandable slider */}
+            <div
+              ref={volumeSliderRef}
+              className="relative flex items-center"
+              onMouseEnter={() => { initAudioBoost(); setShowVolumeSlider(true); }}
+              onMouseLeave={() => {
+                // Only close on hover-leave if NOT pinned open by a click
+                if (!volumePinnedRef.current) setShowVolumeSlider(false);
               }}
-              className="inline-flex h-8 items-center gap-1 rounded-full bg-white/10 px-2 text-[11px] sm:h-auto sm:px-2.5 sm:py-2 sm:text-xs font-semibold text-white transition hover:bg-white/20"
-              aria-label={isMuted ? 'Unmute' : 'Mute'}
             >
-              <i className={`${isMuted ? 'ri-volume-mute-line' : 'ri-volume-up-line'} text-sm`} />
-              <span className="hidden sm:inline">{isMuted ? 'Muted' : 'Sound'}</span>
-            </button>
+              <button
+                type="button"
+                onClick={() => {
+                  initAudioBoost();
+                  if (isMuted) {
+                    // Unmute — restore volume and pin slider open
+                    const restoreVol = volume > 0 ? volume : 1;
+                    setIsMuted(false);
+                    applyVolume(restoreVol, false);
+                    volumePinnedRef.current = true;
+                    setShowVolumeSlider(true);
+                  } else if (showVolumeSlider && volumePinnedRef.current) {
+                    // Already pinned open — click again to close
+                    volumePinnedRef.current = false;
+                    setShowVolumeSlider(false);
+                  } else {
+                    // Pin open (works for both hover-preview and first click)
+                    volumePinnedRef.current = true;
+                    setShowVolumeSlider(true);
+                  }
+                }}
+                className="inline-flex h-8 items-center gap-1 rounded-full bg-white/10 px-2 text-[11px] sm:h-auto sm:px-2.5 sm:py-2 sm:text-xs font-semibold text-white transition hover:bg-white/20"
+                aria-label={isMuted ? 'Unmute' : 'Volume'}
+              >
+                <i className={`${
+                  isMuted || volume === 0
+                    ? 'ri-volume-mute-line'
+                    : volume < 0.4
+                    ? 'ri-volume-down-line'
+                    : 'ri-volume-up-line'
+                } text-sm`} />
+                <span className="hidden sm:inline">
+                  {isMuted ? 'Muted' : `${Math.round(volume * 100)}%`}
+                  {!isMuted && volume > 1 && <span className="ml-0.5 text-amber-400">⚡</span>}
+                </span>
+              </button>
+
+              {/* Volume slider popup */}
+              {showVolumeSlider && (
+                <div
+                  className="absolute bottom-full left-1/2 -translate-x-1/2 flex flex-col items-center gap-0.5 sm:gap-1 bg-black/85 backdrop-blur-sm rounded-lg sm:rounded-xl px-2 py-2 sm:px-3 sm:py-3 shadow-xl z-20 min-w-[40px] sm:min-w-[56px]"
+                >
+                  {/* % label */}
+                  <span className={`text-[9px] sm:text-[10px] font-bold leading-none ${volume > 1 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                    {Math.round((isMuted ? 0 : volume) * 100)}%
+                  </span>
+
+                  {/* Vertical range — 0 to 2 (200%) */}
+                  <div className="relative flex items-center">
+                    {/* 100% marker line */}
+                    <div
+                      className="absolute left-1/2 -translate-x-1/2 w-full h-px bg-white/25 pointer-events-none"
+                      style={{ bottom: '50%' }}
+                    />
+                    <input
+                      type="range"
+                      min="0"
+                      max="2"
+                      step="0.01"
+                      value={isMuted ? 0 : volume}
+                      onChange={(e) => {
+                        initAudioBoost();
+                        const val = Number(e.target.value);
+                        setVolume(val);
+                        setIsMuted(val === 0);
+                        applyVolume(val, val === 0);
+                      }}
+                      className="h-16 sm:h-28 cursor-pointer appearance-none rounded-full"
+                      style={{
+                        writingMode: 'vertical-lr' as any,
+                        direction: 'rtl',
+                        touchAction: 'none',
+                        background: (() => {
+                          const currentVol = isMuted ? 0 : volume;
+                          const pct = (currentVol / 2) * 100;
+                          const midPct = 50;
+                          if (currentVol <= 1) {
+                            return `linear-gradient(to top, #34d399 0%, #34d399 ${pct}%, rgba(255,255,255,0.12) ${pct}%, rgba(255,255,255,0.12) 100%)`;
+                          }
+                          return `linear-gradient(to top, #34d399 0%, #34d399 ${midPct}%, #f59e0b ${midPct}%, #f59e0b ${pct}%, rgba(255,255,255,0.12) ${pct}%, rgba(255,255,255,0.12) 100%)`;
+                        })()
+                      }}
+                      aria-label="Volume (0–200%)"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
 
             <button
               type="button"
@@ -1517,3 +1721,348 @@ function HLSVideoPlayer({
     </div>
   );
 }
+
+interface IframePlayerProps {
+  src: string;
+  title?: string;
+  width?: string | number;
+  height?: string | number;
+  allowFullScreen?: boolean;
+  className?: string;
+  animeId?: string;
+  episodeNumber?: number;
+  estimatedDuration?: number; // Estimated episode duration in seconds
+  onProgressUpdate?: (progress: number, accuracy: 'accurate' | 'estimated' | 'manual') => void;
+  onTimeUpdate?: (currentTime: number, duration: number) => void;
+  onLoad?: () => void;
+  startTime?: number; // Starting time for auto-resuming video
+}
+
+export const IframePlayer: React.FC<IframePlayerProps> = ({
+  src,
+  title = "Video Player",
+  width = "100%",
+  height = "500px",
+  allowFullScreen = true,
+  className = "",
+  estimatedDuration = 1440, // Default 24 minutes
+  onProgressUpdate,
+  onTimeUpdate,
+  onLoad,
+  startTime = 0
+}) => {
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  const [hasReceivedPostMessage, setHasReceivedPostMessage] = useState(false);
+  const hasSeekedRef = useRef(false);
+  
+  // Check if the URL is a 9anime page and needs special handling
+  const is9animeUrl = src.includes('9anime.org.lv') || src.includes('hianime.do');
+  
+  // Check if it's a gogoanime URL (which should be embeddable)
+  const isGogoanimeUrl = src.includes('gogoanime.me.uk') || src.includes('gogoanime');
+  
+  // Check if it's any mega URL (megaplay, megacloud, etc.) - convert to boolean to prevent re-renders
+  const isMegaUrl = !!(src.match(/mega(play|cloud|backup|cdn|stream)/i) || src.includes('mega.'));
+
+  // PostMessage listener for video state from embedded player
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      // Security: Only accept messages from same origin or known video domains
+      const allowedOrigins = [
+        'https://gogoanime.me.uk',
+        'https://gogoanime',
+        'https://megaplay.buzz',
+        'https://megaplay',
+        'https://hianime.do',
+        'https://flixcloud.cc',
+        'https://fetch3.flixcloud.cc',
+        'https://reanime.to',
+        window.location.origin
+      ];
+
+      // Check if message is from a known origin (basic check)
+      const origin = event.origin;
+      const isAllowedOrigin = allowedOrigins.some(allowed => origin.includes(allowed));
+      
+      if (!isAllowedOrigin && event.origin !== window.location.origin) {
+        // Still allow but be cautious
+        console.warn('Received message from unknown origin:', origin);
+      }
+
+      // Handle different message formats from embedded players
+      if (event.data && typeof event.data === 'object') {
+        let isMatch = false;
+        let currentTime = 0;
+        let duration = estimatedDuration;
+
+        // Video.js format
+        if (event.data.type === 'videojs' || event.data.event === 'timeupdate') {
+          isMatch = true;
+          currentTime = event.data.currentTime || event.data.time || 0;
+          duration = event.data.duration || estimatedDuration;
+        }
+        // Generic video player format
+        else if (event.data.currentTime !== undefined || event.data.videoTime !== undefined) {
+          isMatch = true;
+          currentTime = event.data.currentTime || event.data.videoTime || 0;
+          duration = event.data.duration || event.data.videoDuration || estimatedDuration;
+        }
+
+        if (isMatch) {
+          // Prevent premature progress overwriting
+          const isInitialSeekPending = startTime > 5 && !hasSeekedRef.current;
+          if (isInitialSeekPending && currentTime < startTime - 5) {
+            console.log(`⏳ Ignoring pre-seek postMessage: ${currentTime}s (initial seek to ${startTime}s pending)`);
+            return;
+          }
+
+          if (startTime > 5 && !hasSeekedRef.current && currentTime >= startTime - 5) {
+            console.log(`🎯 Initial seek resolved via postMessage playback at ${currentTime}s (start: ${startTime}s)`);
+            hasSeekedRef.current = true;
+          }
+
+          setHasReceivedPostMessage(true); // Mark that we received postMessage data
+          onTimeUpdate?.(currentTime, duration);
+          
+          // Update progress with accurate data
+          if (currentTime > 0 && onProgressUpdate) {
+            onProgressUpdate(currentTime, 'accurate');
+          }
+        }
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    
+    return () => {
+      window.removeEventListener('message', handleMessage);
+    };
+  }, [estimatedDuration, onProgressUpdate, onTimeUpdate, startTime]);
+
+  // Request video state from embedded player via postMessage
+  const requestVideoState = useCallback(() => {
+    if (!iframeRef.current?.contentWindow) return;
+
+    try {
+      // Try different postMessage formats that various players might support
+      const formats = [
+        { type: 'getVideoState' },
+        { type: 'videoState', action: 'get' },
+        { method: 'getCurrentTime' },
+        { event: 'requestVideoState' }
+      ];
+
+      formats.forEach((format, index) => {
+        setTimeout(() => {
+          iframeRef.current?.contentWindow?.postMessage(format, '*');
+        }, index * 500); // Stagger requests
+      });
+    } catch (error) {
+      console.warn('Failed to send postMessage to iframe:', error);
+    }
+  }, []);
+
+  // Request video state periodically
+  useEffect(() => {
+    // Initial request after iframe loads
+    const requestInterval = setInterval(() => {
+      requestVideoState();
+    }, 5000); // Request every 5 seconds
+
+    return () => clearInterval(requestInterval);
+  }, []); // requestVideoState is stable from useCallback with empty deps
+
+  // Same-origin JS injection / DOM querying for progress tracking and auto-resume
+  useEffect(() => {
+    // Reset seek ref when src changes
+    hasSeekedRef.current = false;
+
+    const isSameOrigin = src.startsWith('/') || src.startsWith(window.location.origin);
+    if (!isSameOrigin) return;
+
+    console.log('⚡ Same-origin progress tracking/auto-resume helper active for:', src);
+
+    const queryInterval = setInterval(() => {
+      try {
+        const iframe = iframeRef.current;
+        if (!iframe) return;
+
+        const win = iframe.contentWindow;
+        const doc = iframe.contentDocument || win?.document;
+        if (!doc || !win) return;
+
+        // 1. Try JWPlayer via window.jwplayer inside the same-origin iframe
+        let jwPlayerInstance: any = null;
+        try {
+          if (typeof (win as any).jwplayer === 'function') {
+            jwPlayerInstance = (win as any).jwplayer();
+          }
+        } catch (e) {
+          // fail silently
+        }
+
+        if (jwPlayerInstance && typeof jwPlayerInstance.getPosition === 'function') {
+          const current = Math.floor(jwPlayerInstance.getPosition());
+          const duration = Math.floor(jwPlayerInstance.getDuration());
+
+          if (!hasSeekedRef.current && startTime && startTime > 5 && duration > 5) {
+            console.log(`🚀 Resuming same-origin iframe JWPlayer to saved progress: ${startTime}s`);
+            jwPlayerInstance.seek(startTime);
+            hasSeekedRef.current = true;
+          }
+
+          if (current > 0) {
+            setHasReceivedPostMessage(true);
+            onTimeUpdate?.(current, duration > 0 ? duration : estimatedDuration);
+            onProgressUpdate?.(current, 'accurate');
+          }
+          return; // If JWPlayer was processed, skip standard HTML5 video check
+        }
+
+        // 2. Try standard HTML5 Video element inside the same-origin document
+        const videoElement = doc.querySelector('video');
+        if (videoElement) {
+          // Auto-Resume: Seek to start time on load once, checking readyState to avoid browser discard
+          if (!hasSeekedRef.current && startTime && startTime > 0 && videoElement.readyState >= 2) {
+            const duration = videoElement.duration;
+            if (duration && !isNaN(duration) && duration > 0) {
+              console.log(`🚀 Resuming same-origin iframe HTML5 video to saved progress: ${startTime}s (readyState: ${videoElement.readyState}, duration: ${duration}s)`);
+              videoElement.currentTime = Math.min(startTime, duration - 1);
+              hasSeekedRef.current = true;
+            }
+          }
+
+          // Tracking: Retrieve current time and state
+          const currentTime = videoElement.currentTime;
+          const duration = videoElement.duration || estimatedDuration;
+
+          if (currentTime > 0) {
+            setHasReceivedPostMessage(true);
+            onTimeUpdate?.(currentTime, duration);
+            onProgressUpdate?.(currentTime, 'accurate');
+          }
+        }
+      } catch (error) {
+        // Cross-origin boundaries block this, fail silently (safely caught)
+        console.debug('Cross-origin boundary blocks same-origin helper:', error);
+      }
+    }, 3000); // Check every 3 seconds for responsive tracking/seeking
+
+    return () => clearInterval(queryInterval);
+  }, [src, startTime, estimatedDuration, onProgressUpdate, onTimeUpdate]);
+
+  // 3. Fallback Estimated Tracking for Cross-Origin Iframes
+  useEffect(() => {
+    const isSameOrigin = src.startsWith('/') || src.startsWith(window.location.origin);
+    if (isSameOrigin) return; // Same-origin has its own accurate queryInterval
+
+    console.log('⏰ [IframePlayer] Fallback estimated progress tracking activated for cross-origin player starting at:', startTime);
+    
+    let currentEstimatedTime = startTime;
+    let isTabFocused = true;
+
+    // Track tab focus to avoid counting time when user is in another tab
+    const handleVisibilityChange = () => {
+      isTabFocused = document.visibilityState === 'visible';
+      console.log('📄 [IframePlayer] Tab visibility changed:', isTabFocused ? 'Visible' : 'Hidden');
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    const interval = setInterval(() => {
+      // If the tab is visible and we haven't received custom postMessage data
+      // (postMessage accurate data has priority and overrides estimation)
+      if (isTabFocused && !hasReceivedPostMessage) {
+        currentEstimatedTime += 1;
+        
+        // Every 5 seconds, broadcast the estimated time to the parent
+        if (currentEstimatedTime % 5 === 0) {
+          console.log('📈 [IframePlayer] Broadcasting estimated progress:', currentEstimatedTime);
+          onTimeUpdate?.(currentEstimatedTime, estimatedDuration);
+          onProgressUpdate?.(currentEstimatedTime, 'estimated');
+        }
+      }
+    }, 1000);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      clearInterval(interval);
+      // Immediately send final progress update on unmount
+      if (currentEstimatedTime > startTime && !hasReceivedPostMessage) {
+        console.log('📤 [IframePlayer] Sending final estimated progress on unmount:', currentEstimatedTime);
+        onTimeUpdate?.(currentEstimatedTime, estimatedDuration);
+        onProgressUpdate?.(currentEstimatedTime, 'estimated');
+      }
+    };
+  }, [src, startTime, estimatedDuration, hasReceivedPostMessage, onProgressUpdate, onTimeUpdate]);
+
+  // Instantly trigger onLoad if using the non-embeddable 9anime fallback view
+  useEffect(() => {
+    if (is9animeUrl && !isGogoanimeUrl && !isMegaUrl) {
+      onLoad?.();
+    }
+  }, [src, is9animeUrl, isGogoanimeUrl, isMegaUrl, onLoad]);
+
+  return (
+    <div className={`iframe-player-container ${className}`}>
+      {is9animeUrl && !isGogoanimeUrl && !isMegaUrl ? (
+        <div className="relative w-full h-full bg-gray-900 rounded-lg overflow-hidden aspect-video">
+          <div className="absolute inset-0 flex items-center justify-center bg-gray-800">
+            <div className="text-center text-white p-6">
+              <div className="text-4xl mb-4">🎬</div>
+              <h3 className="text-xl font-semibold mb-2">9anime Player</h3>
+              <p className="text-gray-300 mb-4">
+                This episode is hosted on 9anime.org.lv
+              </p>
+              <a
+                href={src}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                <span className="mr-2">▶️</span>
+                Watch on 9anime
+              </a>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="relative w-full aspect-video group">
+          
+          <iframe
+            ref={iframeRef}
+            src={src}
+            title={title}
+            width={width}
+            height={height}
+            allowFullScreen={allowFullScreen}
+            frameBorder="0"
+            sandbox="allow-scripts allow-same-origin allow-forms allow-presentation"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen; web-share"
+            referrerPolicy="no-referrer-when-downgrade"
+            className="absolute inset-0 w-full h-full rounded-lg shadow-lg"
+            style={{
+              minHeight: typeof height === 'string' ? height : `${height}px`,
+              border: 'none',
+              borderRadius: '8px'
+            }}
+            onLoad={() => {
+              console.log('✅ Iframe onLoad fired - video is loading!');
+              
+              // Call the parent onLoad callback if provided
+              onLoad?.();
+              
+              // Note: We can't access iframe content due to X-Frame-Options,
+              // but the video plays fine! The security restriction only blocks
+              // JavaScript access, not video playback.
+            }}
+            onError={(e) => {
+              console.error('❌ Iframe onError event fired:', e);
+              console.error('This usually means the URL failed to load completely');
+            }}
+          />
+        </div>
+      )}
+    </div>
+  );
+};

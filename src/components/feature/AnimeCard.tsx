@@ -1,7 +1,10 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getProxiedImageUrl, getDirectImageUrl } from '../../utils/media/imageProxy';
+import { useWatchlist } from '../../hooks/user/watchlist';
+import { useFavorites } from '../../hooks/user/favorites';
+import { useUserAnimeProgress } from '../../hooks/user';
 
 // Interfaces for type safety
 import { useCurrentUser } from '../../hooks/auth/selectors';
@@ -28,18 +31,6 @@ interface AnimeCardProps extends Anime {
   showNewBadge?: boolean;
 }
 
-interface StoredAnime {
-  id: string;
-  title: string;
-  image: string;
-  rating: number;
-  year: number;
-  episodes: number;
-  genres: string[];
-  status: 'Ongoing' | 'Completed' | 'Upcoming';
-  description: string;
-  addedAt: string;
-}
 
 // Simple debounce utility (instead of lodash.debounce)
 const debounce = <F extends (...args: any[]) => void>(func: F, wait: number) => {
@@ -51,32 +42,34 @@ const debounce = <F extends (...args: any[]) => void>(func: F, wait: number) => 
 };
 
 const AnimeCard = React.memo(function AnimeCard(props: AnimeCardProps) {
-  const [isInWatchlist, setIsInWatchlist] = useState(false);
-  const [isFavorite, setIsFavorite] = useState(false);
+  const { watchlist, addToWatchlist, removeFromWatchlist } = useWatchlist();
+  const { favorites, addToFavorites, removeFromFavorites } = useFavorites();
+  const { getProgress } = useUserAnimeProgress();
+
   const [isHovered, setIsHovered] = useState(false);
-  const [watchProgress, setWatchProgress] = useState(0);
+  const watchProgress = getProgress(props._id);
   const [showToast, setShowToast] = useState<string | null>(null);
   const [showMoreInfo, setShowMoreInfo] = useState(false);
 
-  const fallbackImage = '/path/to/fallback-image.jpg'; // Replace with actual fallback image path
+  const fallbackImage = 'https://via.placeholder.com/300x400/0d9488/ffffff?text=No+Cover';
   const user = useCurrentUser();
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Load saved states from localStorage with error handling
-  useEffect(() => {
-    try {
-      const savedWatchlist: StoredAnime[] = JSON.parse(localStorage.getItem('watchlist') || '[]');
-      const savedFavorites: StoredAnime[] = JSON.parse(localStorage.getItem('favorites') || '[]');
-      const savedProgress: Record<string, number> = JSON.parse(localStorage.getItem('watchProgress') || '{}');
 
-      setIsInWatchlist(savedWatchlist.some((item) => item.id === props._id));
-      setIsFavorite(savedFavorites.some((item) => item.id === props._id));
-      setWatchProgress(savedProgress[props._id] || 0);
-    } catch (error) {
-      console.error('Error reading from localStorage:', error);
-    }
-  }, [props._id]);
+  const isInWatchlist = useMemo(() => {
+    return user ? watchlist.some((item: any) => item.id === props._id) : false;
+  }, [watchlist, props._id, user]);
+
+  const isFavorite = useMemo(() => {
+    return user ? favorites.some((item: any) => item.id === props._id) : false;
+  }, [favorites, props._id, user]);
+
+  const isInWatchlistRef = useRef(isInWatchlist);
+  isInWatchlistRef.current = isInWatchlist;
+
+  const isFavoriteRef = useRef(isFavorite);
+  isFavoriteRef.current = isFavorite;
 
   // Add keyboard support for modal
   useEffect(() => {
@@ -94,14 +87,9 @@ const AnimeCard = React.memo(function AnimeCard(props: AnimeCardProps) {
     setTimeout(() => setShowToast(null), 2000);
   };
 
-  // Reusable toggle function for watchlist and favorites
-  const toggleItem = debounce(
-    (
-      e: React.MouseEvent,
-      type: 'watchlist' | 'favorites',
-      setState: React.Dispatch<React.SetStateAction<boolean>>,
-      state: boolean
-    ) => {
+  // Reusable stable toggles for watchlist and favorites
+  const handleWatchlistToggle = useMemo(() => {
+    return debounce(async (e: React.MouseEvent) => {
       e.preventDefault();
       e.stopPropagation();
 
@@ -111,42 +99,44 @@ const AnimeCard = React.memo(function AnimeCard(props: AnimeCardProps) {
       }
 
       try {
-        const key = type;
-        const savedItems: StoredAnime[] = JSON.parse(localStorage.getItem(key) || '[]');
-        let updatedItems;
-
-        if (state) {
-          updatedItems = savedItems.filter((item) => item.id !== props._id);
-          showToastMessage(`Removed from ${type}`);
+        if (isInWatchlistRef.current) {
+          await removeFromWatchlist(props._id);
+          showToastMessage('Removed from watchlist');
         } else {
-          const animeData: StoredAnime = {
-            id: props._id,
-            title: props.title,
-            image: props.cover,
-            rating: props.rating,
-            year: props.year,
-            episodes: props.totalEpisodes,
-            genres: props.genres,
-            status: props.status,
-            description: props.description,
-            addedAt: new Date().toISOString(),
-          };
-          updatedItems = [...savedItems, animeData];
-          showToastMessage(`Added to ${type}`);
+          await addToWatchlist(props._id);
+          showToastMessage('Added to watchlist');
         }
-
-        localStorage.setItem(key, JSON.stringify(updatedItems));
-        setState(!state);
       } catch (error) {
-        console.error(`Error updating ${type}:`, error);
-        showToastMessage(`Failed to update ${type}`);
+        console.error('Error updating watchlist:', error);
+        showToastMessage('Failed to update watchlist');
       }
-    },
-    300
-  );
+    }, 300);
+  }, [user, props._id, addToWatchlist, removeFromWatchlist, navigate, location.pathname, location.search]);
 
-  const handleWatchlistToggle = (e: React.MouseEvent) => toggleItem(e, 'watchlist', setIsInWatchlist, isInWatchlist);
-  const handleFavoriteToggle = (e: React.MouseEvent) => toggleItem(e, 'favorites', setIsFavorite, isFavorite);
+  const handleFavoriteToggle = useMemo(() => {
+    return debounce(async (e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (!user) {
+        navigate(`/login?redirect=${encodeURIComponent(location.pathname + location.search)}`);
+        return;
+      }
+
+      try {
+        if (isFavoriteRef.current) {
+          await removeFromFavorites(props._id);
+          showToastMessage('Removed from favorites');
+        } else {
+          await addToFavorites(props._id);
+          showToastMessage('Added to favorites');
+        }
+      } catch (error) {
+        console.error('Error updating favorites:', error);
+        showToastMessage('Failed to update favorites');
+      }
+    }, 300);
+  }, [user, props._id, addToFavorites, removeFromFavorites, navigate, location.pathname, location.search]);
   const handleMoreInfoToggle = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -330,8 +320,8 @@ const AnimeCard = React.memo(function AnimeCard(props: AnimeCardProps) {
               )}
             </div>
 
-            {/* Progress Bar (if in watchlist) */}
-            {isInWatchlist && props.totalEpisodes > 0 && (
+            {/* Progress Bar (if in watchlist and watch progress has started) */}
+            {isInWatchlist && watchProgress > 0 && props.totalEpisodes > 0 && (
               <div className="mb-3">
                 <div className="flex justify-between text-xs text-teal-600 mb-1.5">
                   <span className="font-medium">Progress</span>

@@ -21,6 +21,7 @@ export const queryKeys = {
     continueWatching: (userId: string | null) => ['user', 'continueWatching', userId] as const,
     stats: (userId: string | null) => ['user', 'stats', userId] as const,
     recentActivity: (userId: string | null) => ['user', 'recentActivity', userId] as const,
+    watchProgress: (userId: string | null) => ['user', 'watchProgress', userId] as const,
   },
 };
 

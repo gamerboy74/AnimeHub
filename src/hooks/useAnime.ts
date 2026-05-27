@@ -1,10 +1,8 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useMemo} from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { AnimeService } from '../services/anime'
-import type { Tables } from '../../lib/database/supabase'
 import { queryKeys } from './queryKeys'
 
-type Anime = Tables<'anime'>
 
 interface UseAnimeOptions {
   page?: number
@@ -38,7 +36,6 @@ export function useAnime(options: UseAnimeOptions = {}) {
     retry: 2,
     refetchOnMount: true, // Always refetch on mount to ensure fresh data
     refetchOnWindowFocus: false,
-    keepPreviousData: false, // Don't keep previous data to avoid showing stale empty data
   })
 
   return {
@@ -154,7 +151,7 @@ export function useContinueWatching(userId: string | null) {
     queryKey: queryKeys.user.continueWatching(userId),
     queryFn: () => AnimeService.getContinueWatching(userId!, 10),
     enabled: !!userId,
-    staleTime: 1 * 60 * 1000, // 1 minute – should feel fresh
+    staleTime: 0,
     gcTime: 5 * 60 * 1000,
     retry: 1,
     refetchOnWindowFocus: true, // refresh when user returns to tab

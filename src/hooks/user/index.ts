@@ -1,4 +1,7 @@
 import { useState, useEffect } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useAuthContext } from '../../contexts/auth/AuthContext'
+import { queryKeys } from '../queryKeys'
 import { UserService } from '../../services/user'
 import type { Tables } from '../../lib/database/supabase'
 
@@ -330,3 +333,63 @@ export function useUserStats(userId?: string) {
 
   return { stats, loading, error }
 }
+
+export function useUserAnimeProgress() {
+  const { user } = useAuthContext()
+  const queryClient = useQueryClient()
+
+  // 1. Fetch DB watch progress map if logged in
+  const q = useQuery({
+    queryKey: queryKeys.user.watchProgress(user?.id ?? null),
+    queryFn: () => UserService.getUserAnimeProgressMap(user!.id),
+    enabled: !!user?.id,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+  })
+
+  // 2. Read local watch progress for fallback
+  const getLocalProgressMap = (): Record<string, number> => {
+    try {
+      return JSON.parse(localStorage.getItem('watchProgress') || '{}')
+    } catch {
+      return {}
+    }
+  }
+
+  // 3. Merged map helper
+  const getProgress = (animeId: string): number => {
+    if (user?.id) {
+      // Return DB progress if logged in, fallback to local storage
+      const dbProgress = q.data?.[animeId] || 0
+      const localProgress = getLocalProgressMap()[animeId] || 0
+      return Math.max(dbProgress, localProgress)
+    } else {
+      // Guest: local storage only
+      return getLocalProgressMap()[animeId] || 0
+    }
+  }
+
+  const updateProgressLocal = (animeId: string, episodeNumber: number) => {
+    try {
+      const savedProgress = getLocalProgressMap()
+      savedProgress[animeId] = Math.max(savedProgress[animeId] || 0, episodeNumber)
+      localStorage.setItem('watchProgress', JSON.stringify(savedProgress))
+      
+      // If logged in, invalidate queries so it fetches/recalculates
+      if (user?.id) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.user.watchProgress(user.id) })
+      }
+    } catch (e) {
+      console.error('Error saving local watch progress:', e)
+    }
+  }
+
+  return {
+    progressMap: q.data ?? {},
+    loading: q.isLoading,
+    getProgress,
+    updateProgressLocal,
+    refetch: q.refetch
+  }
+}
+

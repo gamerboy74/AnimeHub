@@ -5,7 +5,6 @@ import { HiAnimeScraperService } from '../../services/scrapers/hianime'
 import Button from '../base/Button'
 import Input from '../base/Input'
 import { SparkleLoadingSpinner } from '../base/LoadingSpinner'
-import Card from '../base/Card'
 import { supabase } from '../../lib/database/supabase'
 
 interface ImportResult {
@@ -18,6 +17,8 @@ interface ImportResult {
 
 interface SearchResult {
   title: string
+  title_english?: string
+  title_romaji?: string
   title_japanese?: string
   year?: number
   status?: string
@@ -65,6 +66,11 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
   const [activeTab, setActiveTab] = useState<'search' | 'trending' | 'seasonal' | 'debug'>('search')
   const [message, setMessage] = useState<string | null>(null)
   const [scrapingAnimeId, setScrapingAnimeId] = useState<string | null>(null)
+  const [resultMode, setResultMode] = useState<'search' | 'trending' | 'seasonal' | null>(null)
+  const [searchPage, setSearchPage] = useState(1)
+  const [trendingPage, setTrendingPage] = useState(1)
+  const [seasonalPage, setSeasonalPage] = useState(1)
+  const [canLoadMoreResults, setCanLoadMoreResults] = useState(false)
 
   // Debounce search query
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -115,36 +121,90 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
     localStorage.setItem('animeImportHistory', JSON.stringify(newHistory))
   }
 
-  const handleSearch = useCallback(async (query: string) => {
+  const mapApiResults = (results: any[], currentSource: 'jikan' | 'anilist'): SearchResult[] => {
+    return results.map(anime => {
+      const mapped = currentSource === 'jikan'
+        ? AnimeImporterService.mapJikanToDatabase(anime)
+        : AnimeImporterService.mapAniListToDatabase(anime)
+
+      return {
+        ...mapped,
+        source: currentSource,
+        originalData: anime
+      } as SearchResult
+    })
+  }
+
+  const getResultTitles = (anime: SearchResult): string[] => {
+    return [anime.title, anime.title_english, anime.title_romaji, anime.title_japanese]
+      .filter((value): value is string => Boolean(value && value.trim()))
+  }
+
+  const normalizeTitle = (value: string) => value.toLowerCase().replace(/\s+/g, ' ').trim()
+
+  const filterExistingAnimeResults = async (results: SearchResult[]): Promise<SearchResult[]> => {
+    const candidateTitles = Array.from(
+      new Set(results.flatMap(anime => getResultTitles(anime)))
+    )
+
+    if (candidateTitles.length === 0) {
+      return results
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('anime')
+        .select('title')
+        .in('title', candidateTitles)
+
+      if (error) {
+        console.warn('Could not check existing anime titles:', error.message)
+        return results
+      }
+
+      const existingTitles = new Set(
+        (data || [])
+          .map(row => row.title)
+          .filter((value): value is string => Boolean(value))
+          .map(normalizeTitle)
+      )
+
+      return results.filter(anime => {
+        return !getResultTitles(anime).some(title => existingTitles.has(normalizeTitle(title)))
+      })
+    } catch (error) {
+      console.warn('Failed to filter existing anime results:', error)
+      return results
+    }
+  }
+
+  const handleSearch = useCallback(async (query: string, page: number = 1, append: boolean = false) => {
     if (!query.trim()) return
 
     setIsSearching(true)
-    setSearchResults([])
-    setImportResult(null)
+    setResultMode('search')
+    if (!append) {
+      setSearchResults([])
+      setSelectedAnime([])
+      setImportResult(null)
+      setSearchPage(1)
+      setCanLoadMoreResults(false)
+    }
 
     try {
+      const pageSize = source === 'jikan' ? 25 : 50
       let results: any[] = []
       
       if (source === 'jikan') {
-        results = await AnimeImporterService.searchJikanAnime(query, 25)
+        results = await AnimeImporterService.searchJikanAnime(query, pageSize, page)
       } else {
-        results = await AnimeImporterService.searchAniListAnime(query, 50)
+        results = await AnimeImporterService.searchAniListAnime(query, pageSize, page)
       }
 
-      const mappedResults: SearchResult[] = results.map(anime => {
-        const mapped = source === 'jikan' 
-          ? AnimeImporterService.mapJikanToDatabase(anime)
-          : AnimeImporterService.mapAniListToDatabase(anime)
-        
-        return {
-          ...mapped,
-          source,
-          originalData: anime
-        } as SearchResult
-      })
-
-      const filteredResults = applyFiltersToResults(mappedResults)
-      setSearchResults(filteredResults)
+      const filteredResults = await filterExistingAnimeResults(applyFiltersToResults(mapApiResults(results, source)))
+      setSearchResults(prev => append ? [...prev, ...filteredResults] : filteredResults)
+      setSearchPage(page)
+      setCanLoadMoreResults(results.length === pageSize)
     } catch (error) {
       console.error('Search error:', error)
       alert(`Search failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
@@ -257,14 +317,14 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
       for (let i = 0; i < selectedAnime.length; i += currentBatchSize) {
         const batch = selectedAnime.slice(i, i + currentBatchSize)
         
-        const batchPromises = batch.map(async (anime, batchIndex) => {
+        const batchPromises = batch.map(async (anime) => {
           try {
             const mappedData = anime.source === 'jikan' 
               ? AnimeImporterService.mapJikanToDatabase(anime.originalData)
               : AnimeImporterService.mapAniListToDatabase(anime.originalData)
 
             const imported = anime.source === 'anilist' 
-              ? await AnimeImporterService.importAnimeFromAniList(anime.originalData)
+              ? await (AnimeImporterService as any).importAnimeFromAniList(anime.originalData)
               : await AnimeImporterService.importAnime(mappedData)
             return {
               success: !!imported,
@@ -275,7 +335,8 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
             return {
               success: false,
               title: anime.title,
-              error: error instanceof Error ? error.message : 'Unknown error'
+              error: error instanceof Error ? error.message : 'Unknown error',
+              isDuplicate: false
             }
           }
         })
@@ -290,7 +351,8 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
             : {
                 success: false,
                 title: batch[batchIndex]?.title || 'Unknown',
-                error: settledResult.reason?.message || 'Unknown error'
+                error: settledResult.reason?.message || 'Unknown error',
+                isDuplicate: false
               }
 
           setImportProgress(prev => prev ? {
@@ -343,7 +405,7 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
         : AnimeImporterService.mapAniListToDatabase(anime.originalData)
 
       const imported = anime.source === 'anilist' 
-        ? await AnimeImporterService.importAnimeFromAniList(anime.originalData)
+        ? await (AnimeImporterService as any).importAnimeFromAniList(anime.originalData)
         : await AnimeImporterService.importAnime(mappedData)
       
       if (imported) {
@@ -404,7 +466,7 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
 
       let importedAnime: any = null
       if (anime.source === 'anilist') {
-        const ok = await AnimeImporterService.importAnimeFromAniList(anime.originalData, { skipAutoScrape: true })
+        const ok = await (AnimeImporterService as any).importAnimeFromAniList(anime.originalData, { skipAutoScrape: true })
         if (ok) {
           // Look up the inserted anime to get its ID
           const { data } = await supabase
@@ -441,12 +503,11 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
             episodeNumbers,
             (event) => {
               if (event.type === 'progress' || event.type === 'success') {
-                setMessage(`📺 Scraping episodes: ${event.data?.current || '?'}/${totalEps} — ${event.data?.title || ''}`)
+                setMessage(`📺 Scraping episodes: ${event.current || '?'}/${totalEps} — ${event.title || ''}`)
               } else if (event.type === 'error') {
-                console.warn('Episode scrape error:', event.data)
+                console.warn('Episode scrape error:', event.error)
               } else if (event.type === 'complete') {
-                const s = event.data?.summary
-                setMessage(`✅ Done! ${s?.successCount || 0}/${s?.totalEpisodes || totalEps} episodes scraped successfully.`)
+                setMessage(`✅ Done! ${event.successCount || 0}/${event.total || totalEps} episodes scraped successfully.`)
               }
             },
           )
@@ -476,32 +537,32 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
     }
   }
 
-  const handleTrendingImport = async () => {
+  const handleTrendingImport = async (page: number = 1, append: boolean = false) => {
     setIsSearching(true)
-    setSearchResults([])
-    setImportResult(null)
+    setResultMode('trending')
+    if (!append) {
+      setSearchResults([])
+      setSelectedAnime([])
+      setImportResult(null)
+      setTrendingPage(1)
+      setCanLoadMoreResults(false)
+    }
 
     try {
-      let mappedResults: SearchResult[]
+      const pageSize = source === 'jikan' ? 25 : 50
+      let results: any[] = []
       
       if (source === 'anilist') {
-        const results = await AnimeImporterService.getTrendingAniListAnime(25)
-        mappedResults = results.map(anime => ({
-          ...AnimeImporterService.mapAniListToDatabase(anime),
-          source: 'anilist' as const,
-          originalData: anime
-        }))
+        results = await AnimeImporterService.getTrendingAniListAnime(pageSize, page)
       } else {
-        const results = await AnimeImporterService.getTrendingJikanAnime(25)
-        mappedResults = results.map(anime => ({
-          ...AnimeImporterService.mapJikanToDatabase(anime),
-          source: 'jikan' as const,
-          originalData: anime
-        }))
+        results = await AnimeImporterService.getTrendingJikanAnime(pageSize, page)
       }
 
-      const filteredResults = applyFiltersToResults(mappedResults)
-      setSearchResults(filteredResults)
+      const mappedResults = mapApiResults(results, source)
+      const filteredResults = await filterExistingAnimeResults(applyFiltersToResults(mappedResults))
+      setSearchResults(prev => append ? [...prev, ...filteredResults] : filteredResults)
+      setTrendingPage(page)
+      setCanLoadMoreResults(results.length === pageSize)
     } catch (error) {
       console.error('Trending import error:', error)
       alert(`Failed to fetch trending anime: ${error instanceof Error ? error.message : 'Unknown error'}`)
@@ -510,7 +571,7 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
     }
   }
 
-  const handleSeasonalImport = async () => {
+  const handleSeasonalImport = async (page: number = 1, append: boolean = false) => {
     const currentDate = new Date()
     const year = currentDate.getFullYear()
     const month = currentDate.getMonth() + 1
@@ -521,35 +582,47 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
     else if (month >= 9 && month <= 11) season = 'fall'
 
     setIsSearching(true)
-    setSearchResults([])
-    setImportResult(null)
+    setResultMode('seasonal')
+    if (!append) {
+      setSearchResults([])
+      setSelectedAnime([])
+      setImportResult(null)
+      setSeasonalPage(1)
+      setCanLoadMoreResults(false)
+    }
 
     try {
-      let mappedResults: SearchResult[]
+      const pageSize = source === 'jikan' ? 25 : 50
+      let results: any[] = []
       
       if (source === 'anilist') {
-        const results = await AnimeImporterService.getSeasonalAniListAnime(year, season, 25)
-        mappedResults = results.map(anime => ({
-          ...AnimeImporterService.mapAniListToDatabase(anime),
-          source: 'anilist' as const,
-          originalData: anime
-        }))
+        results = await (AnimeImporterService as any).getSeasonalAniListAnime(year, season, pageSize, page)
       } else {
-        const results = await AnimeImporterService.getSeasonalJikanAnime(year, season, 25)
-        mappedResults = results.map(anime => ({
-          ...AnimeImporterService.mapJikanToDatabase(anime),
-          source: 'jikan' as const,
-          originalData: anime
-        }))
+        results = await AnimeImporterService.getSeasonalJikanAnime(year, season, pageSize, page)
       }
 
-      const filteredResults = applyFiltersToResults(mappedResults)
-      setSearchResults(filteredResults)
+      const mappedResults = mapApiResults(results, source)
+      const filteredResults = await filterExistingAnimeResults(applyFiltersToResults(mappedResults))
+      setSearchResults(prev => append ? [...prev, ...filteredResults] : filteredResults)
+      setSeasonalPage(page)
+      setCanLoadMoreResults(results.length === pageSize)
     } catch (error) {
       console.error('Seasonal import error:', error)
       alert(`Failed to fetch seasonal anime: ${error instanceof Error ? error.message : 'Unknown error'}`)
     } finally {
       setIsSearching(false)
+    }
+  }
+
+  const handleLoadMoreResults = async () => {
+    if (isSearching || !canLoadMoreResults || !resultMode) return
+
+    if (resultMode === 'search') {
+      await handleSearch(searchQuery, searchPage + 1, true)
+    } else if (resultMode === 'trending') {
+      await handleTrendingImport(trendingPage + 1, true)
+    } else if (resultMode === 'seasonal') {
+      await handleSeasonalImport(seasonalPage + 1, true)
     }
   }
 
@@ -573,10 +646,10 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
 
   const handleApplyFilters = async () => {
     if (!searchQuery.trim()) {
-      await handleTrendingImport()
+      await handleTrendingImport(1, false)
       return
     }
-    await handleSearch()
+    await handleSearch(searchQuery, 1, false)
   }
 
   return (
@@ -702,7 +775,7 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
                     <h3 className="text-2xl font-bold text-slate-800 mb-4"><i className="ri-fire-line text-orange-500 mr-2"></i>Trending Anime</h3>
                     <p className="text-slate-600 mb-6">Discover the most popular anime right now</p>
                     <Button
-                      onClick={handleTrendingImport}
+                      onClick={() => handleTrendingImport(1, false)}
                       disabled={isSearching}
                       className="px-8 py-4 bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105"
                     >
@@ -731,7 +804,7 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
                     <h3 className="text-2xl font-bold text-slate-800 mb-4"><i className="ri-leaf-line text-green-500 mr-2"></i>Current Season</h3>
                     <p className="text-slate-600 mb-6">Explore anime from the current season</p>
                     <Button
-                      onClick={handleSeasonalImport}
+                      onClick={() => handleSeasonalImport(1, false)}
                       disabled={isSearching}
                       className="px-8 py-4 bg-gradient-to-r from-green-500 to-teal-500 hover:from-green-600 hover:to-teal-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105"
                     >
@@ -888,7 +961,7 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
                                   continue
                                 }
 
-                                const result = await AnimeImporterService.importAnimeCharacters(anime.id, media)
+                                const result = await (AnimeImporterService as any).importAnimeCharacters(anime.id, media)
                                 totalSuccess += result.success
                                 totalErrors += result.errors
                               } catch (err) {
@@ -1552,7 +1625,8 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
                         <Button
                           onClick={handleBulkImport}
                           disabled={isImporting}
-                          className="bg-white text-blue-600 hover:bg-slate-50 font-semibold px-6 py-2 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:scale-105"
+                          variant="secondary"
+                          className="bg-white/20 hover:bg-white/30 text-white border-white/30 font-semibold px-6 py-2 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:scale-105"
                         >
                           {isImporting ? (
                             <div className="flex items-center">
@@ -1686,6 +1760,25 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
                       )
                     })}
                   </div>
+
+                  {canLoadMoreResults && resultMode && (
+                    <div className="mt-8 flex justify-center">
+                      <Button
+                        onClick={handleLoadMoreResults}
+                        disabled={isSearching}
+                        className="px-8 py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all duration-200"
+                      >
+                        {isSearching ? (
+                          <div className="flex items-center">
+                            <SparkleLoadingSpinner size="sm" />
+                            <span className="ml-2">Loading more...</span>
+                          </div>
+                        ) : (
+                          <><i className="ri-more-line mr-1"></i> View More</>
+                        )}
+                      </Button>
+                    </div>
+                  )}
                 </div>
               </div>
             </motion.div>
