@@ -1,9 +1,9 @@
 // Optimized User Context - Separated from AuthContext
 // Reduces re-renders by isolating user data
 
-import React, { createContext, useContext, useMemo } from 'react';
+import { createContext, useContext, useMemo } from 'react';
 import type { ReactNode } from 'react';
-import type { Tables } from '../lib/database/supabase';
+import type { Tables } from '../../lib/database/supabase';
 
 type User = Tables<'users'>;
 
@@ -30,7 +30,7 @@ export function UserProvider({ children, user }: UserProviderProps) {
     isAuthenticated: !!user,
     userId: user?.id || null,
     subscriptionType: user?.subscription_type || 'free',
-    isAdmin: user?.subscription_type === 'admin',
+    isAdmin: false,
     isPremium: user?.subscription_type === 'premium' || user?.subscription_type === 'vip'
   }), [user]);
 

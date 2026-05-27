@@ -14,11 +14,12 @@ import { UserService } from '../../services/user';
 import { UserPreferencesService } from '../../services/user/preferences';
 import { AvatarService } from '../../services/auth/avatar';
 import { generatePlayerUrl } from '../../utils/media/player';
-import { sessionManager } from '../../utils/session/manager';
+import { useRefreshSession } from '../../hooks/auth/selectors';
 
 export default function ProfilePage() {
   const user = useCurrentUser();
   const authLoading = useAuthLoadingSelector();
+  const refreshSession = useRefreshSession();
   const [activeTab, setActiveTab] = useState('overview');
   const [isEditing, setIsEditing] = useState(false);
   const [showGenrePreferences, setShowGenrePreferences] = useState(false);
@@ -112,7 +113,7 @@ export default function ProfilePage() {
       
       // Update the session manager with the new user data
       // This will trigger a re-render across the app
-      await sessionManager.refreshSession();
+      await refreshSession();
       
       setIsEditing(false);
       setEditingUsername('');
@@ -143,12 +144,12 @@ export default function ProfilePage() {
       });
 
       // Update user profile with new avatar URL
-      const updatedUser = await UserService.updateUserProfile(user.id, {
+      await UserService.updateUserProfile(user.id, {
         avatar_url: avatarUrl
       });
 
       // Refresh session to update user data across the app
-      await sessionManager.refreshSession();
+      await refreshSession();
 
       console.log('Avatar uploaded successfully:', avatarUrl);
       
