@@ -15,8 +15,9 @@ import { ReAnimeScraperComponent } from '../../../components/admin/ReAnimeScrape
 import { SanjiAnimeScraperComponent } from '../../../components/admin/SanjiAnimeScraperComponent';
 import { AnimeSugeScraperComponent } from '../../../components/admin/AnimeSugeScraperComponent';
 import { ScrapedEpisodesModal } from '../../../components/admin/ScrapedEpisodesModal';
-import LargeAnimeScraper from '../../../components/admin/LargeAnimeScraper';
 import { SparkleLoadingSpinner } from '../../../components/base/LoadingSpinner';
+import { supabase } from '../../../lib/database/supabase';
+import LargeAnimeScraper from '../../../components/admin/LargeAnimeScraper';
 
 export default function AnimeManagement() {
   const queryClient = useQueryClient();
@@ -47,6 +48,8 @@ export default function AnimeManagement() {
   const [error, setError] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalAnime, setTotalAnime] = useState(0);
+  const [globalPublishedCount, setGlobalPublishedCount] = useState(0);
+  const [globalOngoingCount, setGlobalOngoingCount] = useState(0);
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterGenre, setFilterGenre] = useState<string>('all');
   const [filterType, setFilterType] = useState<string>('all');
@@ -132,16 +135,22 @@ export default function AnimeManagement() {
       setError(null);
       setSuccessMessage(null);
       
-      const result = await AdminService.getAllAnime(page, 20, {
-        search: currentSearch,
-        status: currentStatus,
-        genre: currentGenre,
-        type: currentType,
-        sortBy: currentSortBy,
-        sortOrder: currentSortOrder
-      });
+      const [result, publishedRes, ongoingRes] = await Promise.all([
+        AdminService.getAllAnime(page, 20, {
+          search: currentSearch,
+          status: currentStatus,
+          genre: currentGenre,
+          type: currentType,
+          sortBy: currentSortBy,
+          sortOrder: currentSortOrder
+        }),
+        supabase.from('anime').select('id', { count: 'exact', head: true }).in('status', ['published', 'ongoing', 'completed', 'upcoming']),
+        supabase.from('anime').select('id', { count: 'exact', head: true }).eq('status', 'ongoing')
+      ]);
       setAnime(result.anime);
       setTotalAnime(result.total);
+      setGlobalPublishedCount(publishedRes.count || 0);
+      setGlobalOngoingCount(ongoingRes.count || 0);
       setCurrentPage(page);
       
       // Start preloading episodes for visible anime using queue system
@@ -721,7 +730,7 @@ This action cannot be undone.`,
               <div>
                 <p className="text-sm font-medium text-slate-500 mb-1">Published</p>
                 <p className="text-3xl font-bold text-emerald-600">
-                  {anime.filter(a => a.status === 'published').length}
+                  {globalPublishedCount}
                 </p>
               </div>
               <div className="w-12 h-12 bg-emerald-100 rounded-xl flex items-center justify-center">
@@ -740,7 +749,7 @@ This action cannot be undone.`,
               <div>
                 <p className="text-sm font-medium text-slate-500 mb-1">Ongoing</p>
                 <p className="text-3xl font-bold text-amber-600">
-                  {anime.filter(a => a.status === 'ongoing').length}
+                  {globalOngoingCount}
                 </p>
               </div>
               <div className="w-12 h-12 bg-amber-100 rounded-xl flex items-center justify-center">

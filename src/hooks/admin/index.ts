@@ -1,6 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { AdminService, type AdminStats, type UserManagement, type SystemHealth } from '../../services/admin'
-import { onAuthUserChanged } from '../../utils/session/manager'
 
 // Global cache to prevent refetching on every mount
 const adminCache = {
@@ -17,7 +16,6 @@ const adminCache = {
 }
 
 const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes
-const ADMIN_CACHE_DURATION = 10 * 60 * 1000 // 10 minutes for admin status
 
 import { useCurrentUser, useAuthLoading } from '../auth/selectors'
 import { useAuthContext } from '../../contexts/auth/AuthContext'
@@ -196,7 +194,7 @@ export function useSystemHealth() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch system health')
       // Set fallback data
-      const fallbackData = {
+      const fallbackData: SystemHealth = {
         database_status: 'error',
         api_response_time: 0,
         storage_usage: 0,

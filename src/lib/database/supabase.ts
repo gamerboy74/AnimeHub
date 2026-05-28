@@ -62,6 +62,8 @@ export interface Database {
           username: string
           avatar_url: string | null
           subscription_type: 'free' | 'premium' | 'vip'
+          role: 'user' | 'moderator' | 'admin'
+          is_admin: boolean
           created_at: string
           updated_at: string
         }
@@ -71,6 +73,8 @@ export interface Database {
           username: string
           avatar_url?: string | null
           subscription_type?: 'free' | 'premium' | 'vip'
+          role?: 'user' | 'moderator' | 'admin'
+          is_admin?: boolean
           created_at?: string
           updated_at?: string
         }
@@ -80,6 +84,8 @@ export interface Database {
           username?: string
           avatar_url?: string | null
           subscription_type?: 'free' | 'premium' | 'vip'
+          role?: 'user' | 'moderator' | 'admin'
+          is_admin?: boolean
           created_at?: string
           updated_at?: string
         }
