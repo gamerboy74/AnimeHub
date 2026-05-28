@@ -474,7 +474,7 @@ app.get("/api/vidmoly-embed/:id", async (req, res) => {
 <style>
   *{margin:0;padding:0;box-sizing:border-box}
   html,body{width:100%;height:100%;background:#000;overflow:hidden}
-  video{width:100%;height:100%;object-fit:contain;background:#000}
+  video{position:absolute;inset:0;width:100vw;height:100vh;object-fit:cover;object-position:center;background:#000}
   #loader{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#000;z-index:10}
   .spinner{width:48px;height:48px;border:3px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
@@ -611,7 +611,7 @@ app.get("/api/video-embed/:id", async (req, res) => {
 <style>
   *{margin:0;padding:0;box-sizing:border-box}
   html,body{width:100%;height:100%;background:#000;overflow:hidden}
-  video{width:100%;height:100%;object-fit:contain;background:#000}
+  video{position:absolute;inset:0;width:100vw;height:100vh;object-fit:cover;object-position:center;background:#000}
   #loader{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#000;z-index:10}
   .spinner{width:48px;height:48px;border:3px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite}
   @keyframes spin{to{transform:rotate(360deg)}}

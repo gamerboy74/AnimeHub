@@ -1266,6 +1266,8 @@ export class NineAnimeScraperService {
    * Vidmoly uses JWPlayer with a plain m3u8 URL in the sources array.
    */
   static async extractVidmolyHLS(vidmolyUrl) {
+    let browser;
+    let context;
     try {
       const idMatch = vidmolyUrl.match(/vidmoly\.(?:biz|net)\/embed-([a-zA-Z0-9]+)/);
       if (!idMatch) return null;
@@ -1299,11 +1301,68 @@ export class NineAnimeScraperService {
         return fallback[0];
       }
 
+      console.log("⚠️ Static vidmoly scrape did not find HLS, trying browser fallback");
+
+      browser = await getBrowser();
+      if (!browser) return null;
+
+      context = await browser.newContext({
+        userAgent: this.USER_AGENT,
+        viewport: { width: 1280, height: 720 },
+        bypassCSP: true,
+        javaScriptEnabled: true,
+        extraHTTPHeaders: {
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.5",
+          Referer: "https://9anime.org.lv/",
+        },
+      });
+
+      const page = await context.newPage();
+      let foundHls = null;
+
+      await page.route("**/*", (route) => {
+        const requestUrl = route.request().url();
+        if (!foundHls && /\.m3u8(\?|$|#)/i.test(requestUrl)) {
+          foundHls = requestUrl;
+          console.log("✅ Extracted vidmoly HLS via network:", foundHls.substring(0, 80) + "...");
+        }
+        route.continue();
+      });
+
+      try {
+        await page.goto(embedUrl, { waitUntil: "domcontentloaded", timeout: 10000 });
+      } catch (navError) {
+        console.log("⚠️ Vidmoly browser navigation warning:", navError.message);
+      }
+
+      const deadline = Date.now() + 5000;
+      while (!foundHls && Date.now() < deadline) {
+        await page.waitForTimeout(400);
+        try {
+          const content = await page.content();
+          const pageMatch = content.match(/https?:\/\/[^"'\s]*\.m3u8[^"'\s]*/);
+          if (pageMatch) {
+            foundHls = pageMatch[0];
+            console.log("✅ Extracted vidmoly HLS from browser HTML:", foundHls.substring(0, 80) + "...");
+            break;
+          }
+        } catch {
+          // keep waiting for network interception
+        }
+      }
+
+      return foundHls;
+
       console.log("⚠️ No m3u8 URL found in vidmoly page");
       return null;
     } catch (e) {
       console.log("⚠️ vidmoly HLS extraction failed:", e.message);
       return null;
+    } finally {
+      if (context) {
+        await context.close().catch((err) => console.warn("Failed to close vidmoly browser context:", err));
+      }
     }
   }
 
@@ -1999,6 +2058,15 @@ export class NineAnimeScraperService {
           success: false,
           error: `No video stream found for episode. The anime page loaded but no embeddable player was detected.`,
         };
+      }
+
+      if (streamUrl.match(/vidmoly\.(biz|net)/i) && !streamUrl.match(/\.m3u8(\?|$|#)/i)) {
+        console.log("🔄 Vidmoly embed detected, resolving direct HLS before return...");
+        const resolvedVidmolyHls = await this.extractVidmolyHLS(streamUrl);
+        if (resolvedVidmolyHls) {
+          streamUrl = resolvedVidmolyHls;
+          console.log("✅ Replaced Vidmoly embed with direct HLS:", streamUrl.substring(0, 80) + "...");
+        }
       }
 
       console.log("🎉 Final 9anime URL:", streamUrl);

@@ -636,19 +636,67 @@ export class AdminService {
   }
 
   // Anime Management Methods
-  static async getAllAnime(page: number = 1, limit: number = 20): Promise<{ anime: any[], total: number }> {
+  static async getAllAnime(page: number = 1, limit: number = 20, filters?: {
+    search?: string
+    status?: string
+    genre?: string
+    type?: string
+  }): Promise<{ anime: any[], total: number }> {
     try {
       const offset = (page - 1) * limit
 
-      const { data: anime, count, error } = await supabase
+      const searchTerm = filters?.search?.trim()
+
+      let countQuery = supabase
+        .from('anime')
+        .select('id', { count: 'exact', head: true })
+
+      if (searchTerm) {
+        countQuery = countQuery.or(`title.ilike.%${searchTerm}%,title_japanese.ilike.%${searchTerm}%,description.ilike.%${searchTerm}%`)
+      }
+
+      if (filters?.status && filters.status !== 'all') {
+        countQuery = countQuery.eq('status', filters.status)
+      }
+
+      if (filters?.type && filters.type !== 'all') {
+        countQuery = countQuery.eq('type', filters.type)
+      }
+
+      if (filters?.genre && filters.genre !== 'all') {
+        countQuery = countQuery.contains('genres', [filters.genre])
+      }
+
+      const { count, error: countError } = await countQuery
+
+      if (countError) throw countError
+
+      let dataQuery = supabase
         .from('anime')
         .select(`
           *,
           episodes:episodes(id, title, episode_number, duration, video_url, created_at),
           reviews:reviews(id, rating, created_at)
-        `, { count: 'exact' })
+        `)
         .order('created_at', { ascending: false })
-        .range(offset, offset + limit - 1)
+
+      if (searchTerm) {
+        dataQuery = dataQuery.or(`title.ilike.%${searchTerm}%,title_japanese.ilike.%${searchTerm}%,description.ilike.%${searchTerm}%`)
+      }
+
+      if (filters?.status && filters.status !== 'all') {
+        dataQuery = dataQuery.eq('status', filters.status)
+      }
+
+      if (filters?.type && filters.type !== 'all') {
+        dataQuery = dataQuery.eq('type', filters.type)
+      }
+
+      if (filters?.genre && filters.genre !== 'all') {
+        dataQuery = dataQuery.contains('genres', [filters.genre])
+      }
+
+      const { data: anime, error } = await dataQuery.range(offset, offset + limit - 1)
 
       if (error) throw error
 

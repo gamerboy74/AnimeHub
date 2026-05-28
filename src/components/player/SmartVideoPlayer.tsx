@@ -742,7 +742,7 @@ export default function SmartVideoPlayer({
       <video
         ref={videoRef}
         src={processedSource.url}
-        className="w-full h-full"
+        className="w-full h-full object-cover bg-black"
         controls
         autoPlay={autoPlay}
         crossOrigin="anonymous"
@@ -1446,7 +1446,7 @@ function HLSVideoPlayer({
     >
       <video
         ref={videoRef}
-        className="w-full h-full object-contain bg-black"
+        className="w-full h-full object-cover bg-black"
         controls={false}
         playsInline
         crossOrigin="anonymous"

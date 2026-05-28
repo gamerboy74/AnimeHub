@@ -65,7 +65,11 @@ export default function AnimeManagement() {
       setError(null);
       setSuccessMessage(null);
       
-      const result = await AdminService.getAllAnime(page, 20);
+      const result = await AdminService.getAllAnime(page, 20, {
+        search: searchTerm,
+        status: filterStatus,
+        genre: filterGenre
+      });
       setAnime(result.anime);
       setTotalAnime(result.total);
       setCurrentPage(page);
