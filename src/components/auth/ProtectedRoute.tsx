@@ -27,10 +27,20 @@ export default function ProtectedRoute({
 
   // Wait for auth to be fully initialized before making any redirect decisions
   if (loading || !isInitialized || (requireAdmin && adminLoading)) {
+    const isAdminPath = requireAdmin || location.pathname.startsWith('/admin')
     return (
-      <div className="min-h-screen bg-gradient-to-br from-green-50 via-yellow-50 to-pink-50 flex items-center justify-center">
+      <div className={isAdminPath 
+        ? "min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex items-center justify-center"
+        : "min-h-screen bg-gradient-to-br from-green-50 via-yellow-50 to-pink-50 flex items-center justify-center"
+      }>
         <div className="text-center">
-          <SparkleLoadingSpinner size="xl" text={loading || !isInitialized ? "Checking authentication..." : "Checking admin status..."} />
+          <SparkleLoadingSpinner 
+            size="xl" 
+            text={loading || !isInitialized 
+              ? (isAdminPath ? "Initializing admin session..." : "Checking authentication...") 
+              : "Verifying admin access..."
+            } 
+          />
         </div>
       </div>
     )

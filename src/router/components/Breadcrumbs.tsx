@@ -5,7 +5,6 @@
 
 import { Link, useLocation } from 'react-router-dom';
 import { getRouteMetadata } from '../metadata';
-import { motion } from 'framer-motion';
 
 interface Breadcrumb {
   label: string;

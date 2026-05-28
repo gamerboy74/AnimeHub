@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { useQueryClient } from '@tanstack/react-query';
 import { AdminService } from '../../../services/admin';
+import { AdminAnimeService } from '../../../services/admin/anime';
 import { invalidateAnimeCaches } from '../../../utils/cache/invalidateAnimeCaches';
 import AddAnimeModal from '../../../components/admin/AddAnimeModal';
 import AddEpisodeModal from '../../../components/admin/AddEpisodeModal';
@@ -19,6 +20,28 @@ import { SparkleLoadingSpinner } from '../../../components/base/LoadingSpinner';
 
 export default function AnimeManagement() {
   const queryClient = useQueryClient();
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      } else if (
+        e.key === '/' &&
+        document.activeElement !== searchInputRef.current &&
+        document.activeElement?.tagName !== 'INPUT' &&
+        document.activeElement?.tagName !== 'TEXTAREA'
+      ) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   const [anime, setAnime] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -26,7 +49,16 @@ export default function AnimeManagement() {
   const [totalAnime, setTotalAnime] = useState(0);
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterGenre, setFilterGenre] = useState<string>('all');
+  const [filterType, setFilterType] = useState<string>('all');
+  const [sortBy, setSortBy] = useState<string>('created_at');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [searchInputValue, setSearchInputValue] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
+  const [availableGenres, setAvailableGenres] = useState<string[]>([
+    'Action', 'Adventure', 'Comedy', 'Drama', 'Fantasy', 'Horror', 'Mystery',
+    'Romance', 'Sci-Fi', 'Slice of Life', 'Sports', 'Supernatural', 'Thriller'
+  ]);
   const [selectedAnime, setSelectedAnime] = useState<Set<string>>(new Set());
   const [updatingAnime, setUpdatingAnime] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -61,6 +93,21 @@ export default function AnimeManagement() {
   const [selectedAnimeForLargeScraping, setSelectedAnimeForLargeScraping] = useState<any>(null);
   const [copiedId, setCopiedId] = useState(false);
 
+  // Load genres dynamically from database
+  useEffect(() => {
+    const loadGenres = async () => {
+      try {
+        const dbGenres = await AdminAnimeService.getAvailableGenres();
+        if (dbGenres && dbGenres.length > 0) {
+          setAvailableGenres(dbGenres);
+        }
+      } catch (err) {
+        console.error('Failed to load genres:', err);
+      }
+    };
+    loadGenres();
+  }, []);
+
   const handleCopyId = async (id: string) => {
     try {
       await navigator.clipboard.writeText(id);
@@ -71,16 +118,27 @@ export default function AnimeManagement() {
     }
   };
 
-  const fetchAnime = async (page: number = 1) => {
+  const fetchAnime = async (
+    page: number = 1,
+    currentSearch: string = searchTerm,
+    currentStatus: string = filterStatus,
+    currentGenre: string = filterGenre,
+    currentType: string = filterType,
+    currentSortBy: string = sortBy,
+    currentSortOrder: 'asc' | 'desc' = sortOrder
+  ) => {
     try {
       setLoading(true);
       setError(null);
       setSuccessMessage(null);
       
       const result = await AdminService.getAllAnime(page, 20, {
-        search: searchTerm,
-        status: filterStatus,
-        genre: filterGenre
+        search: currentSearch,
+        status: currentStatus,
+        genre: currentGenre,
+        type: currentType,
+        sortBy: currentSortBy,
+        sortOrder: currentSortOrder
       });
       setAnime(result.anime);
       setTotalAnime(result.total);
@@ -126,43 +184,53 @@ export default function AnimeManagement() {
     }
   }, [preloadQueue, episodesCache, preloadedAnime]);
 
-  // Debounce search and filter changes to avoid excessive API calls
-  const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const [debouncedFilters, setDebouncedFilters] = useState({ status: filterStatus, genre: filterGenre, search: searchTerm });
-
+  // Debounce search input only
   useEffect(() => {
-    if (debounceTimeoutRef.current) {
-      clearTimeout(debounceTimeoutRef.current);
+    if (searchInputValue !== searchTerm) {
+      setIsTyping(true);
     }
-    
-    debounceTimeoutRef.current = setTimeout(() => {
-      setDebouncedFilters({ status: filterStatus, genre: filterGenre, search: searchTerm });
-    }, 300);
+    const handler = setTimeout(() => {
+      setSearchTerm(searchInputValue);
+      setIsTyping(false);
+    }, 400);
 
     return () => {
-      if (debounceTimeoutRef.current) {
-        clearTimeout(debounceTimeoutRef.current);
-      }
+      clearTimeout(handler);
     };
-  }, [filterStatus, filterGenre, searchTerm]);
+  }, [searchInputValue]);
 
+  // Fetch anime whenever any filter or search term changes
   useEffect(() => {
-    fetchAnime();
-  }, [debouncedFilters.status, debouncedFilters.genre, debouncedFilters.search]);
+    fetchAnime(1, searchTerm, filterStatus, filterGenre, filterType, sortBy, sortOrder);
+  }, [searchTerm, filterStatus, filterGenre, filterType, sortBy, sortOrder]);
 
   const handleStatusChange = async (animeId: string, newStatus: 'published' | 'pending' | 'draft') => {
+    const previousAnimeList = [...anime];
+    
     try {
       setUpdatingAnime(animeId);
       setError(null);
       setSuccessMessage(null);
       
+      // Optimistic UI Update: Toggle status instantly in local state
+      setAnime(prev => prev.map(item => {
+        if (item.id === animeId) {
+          return { ...item, status: newStatus };
+        }
+        return item;
+      }));
+
       await AdminService.updateAnimeStatus(animeId, newStatus);
-      await fetchAnime(currentPage);
+      
+      // Silent cache invalidation in the background
+      invalidateAnimeCaches(queryClient, animeId);
       
       setSuccessMessage(`Anime status updated to ${newStatus} successfully!`);
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err) {
       console.error('Failed to update anime status:', err);
+      // Revert status to previous value on server failure
+      setAnime(previousAnimeList);
       setError(err instanceof Error ? err.message : 'Failed to update anime status');
     } finally {
       setUpdatingAnime(null);
@@ -215,6 +283,8 @@ This action cannot be undone.`,
     
     if (selectedIds.length === 0) return;
 
+    const previousAnimeList = [...anime];
+
     try {
       setUpdatingAnime('bulk');
       setError(null);
@@ -249,17 +319,27 @@ This action cannot be undone.`,
         setShowConfirmationDialog(true);
         return;
       } else {
+        // Optimistic UI Update: Toggle status instantly in local state
+        setAnime(prev => prev.map(item => {
+          if (selectedIds.includes(item.id)) {
+            return { ...item, status: action };
+          }
+          return item;
+        }));
+        setSelectedAnime(new Set()); // Clear selection list immediately
+
         await AdminService.bulkUpdateAnimeStatus(selectedIds, action);
-        // Invalidate caches after status change
-        await invalidateAnimeCaches(queryClient);
+        
+        // Invalidate caches silently in the background
+        invalidateAnimeCaches(queryClient);
         setSuccessMessage(`${selectedIds.length} anime status updated to ${action}!`);
       }
 
-      await fetchAnime(currentPage);
-      setSelectedAnime(new Set());
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err) {
       console.error('Failed to perform bulk action:', err);
+      // Revert status to previous values on server failure
+      setAnime(previousAnimeList);
       setError(err instanceof Error ? err.message : 'Failed to perform bulk action');
     } finally {
       setUpdatingAnime(null);
@@ -458,16 +538,6 @@ This action cannot be undone.`,
     setTimeout(() => setSuccessMessage(null), 3000);
   };
 
-  const handleScrapAnime = (anime: any) => {
-    setSelectedAnimeForScraping(anime);
-    setShowScraper(true);
-  };
-
-  const handleLargeScrape = (anime: any) => {
-    setSelectedAnimeForLargeScraping(anime);
-    setShowLargeScraper(true);
-  };
-
   const handleCloseLargeScraper = async () => {
     setShowLargeScraper(false);
     setSelectedAnimeForLargeScraping(null);
@@ -533,15 +603,7 @@ This action cannot be undone.`,
     }
   };
 
-  const filteredAnime = anime.filter(item => {
-    const matchesStatus = filterStatus === 'all' || item.status === filterStatus;
-    const matchesGenre = filterGenre === 'all' || 
-      (item.genres && item.genres.some((genre: string) => genre.toLowerCase().includes(filterGenre.toLowerCase())));
-    const matchesSearch = searchTerm === '' || 
-      item.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (item.description && item.description.toLowerCase().includes(searchTerm.toLowerCase()));
-    return matchesStatus && matchesGenre && matchesSearch;
-  });
+
 
   const totalPages = Math.ceil(totalAnime / 20);
 
@@ -748,70 +810,273 @@ This action cannot be undone.`,
           </motion.div>
         )}
 
-        {/* Filters and Search - Anime Themed */}
-        <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg border border-white/20 p-6 mb-6">
-          <div className="flex items-center gap-2 mb-5">
-            <i className="ri-filter-3-line text-blue-600 text-xl"></i>
-            <h2 className="text-lg font-semibold text-slate-800">Search & Filters</h2>
+        {/* Filters and Search - State-of-the-Art Custom Control Center */}
+        <div className="bg-white/85 backdrop-blur-md rounded-2xl shadow-xl border border-white/40 p-6 mb-6">
+          {/* Header & Live Summary */}
+          <div className="flex items-center justify-between flex-wrap gap-4 mb-6 border-b border-slate-100 pb-4">
+            <div className="flex items-center gap-2">
+              <div className="w-9 h-9 bg-blue-50 rounded-xl flex items-center justify-center border border-blue-100 shadow-sm">
+                <i className="ri-filter-3-line text-blue-600 text-lg"></i>
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-slate-800">Search & Filters</h2>
+                <p className="text-[11px] text-slate-400 font-medium">Refine, sort and select from the anime library</p>
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-slate-200/80 rounded-full text-xs font-semibold text-slate-600 shadow-sm">
+                <span className={`w-2 h-2 rounded-full ${loading || isTyping ? 'bg-amber-400 animate-pulse' : 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]'}`}></span>
+                {loading || isTyping ? (
+                  <span className="text-slate-500">Updating library...</span>
+                ) : (
+                  <span>Showing {anime.length} of {totalAnime} Anime</span>
+                )}
+              </div>
+            </div>
           </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            {/* Search */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
+            {/* Search Input with Keyboard Shortcut & Micro-Spinner */}
             <div className="md:col-span-2">
               <label htmlFor="search" className="flex items-center gap-2 text-sm font-semibold text-slate-700 mb-2">
-                <i className="ri-search-line text-slate-400"></i> Search Anime
+                <i className="ri-search-line text-blue-500"></i> Search Anime
               </label>
-              <input
-                type="text"
-                id="search"
-                className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
-                placeholder="Search by title..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
+              <div className="relative group">
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  id="search"
+                  className="w-full pl-11 pr-24 py-2.5 bg-white border border-slate-200 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 group-hover:border-slate-300 transition-all font-medium text-slate-700"
+                  placeholder="Search by title, Japanese title, or desc..."
+                  value={searchInputValue}
+                  onChange={(e) => setSearchInputValue(e.target.value)}
+                />
+                
+                <div className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 transition-colors">
+                  {loading && isTyping ? (
+                    <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                  ) : (
+                    <i className="ri-search-line text-lg text-slate-400 group-focus-within:text-blue-500 transition-colors"></i>
+                  )}
+                </div>
+                
+                <div className="absolute right-3.5 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                  {searchInputValue && (
+                    <button
+                      onClick={() => {
+                        setSearchInputValue('');
+                        setSearchTerm('');
+                      }}
+                      className="p-1 hover:bg-slate-100 rounded-full text-slate-400 hover:text-slate-600 transition-colors"
+                      title="Clear search"
+                    >
+                      <i className="ri-close-circle-fill text-base"></i>
+                    </button>
+                  )}
+                  
+                  <span className="hidden sm:inline-flex items-center px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 text-[9px] font-extrabold text-slate-400 select-none shadow-sm font-mono">
+                    ⌘K
+                  </span>
+                </div>
+              </div>
             </div>
 
-            {/* Status Filter */}
-            <div>
-              <label htmlFor="statusFilter" className="flex items-center gap-2 text-sm font-semibold text-slate-700 mb-2">
-                <i className="ri-bar-chart-line text-slate-400"></i> Status
+            {/* Publication Status - Premium Segmented Tabs */}
+            <div className="md:col-span-2">
+              <label className="flex items-center gap-2 text-sm font-semibold text-slate-700 mb-2">
+                <i className="ri-shield-check-line text-emerald-500"></i> Publication Status
               </label>
-              <select
-                id="statusFilter"
-                className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
-                value={filterStatus}
-                onChange={(e) => setFilterStatus(e.target.value)}
-              >
-                <option value="all">All Status</option>
-                <option value="published">✅ Published</option>
-                <option value="pending">⏳ Ongoing</option>
-                <option value="draft">📝 Draft</option>
-              </select>
+              <div className="flex bg-slate-100 p-1.5 rounded-xl border border-slate-200/50 shadow-inner h-[46px]">
+                {[
+                  { value: 'all', label: 'All', icon: 'ri-apps-2-line', activeBg: 'bg-gradient-to-r from-blue-600 to-blue-700' },
+                  { value: 'published', label: 'Published', icon: 'ri-checkbox-circle-line', activeBg: 'bg-gradient-to-r from-emerald-600 to-emerald-700' },
+                  { value: 'pending', label: 'Pending', icon: 'ri-time-line', activeBg: 'bg-gradient-to-r from-amber-600 to-amber-700' },
+                  { value: 'draft', label: 'Draft', icon: 'ri-edit-2-line', activeBg: 'bg-gradient-to-r from-slate-600 to-slate-700' }
+                ].map((tab) => {
+                  const isActive = filterStatus === tab.value;
+                  return (
+                    <button
+                      key={tab.value}
+                      onClick={() => setFilterStatus(tab.value)}
+                      className={`relative flex-1 py-1.5 rounded-lg text-xs font-bold transition-all duration-300 flex items-center justify-center gap-1.5 z-10 ${
+                        isActive ? 'text-white' : 'text-slate-600 hover:text-slate-800 hover:bg-slate-200/40'
+                      }`}
+                    >
+                      {isActive && (
+                        <motion.div
+                          layoutId="activeStatusIndicator"
+                          className={`absolute inset-0 rounded-lg shadow-md ${tab.activeBg}`}
+                          transition={{ type: "spring", stiffness: 350, damping: 28 }}
+                        />
+                      )}
+                      <span className="relative flex items-center gap-1">
+                        <i className={`${tab.icon} text-[13px]`}></i>
+                        <span className="hidden lg:inline">{tab.label}</span>
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
+            </div>
 
-            {/* Genre Filter */}
+            {/* Genre Select Dropdown with custom styling */}
             <div>
               <label htmlFor="genreFilter" className="flex items-center gap-2 text-sm font-semibold text-slate-700 mb-2">
-                <i className="ri-price-tag-3-line text-slate-400"></i> Genre
+                <i className="ri-price-tag-3-line text-blue-500"></i> Genre
               </label>
-              <select
-                id="genreFilter"
-                className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
-                value={filterGenre}
-                onChange={(e) => setFilterGenre(e.target.value)}
-              >
-                <option value="all">All Genres</option>
-                <option value="action">⚔️ Action</option>
-                <option value="romance">💕 Romance</option>
-                <option value="comedy">😂 Comedy</option>
-                <option value="drama">🎭 Drama</option>
-                <option value="fantasy">✨ Fantasy</option>
-                <option value="sci-fi">🚀 Sci-Fi</option>
-                <option value="horror">👻 Horror</option>
-                <option value="slice of life">🌸 Slice of Life</option>
-              </select>
+              <div className="relative">
+                <select
+                  id="genreFilter"
+                  className="w-full pl-10 pr-10 py-2.5 bg-white border border-slate-200 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all font-semibold text-slate-700 appearance-none cursor-pointer text-sm"
+                  value={filterGenre}
+                  onChange={(e) => setFilterGenre(e.target.value)}
+                >
+                  <option value="all">All Genres</option>
+                  {availableGenres.map((genre) => (
+                    <option key={genre} value={genre.toLowerCase()}>
+                      {genre}
+                    </option>
+                  ))}
+                </select>
+                <div className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                  <i className="ri-price-tag-line text-slate-400 text-sm"></i>
+                </div>
+                <div className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                  <i className="ri-arrow-down-s-line text-lg"></i>
+                </div>
+              </div>
+            </div>
+
+            {/* Type Select Dropdown */}
+            <div>
+              <label htmlFor="typeFilter" className="flex items-center gap-2 text-sm font-semibold text-slate-700 mb-2">
+                <i className="ri-movie-line text-purple-500"></i> Type
+              </label>
+              <div className="relative">
+                <select
+                  id="typeFilter"
+                  className="w-full pl-10 pr-10 py-2.5 bg-white border border-slate-200 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all font-semibold text-slate-700 appearance-none cursor-pointer text-sm"
+                  value={filterType}
+                  onChange={(e) => setFilterType(e.target.value)}
+                >
+                  <option value="all">All Types</option>
+                  <option value="tv">📺 TV Series</option>
+                  <option value="movie">🎬 Movie</option>
+                  <option value="ova">💿 OVA</option>
+                  <option value="ona">🌐 ONA</option>
+                  <option value="special">✨ Special</option>
+                </select>
+                <div className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                  <i className="ri-movie-2-line text-slate-400 text-sm"></i>
+                </div>
+                <div className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                  <i className="ri-arrow-down-s-line text-lg"></i>
+                </div>
+              </div>
+            </div>
+
+            {/* Sort & Order Controls */}
+            <div className="md:col-span-2">
+              <label htmlFor="sortFilter" className="flex items-center gap-2 text-sm font-semibold text-slate-700 mb-2">
+                <i className="ri-equalizer-line text-emerald-500"></i> Sort & Order
+              </label>
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <select
+                    id="sortFilter"
+                    className="w-full pl-10 pr-10 py-2.5 bg-white border border-slate-200 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all font-semibold text-slate-700 appearance-none cursor-pointer text-sm"
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value)}
+                  >
+                    <option value="created_at">📅 Date Added</option>
+                    <option value="title">🔤 Title</option>
+                    <option value="rating">⭐️ Rating</option>
+                    <option value="year">🗓️ Release Year</option>
+                    <option value="total_episodes">🔢 Episodes</option>
+                  </select>
+                  <div className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                    <i className="ri-sort-asc text-slate-400 text-sm"></i>
+                  </div>
+                  <div className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                    <i className="ri-arrow-down-s-line text-lg"></i>
+                  </div>
+                </div>
+                
+                <button
+                  onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
+                  className="px-3.5 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl shadow-sm transition-all duration-200 flex items-center justify-center text-slate-600 hover:text-blue-600 focus:ring-2 focus:ring-blue-500 h-[46px]"
+                  title={sortOrder === 'asc' ? 'Sort Ascending' : 'Sort Descending'}
+                >
+                  <i className={sortOrder === 'asc' ? 'ri-sort-asc-line text-lg' : 'ri-sort-desc-line text-lg'}></i>
+                </button>
+              </div>
             </div>
           </div>
+
+          {/* Active Filter Chips with satisfying layout transitions */}
+          {(searchTerm || filterStatus !== 'all' || filterGenre !== 'all' || filterType !== 'all' || sortBy !== 'created_at' || sortOrder !== 'desc') && (
+            <div className="mt-5 pt-4 border-t border-slate-100 flex flex-wrap items-center gap-2">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mr-1">Active filters:</span>
+              <div className="flex flex-wrap gap-1.5 flex-1 items-center">
+                {searchTerm && (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200/50 shadow-sm">
+                    <i className="ri-search-line text-[11px]"></i> Search: "{searchTerm}"
+                    <button onClick={() => { setSearchInputValue(''); setSearchTerm(''); }} className="hover:bg-blue-200/50 p-0.5 rounded-full transition-colors">
+                      <i className="ri-close-line"></i>
+                    </button>
+                  </span>
+                )}
+                {filterStatus !== 'all' && (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/50 shadow-sm capitalize">
+                    <i className="ri-checkbox-circle-line text-[11px]"></i> Status: {filterStatus}
+                    <button onClick={() => setFilterStatus('all')} className="hover:bg-emerald-200/50 p-0.5 rounded-full transition-colors">
+                      <i className="ri-close-line"></i>
+                    </button>
+                  </span>
+                )}
+                {filterGenre !== 'all' && (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200/50 shadow-sm capitalize">
+                    <i className="ri-price-tag-3-line text-[11px]"></i> Genre: {filterGenre}
+                    <button onClick={() => setFilterGenre('all')} className="hover:bg-amber-200/50 p-0.5 rounded-full transition-colors">
+                      <i className="ri-close-line"></i>
+                    </button>
+                  </span>
+                )}
+                {filterType !== 'all' && (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-200/50 shadow-sm uppercase">
+                    <i className="ri-movie-2-line text-[11px]"></i> Type: {filterType}
+                    <button onClick={() => setFilterType('all')} className="hover:bg-purple-200/50 p-0.5 rounded-full transition-colors">
+                      <i className="ri-close-line"></i>
+                    </button>
+                  </span>
+                )}
+                {(sortBy !== 'created_at' || sortOrder !== 'desc') && (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-700 border border-slate-200/50 shadow-sm">
+                    <i className="ri-sort-asc text-[11px]"></i> Sort: {sortBy === 'created_at' ? 'Date' : sortBy === 'title' ? 'Title' : sortBy === 'rating' ? 'Rating' : sortBy === 'year' ? 'Year' : 'Episodes'} ({sortOrder === 'asc' ? 'Asc' : 'Desc'})
+                    <button onClick={() => { setSortBy('created_at'); setSortOrder('desc'); }} className="hover:bg-slate-200 p-0.5 rounded-full transition-colors">
+                      <i className="ri-close-line"></i>
+                    </button>
+                  </span>
+                )}
+                
+                <button
+                  onClick={() => {
+                    setSearchInputValue('');
+                    setSearchTerm('');
+                    setFilterStatus('all');
+                    setFilterGenre('all');
+                    setFilterType('all');
+                    setSortBy('created_at');
+                    setSortOrder('desc');
+                  }}
+                  className="text-xs text-red-500 hover:text-red-700 font-bold hover:underline ml-auto flex items-center gap-1 transition-all duration-200 hover:scale-105"
+                >
+                  <i className="ri-refresh-line"></i> Reset All
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Bulk Actions - Redesigned */}
@@ -869,17 +1134,17 @@ This action cannot be undone.`,
         )}
 
         {/* Select All Header - Redesigned */}
-        {!loading && filteredAnime.length > 0 && (
+        {!loading && anime.length > 0 && (
           <div className="bg-white/70 backdrop-blur-sm border border-white/20 rounded-xl p-4 mb-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
                 <input
                   type="checkbox"
-                  checked={selectedAnime.size === filteredAnime.length && filteredAnime.length > 0}
+                  checked={selectedAnime.size === anime.length && anime.length > 0}
                   onChange={(e) => {
                     if (e.target.checked) {
                       // Select all visible anime
-                      const allIds = new Set(filteredAnime.map(item => item.id));
+                      const allIds = new Set(anime.map(item => item.id));
                       setSelectedAnime(allIds);
                     } else {
                       // Deselect all
@@ -889,7 +1154,7 @@ This action cannot be undone.`,
                   className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                 />
                 <span className="text-sm font-medium text-slate-700">
-                  Select All ({filteredAnime.length} anime)
+                  Select All ({anime.length} anime)
                 </span>
               </div>
               <div className="text-sm text-slate-500">
@@ -906,7 +1171,7 @@ This action cannot be undone.`,
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-5">
-            {filteredAnime.map((item, index) => (
+            {anime.map((item, index) => (
               <motion.div
                 key={item.id}
                 initial={{ opacity: 0, y: 30 }}
@@ -1043,7 +1308,7 @@ This action cannot be undone.`,
                       </div>
 
                       {/* Action Buttons Grid */}
-                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                         <button 
                           onClick={() => handleViewAnimeDetails(item)}
                           className="px-3 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all text-xs font-semibold shadow-sm hover:shadow-md flex items-center justify-center gap-1"
@@ -1063,18 +1328,6 @@ This action cannot be undone.`,
                           <i className="ri-add-circle-line"></i> Episode
                         </button>
                         <button
-                          onClick={() => handleScrapAnime(item)}
-                          className="px-3 py-2 bg-amber-600 text-white rounded-xl hover:bg-amber-700 transition-all text-xs font-semibold shadow-sm hover:shadow-md flex items-center justify-center gap-1"
-                        >
-                          <i className="ri-search-2-line"></i> Scrape
-                        </button>
-                        <button
-                          onClick={() => handleLargeScrape(item)}
-                          className="px-3 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all text-xs font-semibold shadow-sm hover:shadow-md flex items-center justify-center gap-1"
-                        >
-                          <i className="ri-rocket-line"></i> Bulk
-                        </button>
-                        <button
                           onClick={() => handleDeleteAnime(item.id, item.title)}
                           disabled={updatingAnime === item.id}
                           className="px-3 py-2 bg-red-600 text-white rounded-xl hover:bg-red-700 disabled:opacity-50 transition-all text-xs font-semibold shadow-sm hover:shadow-md flex items-center justify-center gap-1"
@@ -1088,7 +1341,7 @@ This action cannot be undone.`,
               </motion.div>
             ))}
             
-            {filteredAnime.length === 0 && (
+            {anime.length === 0 && (
               <motion.div 
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}

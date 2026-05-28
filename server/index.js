@@ -3631,8 +3631,8 @@ app.post("/api/add-scraped-episode", async (req, res) => {
           video_servers: mergedServers,
           duration: episodeData.duration || 1440, // Default to 24 minutes if not provided
           description: `Scraped from 9anime.org.lv - ${episodeData.embeddingProtected
-              ? "May have embedding protection"
-              : "Embedding friendly"
+            ? "May have embedding protection"
+            : "Embedding friendly"
             }`,
         })
         .eq("anime_id", animeId)
@@ -3658,8 +3658,8 @@ app.post("/api/add-scraped-episode", async (req, res) => {
           duration: episodeData.duration || 1440, // Default to 24 minutes (1440 seconds) if not provided
           thumbnail_url: null,
           description: `Scraped from 9anime.org.lv - ${episodeData.embeddingProtected
-              ? "May have embedding protection"
-              : "Embedding friendly"
+            ? "May have embedding protection"
+            : "Embedding friendly"
             }`,
           is_premium: false,
         })

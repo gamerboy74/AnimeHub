@@ -26,7 +26,6 @@ export class AnimeSugeScraperService {
     return `${this.BASE_URL}${inputUrl.startsWith("/") ? "" : "/"}${inputUrl}`;
   }
 
-
   /**
    * Search AnimeSuge for the given title and return the anime detail page URL.
    * AnimeSuge search results have EMPTY text on <a> poster links —
@@ -89,43 +88,53 @@ export class AnimeSugeScraperService {
     }
 
     const targetSeason = extractSeasonNumber(title);
+
+    // Normalization functions
     const cleanStr = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const sortWords = (s) => s.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(Boolean).sort().join(" ");
+    
     const targetClean = cleanStr(title);
+    const targetSorted = sortWords(title);
     const targetCore = getCoreTitle(title);
 
     let exactMatch = null;
-    const partialMatches = [];
+    let reorderMatch = null;
+    let coreMatch = null;
 
     for (const link of animeLinks) {
       const resultSeason = extractSeasonNumber(link.text);
       if (targetSeason !== resultSeason) {
-        console.log(`   ⏭️ Skipping result "${link.text}" (Season ${resultSeason}) - mismatch with target (Season ${targetSeason})`);
         continue;
       }
 
       const textClean = cleanStr(link.text);
+      const textSorted = sortWords(link.text);
       const textCore = getCoreTitle(link.text);
 
+      // 1. Direct exact clean match
       if (textClean === targetClean) {
         exactMatch = link.href;
         console.log(`🎯 EXACT match: "${link.text}" -> ${link.href}`);
         break;
       }
 
-      const isCleanMatch = textClean && (textClean.includes(targetClean) || targetClean.includes(textClean));
-      const isCoreMatch = textCore && (textCore.includes(targetCore) || targetCore.includes(textCore));
+      // 2. Token-sorted word match (e.g. "Baki Hanma" vs "Hanma Baki")
+      if (textSorted === targetSorted && targetSorted !== "") {
+        reorderMatch = link.href;
+        console.log(`🎯 REORDER match: "${link.text}" -> ${link.href}`);
+      }
 
-      if (isCleanMatch || isCoreMatch) {
-        partialMatches.push({ href: link.href, text: link.text, textClean });
+      // 3. Core exact match (excluding season suffix variations)
+      if (textCore === targetCore && targetCore !== "") {
+        coreMatch = link.href;
+        console.log(`🎯 CORE match: "${link.text}" -> ${link.href}`);
       }
     }
 
-    if (exactMatch) return exactMatch;
+    const finalMatch = exactMatch || reorderMatch || coreMatch;
 
-    if (partialMatches.length > 0) {
-      partialMatches.sort((a, b) => a.textClean.length - b.textClean.length);
-      console.log(`🎯 Closest partial: "${partialMatches[0].text}" → ${partialMatches[0].href}`);
-      return partialMatches[0].href;
+    if (finalMatch) {
+      return finalMatch;
     }
 
     // Strict reject: throw error instead of falling back to a mismatch season link

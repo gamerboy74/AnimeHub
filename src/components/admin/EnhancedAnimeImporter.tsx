@@ -1,111 +1,123 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { AnimeImporterService } from '../../services/anime/importer'
-import { HiAnimeScraperService } from '../../services/scrapers/hianime'
-import Button from '../base/Button'
-import Input from '../base/Input'
-import { SparkleLoadingSpinner } from '../base/LoadingSpinner'
-import { supabase } from '../../lib/database/supabase'
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { AnimeImporterService } from '../../services/anime/importer';
+import { HiAnimeScraperService } from '../../services/scrapers/hianime';
+import { AdminAnimeService } from '../../services/admin/anime';
+import { supabase } from '../../lib/database/supabase';
 
 interface ImportResult {
-  success: boolean
-  imported: number
-  skipped: number
-  errors: string[]
-  duplicates: string[]
+  success: boolean;
+  imported: number;
+  skipped: number;
+  errors: string[];
+  duplicates: string[];
 }
 
 interface SearchResult {
-  title: string
-  title_english?: string
-  title_romaji?: string
-  title_japanese?: string
-  year?: number
-  status?: string
-  type?: string
-  genres?: string[]
-  rating?: number
-  poster_url?: string
-  description?: string
-  source: 'jikan' | 'anilist'
-  originalData: any
+  title: string;
+  title_english?: string;
+  title_romaji?: string;
+  title_japanese?: string;
+  year?: number;
+  status?: string;
+  type?: string;
+  genres?: string[];
+  rating?: number;
+  poster_url?: string;
+  description?: string;
+  source: 'jikan' | 'anilist';
+  originalData: any;
 }
 
 interface ImportProgress {
-  total: number
-  completed: number
-  current: string
-  percentage: number
+  total: number;
+  completed: number;
+  current: string;
+  percentage: number;
 }
 
 interface EnhancedAnimeImporterProps {
-  onImportComplete?: () => void
+  onImportComplete?: () => void;
 }
 
 export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ onImportComplete }) => {
-  const [searchQuery, setSearchQuery] = useState('')
-  const [searchResults, setSearchResults] = useState<SearchResult[]>([])
-  const [selectedAnime, setSelectedAnime] = useState<SearchResult[]>([])
-  const [isSearching, setIsSearching] = useState(false)
-  const [isImporting, setIsImporting] = useState(false)
-  const [importResult, setImportResult] = useState<ImportResult | null>(null)
-  const [source, setSource] = useState<'jikan' | 'anilist'>('jikan')
-  const [showPreview, setShowPreview] = useState(false)
-  const [importProgress, setImportProgress] = useState<ImportProgress | null>(null)
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [selectedAnime, setSelectedAnime] = useState<SearchResult[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const [source, setSource] = useState<'jikan' | 'anilist'>('jikan');
+  const [showPreview, setShowPreview] = useState(false);
+  const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
   const [searchFilters, setSearchFilters] = useState({
     year: '',
     genre: '',
     status: '',
     rating: '',
     sortBy: 'relevance'
-  })
-  const [batchSize, setBatchSize] = useState(5)
-  const [autoImport, setAutoImport] = useState(false)
-  const [importHistory, setImportHistory] = useState<any[]>([])
-  const [showAdvanced, setShowAdvanced] = useState(false)
-  const [activeTab, setActiveTab] = useState<'search' | 'trending' | 'seasonal' | 'debug'>('search')
-  const [message, setMessage] = useState<string | null>(null)
-  const [scrapingAnimeId, setScrapingAnimeId] = useState<string | null>(null)
-  const [resultMode, setResultMode] = useState<'search' | 'trending' | 'seasonal' | null>(null)
-  const [searchPage, setSearchPage] = useState(1)
-  const [trendingPage, setTrendingPage] = useState(1)
-  const [seasonalPage, setSeasonalPage] = useState(1)
-  const [canLoadMoreResults, setCanLoadMoreResults] = useState(false)
+  });
+  const [batchSize, setBatchSize] = useState(5);
+  const [autoImport, setAutoImport] = useState(false);
+  const [importHistory, setImportHistory] = useState<any[]>([]);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [activeTab, setActiveTab] = useState<'search' | 'trending' | 'seasonal' | 'debug'>('search');
+  const [message, setMessage] = useState<string | null>(null);
+  const [scrapingAnimeId, setScrapingAnimeId] = useState<string | null>(null);
+  const [resultMode, setResultMode] = useState<'search' | 'trending' | 'seasonal' | null>(null);
+  const [searchPage, setSearchPage] = useState(1);
+  const [trendingPage, setTrendingPage] = useState(1);
+  const [seasonalPage, setSeasonalPage] = useState(1);
+  const [canLoadMoreResults, setCanLoadMoreResults] = useState(false);
+
+  // Autocomplete Genre states
+  const [availableGenres, setAvailableGenres] = useState<string[]>([]);
+  const [showGenreDropdown, setShowGenreDropdown] = useState(false);
 
   // Debounce search query
-  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('')
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
 
   // Debounce search query with 300ms delay
   useEffect(() => {
     if (searchTimeoutRef.current) {
-      clearTimeout(searchTimeoutRef.current)
+      clearTimeout(searchTimeoutRef.current);
     }
     
     searchTimeoutRef.current = setTimeout(() => {
-      setDebouncedSearchQuery(searchQuery)
-    }, 300)
+      setDebouncedSearchQuery(searchQuery);
+    }, 300);
 
     return () => {
       if (searchTimeoutRef.current) {
-        clearTimeout(searchTimeoutRef.current)
+        clearTimeout(searchTimeoutRef.current);
       }
-    }
-  }, [searchQuery])
+    };
+  }, [searchQuery]);
 
-  // Load import history on component mount
+  // Load import history and database genres on mount
   useEffect(() => {
-    loadImportHistory()
-  }, [])
+    loadImportHistory();
+    loadGenresList();
+  }, []);
+
+  const loadGenresList = async () => {
+    try {
+      const genres = await AdminAnimeService.getAvailableGenres();
+      setAvailableGenres(genres || []);
+    } catch (err) {
+      console.error('Failed to load genres:', err);
+    }
+  };
 
   const loadImportHistory = async () => {
     try {
-      const history = JSON.parse(localStorage.getItem('animeImportHistory') || '[]')
-      setImportHistory(history)
+      const history = JSON.parse(localStorage.getItem('animeImportHistory') || '[]');
+      setImportHistory(history);
     } catch (error) {
-      console.error('Failed to load import history:', error)
+      console.error('Failed to load import history:', error);
     }
-  }
+  };
 
   const saveImportHistory = (result: ImportResult, query: string) => {
     const historyItem = {
@@ -114,52 +126,52 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
       result,
       timestamp: new Date().toISOString(),
       source
-    }
+    };
     
-    const newHistory = [historyItem, ...importHistory.slice(0, 9)]
-    setImportHistory(newHistory)
-    localStorage.setItem('animeImportHistory', JSON.stringify(newHistory))
-  }
+    const newHistory = [historyItem, ...importHistory.slice(0, 9)];
+    setImportHistory(newHistory);
+    localStorage.setItem('animeImportHistory', JSON.stringify(newHistory));
+  };
 
   const mapApiResults = (results: any[], currentSource: 'jikan' | 'anilist'): SearchResult[] => {
     return results.map(anime => {
       const mapped = currentSource === 'jikan'
         ? AnimeImporterService.mapJikanToDatabase(anime)
-        : AnimeImporterService.mapAniListToDatabase(anime)
+        : AnimeImporterService.mapAniListToDatabase(anime);
 
       return {
         ...mapped,
         source: currentSource,
         originalData: anime
-      } as SearchResult
-    })
-  }
+      } as SearchResult;
+    });
+  };
 
   const getResultTitles = (anime: SearchResult): string[] => {
     return [anime.title, anime.title_english, anime.title_romaji, anime.title_japanese]
-      .filter((value): value is string => Boolean(value && value.trim()))
-  }
+      .filter((value): value is string => Boolean(value && value.trim()));
+  };
 
-  const normalizeTitle = (value: string) => value.toLowerCase().replace(/\s+/g, ' ').trim()
+  const normalizeTitle = (value: string) => value.toLowerCase().replace(/\s+/g, ' ').trim();
 
   const filterExistingAnimeResults = async (results: SearchResult[]): Promise<SearchResult[]> => {
     const candidateTitles = Array.from(
       new Set(results.flatMap(anime => getResultTitles(anime)))
-    )
+    );
 
     if (candidateTitles.length === 0) {
-      return results
+      return results;
     }
 
     try {
       const { data, error } = await supabase
         .from('anime')
         .select('title')
-        .in('title', candidateTitles)
+        .in('title', candidateTitles);
 
       if (error) {
-        console.warn('Could not check existing anime titles:', error.message)
-        return results
+        console.warn('Could not check existing anime titles:', error.message);
+        return results;
       }
 
       const existingTitles = new Set(
@@ -167,67 +179,67 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
           .map(row => row.title)
           .filter((value): value is string => Boolean(value))
           .map(normalizeTitle)
-      )
+      );
 
       return results.filter(anime => {
-        return !getResultTitles(anime).some(title => existingTitles.has(normalizeTitle(title)))
-      })
+        return !getResultTitles(anime).some(title => existingTitles.has(normalizeTitle(title)));
+      });
     } catch (error) {
-      console.warn('Failed to filter existing anime results:', error)
-      return results
+      console.warn('Failed to filter existing anime results:', error);
+      return results;
     }
-  }
+  };
 
   const handleSearch = useCallback(async (query: string, page: number = 1, append: boolean = false) => {
-    if (!query.trim()) return
+    if (!query.trim()) return;
 
-    setIsSearching(true)
-    setResultMode('search')
+    setIsSearching(true);
+    setResultMode('search');
     if (!append) {
-      setSearchResults([])
-      setSelectedAnime([])
-      setImportResult(null)
-      setSearchPage(1)
-      setCanLoadMoreResults(false)
+      setSearchResults([]);
+      setSelectedAnime([]);
+      setImportResult(null);
+      setSearchPage(1);
+      setCanLoadMoreResults(false);
     }
 
     try {
-      const pageSize = source === 'jikan' ? 25 : 50
-      let results: any[] = []
+      const pageSize = source === 'jikan' ? 25 : 50;
+      let results: any[] = [];
       
       if (source === 'jikan') {
-        results = await AnimeImporterService.searchJikanAnime(query, pageSize, page)
+        results = await AnimeImporterService.searchJikanAnime(query, pageSize, page);
       } else {
-        results = await AnimeImporterService.searchAniListAnime(query, pageSize, page)
+        results = await AnimeImporterService.searchAniListAnime(query, pageSize, page);
       }
 
-      const filteredResults = await filterExistingAnimeResults(applyFiltersToResults(mapApiResults(results, source)))
-      setSearchResults(prev => append ? [...prev, ...filteredResults] : filteredResults)
-      setSearchPage(page)
-      setCanLoadMoreResults(results.length === pageSize)
+      const filteredResults = await filterExistingAnimeResults(applyFiltersToResults(mapApiResults(results, source)));
+      setSearchResults(prev => append ? [...prev, ...filteredResults] : filteredResults);
+      setSearchPage(page);
+      setCanLoadMoreResults(results.length === pageSize);
     } catch (error) {
-      console.error('Search error:', error)
-      alert(`Search failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      console.error('Search error:', error);
+      alert(`Search failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
-      setIsSearching(false)
+      setIsSearching(false);
     }
-  }, [source])
+  }, [source, searchFilters]);
 
   // Auto-search when debounced query changes
   useEffect(() => {
     if (debouncedSearchQuery.trim() && activeTab === 'search') {
-      handleSearch(debouncedSearchQuery)
+      handleSearch(debouncedSearchQuery);
     }
-  }, [debouncedSearchQuery, activeTab, handleSearch])
+  }, [debouncedSearchQuery, activeTab, handleSearch]);
 
   const applyFiltersToResults = (results: SearchResult[]): SearchResult[] => {
-    let filteredResults = results
+    let filteredResults = results;
     
     if (searchFilters.year) {
       filteredResults = filteredResults.filter(anime => 
         anime.year === parseInt(searchFilters.year) || 
         anime.originalData.startDate?.year === parseInt(searchFilters.year)
-      )
+      );
     }
     
     if (searchFilters.genre) {
@@ -235,73 +247,73 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
         anime.genres?.some((g: string) => 
           g.toLowerCase().includes(searchFilters.genre.toLowerCase())
         )
-      )
+      );
     }
     
     if (searchFilters.status) {
       filteredResults = filteredResults.filter(anime => 
         anime.status?.toLowerCase().includes(searchFilters.status.toLowerCase())
-      )
+      );
     }
     
     if (searchFilters.rating) {
-      const minRating = parseFloat(searchFilters.rating)
+      const minRating = parseFloat(searchFilters.rating);
       filteredResults = filteredResults.filter(anime => 
         (anime.rating || anime.originalData.score || anime.originalData.averageScore) >= minRating
-      )
+      );
     }
 
     filteredResults.sort((a, b) => {
       switch (searchFilters.sortBy) {
         case 'rating':
           return (b.rating || b.originalData.score || b.originalData.averageScore || 0) - 
-                 (a.rating || a.originalData.score || a.originalData.averageScore || 0)
+                 (a.rating || a.originalData.score || a.originalData.averageScore || 0);
         case 'year':
           return (b.year || b.originalData.startDate?.year || 0) - 
-                 (a.year || a.originalData.startDate?.year || 0)
+                 (a.year || a.originalData.startDate?.year || 0);
         case 'title':
-          return (a.title || '').localeCompare(b.title || '')
+          return (a.title || '').localeCompare(b.title || '');
         case 'popularity':
           return (b.originalData.popularity || b.originalData.members || 0) - 
-                 (a.originalData.popularity || a.originalData.members || 0)
+                 (a.originalData.popularity || a.originalData.members || 0);
         default:
-          return 0
+          return 0;
       }
-    })
+    });
 
-    return filteredResults
-  }
+    return filteredResults;
+  };
 
   const handleSelectAnime = (anime: SearchResult) => {
     setSelectedAnime(prev => {
       const isSelected = prev.some(selected => 
         selected.title === anime.title && selected.source === anime.source
-      )
+      );
       
       if (isSelected) {
         return prev.filter(selected => 
           !(selected.title === anime.title && selected.source === anime.source)
-        )
+        );
       } else {
-        return [...prev, anime]
+        return [...prev, anime];
       }
-    })
-  }
+    });
+  };
 
   const handleBulkImport = async () => {
     if (selectedAnime.length === 0) {
-      alert('Please select at least one anime to import')
-      return
+      alert('Please select at least one anime to import');
+      return;
     }
 
-    setIsImporting(true)
-    setImportResult(null)
+    setIsImporting(true);
+    setImportResult(null);
     setImportProgress({
       total: selectedAnime.length,
       completed: 0,
       current: '',
       percentage: 0
-    })
+    });
 
     try {
       const results: ImportResult = {
@@ -310,42 +322,39 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
         skipped: 0,
         errors: [],
         duplicates: []
-      }
+      };
 
-      // Use state batchSize instead of hardcoded value
-      const currentBatchSize = batchSize || 3
+      const currentBatchSize = batchSize || 3;
       for (let i = 0; i < selectedAnime.length; i += currentBatchSize) {
-        const batch = selectedAnime.slice(i, i + currentBatchSize)
+        const batch = selectedAnime.slice(i, i + currentBatchSize);
         
         const batchPromises = batch.map(async (anime) => {
           try {
             const mappedData = anime.source === 'jikan' 
               ? AnimeImporterService.mapJikanToDatabase(anime.originalData)
-              : AnimeImporterService.mapAniListToDatabase(anime.originalData)
+              : AnimeImporterService.mapAniListToDatabase(anime.originalData);
 
             const imported = anime.source === 'anilist' 
               ? await (AnimeImporterService as any).importAnimeFromAniList(anime.originalData)
-              : await AnimeImporterService.importAnime(mappedData)
+              : await AnimeImporterService.importAnime(mappedData);
             return {
               success: !!imported,
               title: anime.title,
               isDuplicate: !imported
-            }
+            };
           } catch (error) {
             return {
               success: false,
               title: anime.title,
               error: error instanceof Error ? error.message : 'Unknown error',
               isDuplicate: false
-            }
+            };
           }
-        })
+        });
 
-        // Use Promise.allSettled for better error handling
-        const batchResults = await Promise.allSettled(batchPromises)
+        const batchResults = await Promise.allSettled(batchPromises);
         
         batchResults.forEach((settledResult, batchIndex) => {
-          // Handle Promise.allSettled results
           const result = settledResult.status === 'fulfilled' 
             ? settledResult.value 
             : {
@@ -353,60 +362,59 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
                 title: batch[batchIndex]?.title || 'Unknown',
                 error: settledResult.reason?.message || 'Unknown error',
                 isDuplicate: false
-              }
+              };
 
           setImportProgress(prev => prev ? {
             ...prev,
             current: result.title,
             completed: prev.completed + 1,
             percentage: Math.round(((prev.completed + 1) / prev.total) * 100)
-          } : null)
+          } : null);
 
           if (result.success) {
-            results.imported++
+            results.imported++;
           } else if (result.isDuplicate) {
-            results.skipped++
-            results.duplicates.push(result.title)
+            results.skipped++;
+            results.duplicates.push(result.title);
           } else {
-            results.errors.push(`${result.title}: ${result.error}`)
+            results.errors.push(`${result.title}: ${result.error}`);
           }
-        })
+        });
 
         if (i + currentBatchSize < selectedAnime.length) {
-          await new Promise(resolve => setTimeout(resolve, 300))
+          await new Promise(resolve => setTimeout(resolve, 300));
         }
       }
 
-      setImportResult(results)
-      saveImportHistory(results, searchQuery)
-      setSelectedAnime([])
-      setSearchResults([])
+      setImportResult(results);
+      saveImportHistory(results, searchQuery);
+      setSelectedAnime([]);
+      setSearchResults([]);
       
-      // Call callback to refresh parent component
       if (results.imported > 0 && onImportComplete) {
-        onImportComplete()
+        onImportComplete();
       }
     } catch (error) {
-      console.error('Import error:', error)
-      alert(`Import failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      console.error('Import error:', error);
+      alert(`Import failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
-      setIsImporting(false)
-      setImportProgress(null)
+      setIsImporting(false);
+      setImportProgress(null);
     }
-  }
+  };
 
   const handleQuickImport = async (anime: SearchResult) => {
-    setIsImporting(true)
-    setImportResult(null)
+    setIsImporting(true);
+    setImportResult(null);
 
     try {
       const mappedData = anime.source === 'jikan' 
         ? AnimeImporterService.mapJikanToDatabase(anime.originalData)
-        : AnimeImporterService.mapAniListToDatabase(anime.originalData)
+        : AnimeImporterService.mapAniListToDatabase(anime.originalData);
 
       const imported = anime.source === 'anilist' 
         ? await (AnimeImporterService as any).importAnimeFromAniList(anime.originalData)
-        : await AnimeImporterService.importAnime(mappedData)
+        : await AnimeImporterService.importAnime(mappedData);
       
       if (imported) {
         const result = {
@@ -415,18 +423,17 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
           skipped: 0,
           errors: [],
           duplicates: []
-        }
+        };
         
-        setImportResult(result)
-        saveImportHistory(result, anime.title)
+        setImportResult(result);
+        saveImportHistory(result, anime.title);
         
-        setSearchResults(prev => prev.filter(result => 
-          !(result.title === anime.title && result.source === anime.source)
-        ))
+        setSearchResults(prev => prev.filter(res => 
+          !(res.title === anime.title && res.source === anime.source)
+        ));
         
-        // Call callback to refresh parent component
         if (onImportComplete) {
-          onImportComplete()
+          onImportComplete();
         }
       } else {
         setImportResult({
@@ -435,7 +442,7 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
           skipped: 1,
           errors: [],
           duplicates: [anime.title]
-        })
+        });
       }
     } catch (error) {
       setImportResult({
@@ -444,57 +451,51 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
         skipped: 0,
         errors: [`${anime.title}: ${error instanceof Error ? error.message : 'Unknown error'}`],
         duplicates: []
-      })
+      });
     } finally {
-      setIsImporting(false)
+      setIsImporting(false);
     }
-  }
+  };
 
-  /**
-   * Import anime metadata + episode stubs, then trigger batch scraping for all episodes.
-   */
   const handleImportAndScrape = async (anime: SearchResult) => {
-    setIsImporting(true)
-    setImportResult(null)
-    setScrapingAnimeId(null)
+    setIsImporting(true);
+    setImportResult(null);
+    setScrapingAnimeId(null);
 
     try {
-      // Step 1: Import the anime (episode stubs are auto-created by importer)
       const mappedData = anime.source === 'jikan'
         ? AnimeImporterService.mapJikanToDatabase(anime.originalData)
-        : AnimeImporterService.mapAniListToDatabase(anime.originalData)
+        : AnimeImporterService.mapAniListToDatabase(anime.originalData);
 
-      let importedAnime: any = null
+      let importedAnime: any = null;
       if (anime.source === 'anilist') {
-        const ok = await (AnimeImporterService as any).importAnimeFromAniList(anime.originalData, { skipAutoScrape: true })
+        const ok = await (AnimeImporterService as any).importAnimeFromAniList(anime.originalData, { skipAutoScrape: true });
         if (ok) {
-          // Look up the inserted anime to get its ID
           const { data } = await supabase
             .from('anime')
             .select('id, title, total_episodes')
             .ilike('title', mappedData.title || '')
-            .maybeSingle()
-          importedAnime = data
+            .maybeSingle();
+          importedAnime = data;
         }
       } else {
-        importedAnime = await AnimeImporterService.importAnime(mappedData, { skipAutoScrape: true })
+        importedAnime = await AnimeImporterService.importAnime(mappedData, { skipAutoScrape: true });
       }
 
       if (!importedAnime) {
-        setImportResult({ success: false, imported: 0, skipped: 1, errors: [], duplicates: [anime.title] })
-        return
+        setImportResult({ success: false, imported: 0, skipped: 1, errors: [], duplicates: [anime.title] });
+        return;
       }
 
-      setImportResult({ success: true, imported: 1, skipped: 0, errors: [], duplicates: [] })
-      saveImportHistory({ success: true, imported: 1, skipped: 0, errors: [], duplicates: [] }, anime.title)
+      setImportResult({ success: true, imported: 1, skipped: 0, errors: [], duplicates: [] });
+      saveImportHistory({ success: true, imported: 1, skipped: 0, errors: [], duplicates: [] }, anime.title);
 
-      // Step 2: Trigger batch scraping for all episodes
-      const totalEps = importedAnime.total_episodes || (anime.originalData as any)?.episodes || 0
+      const totalEps = importedAnime.total_episodes || (anime.originalData as any)?.episodes || 0;
       if (totalEps > 0 && importedAnime.id) {
-        setScrapingAnimeId(importedAnime.id)
-        setMessage(`📺 Imported! Now scraping ${totalEps} episodes for "${anime.title}"...`)
+        setScrapingAnimeId(importedAnime.id);
+        setMessage(`📺 Imported! Now scraping ${totalEps} episodes for "${anime.title}"...`);
 
-        const episodeNumbers = Array.from({ length: totalEps }, (_, i) => i + 1)
+        const episodeNumbers = Array.from({ length: totalEps }, (_, i) => i + 1);
 
         try {
           await HiAnimeScraperService.batchScrapeEpisodesWithProgress(
@@ -503,26 +504,25 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
             episodeNumbers,
             (event) => {
               if (event.type === 'progress' || event.type === 'success') {
-                setMessage(`📺 Scraping episodes: ${event.current || '?'}/${totalEps} — ${event.title || ''}`)
+                setMessage(`📺 Scraping episodes: ${event.current || '?'}/${totalEps} — ${event.title || ''}`);
               } else if (event.type === 'error') {
-                console.warn('Episode scrape error:', event.error)
+                console.warn('Episode scrape error:', event.error);
               } else if (event.type === 'complete') {
-                setMessage(`✅ Done! ${event.successCount || 0}/${event.total || totalEps} episodes scraped successfully.`)
+                setMessage(`✅ Done! ${event.successCount || 0}/${event.total || totalEps} episodes scraped successfully.`);
               }
             },
-          )
+          );
         } catch (scrapeErr) {
-          console.error('Batch scrape error:', scrapeErr)
-          setMessage(`⚠️ Import succeeded but scraping failed: ${scrapeErr instanceof Error ? scrapeErr.message : 'Unknown error'}`)
+          console.error('Batch scrape error:', scrapeErr);
+          setMessage(`⚠️ Import succeeded but scraping failed: ${scrapeErr instanceof Error ? scrapeErr.message : 'Unknown error'}`);
         }
       } else {
-        setMessage(`✅ Imported "${anime.title}"! (Episode count unknown — scrape manually from the Scraper tab.)`)
+        setMessage(`✅ Imported "${anime.title}"! (Episode count unknown — scrape manually from the Scraper tab.)`);
       }
 
-      // Remove from search results
-      setSearchResults(prev => prev.filter(r => !(r.title === anime.title && r.source === anime.source)))
+      setSearchResults(prev => prev.filter(r => !(r.title === anime.title && r.source === anime.source)));
 
-      if (onImportComplete) onImportComplete()
+      if (onImportComplete) onImportComplete();
     } catch (error) {
       setImportResult({
         success: false,
@@ -530,109 +530,109 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
         skipped: 0,
         errors: [`${anime.title}: ${error instanceof Error ? error.message : 'Unknown error'}`],
         duplicates: []
-      })
+      });
     } finally {
-      setIsImporting(false)
-      setScrapingAnimeId(null)
+      setIsImporting(false);
+      setScrapingAnimeId(null);
     }
-  }
+  };
 
   const handleTrendingImport = async (page: number = 1, append: boolean = false) => {
-    setIsSearching(true)
-    setResultMode('trending')
+    setIsSearching(true);
+    setResultMode('trending');
     if (!append) {
-      setSearchResults([])
-      setSelectedAnime([])
-      setImportResult(null)
-      setTrendingPage(1)
-      setCanLoadMoreResults(false)
+      setSearchResults([]);
+      setSelectedAnime([]);
+      setImportResult(null);
+      setTrendingPage(1);
+      setCanLoadMoreResults(false);
     }
 
     try {
-      const pageSize = source === 'jikan' ? 25 : 50
-      let results: any[] = []
+      const pageSize = source === 'jikan' ? 25 : 50;
+      let results: any[] = [];
       
       if (source === 'anilist') {
-        results = await AnimeImporterService.getTrendingAniListAnime(pageSize, page)
+        results = await AnimeImporterService.getTrendingAniListAnime(pageSize, page);
       } else {
-        results = await AnimeImporterService.getTrendingJikanAnime(pageSize, page)
+        results = await AnimeImporterService.getTrendingJikanAnime(pageSize, page);
       }
 
-      const mappedResults = mapApiResults(results, source)
-      const filteredResults = await filterExistingAnimeResults(applyFiltersToResults(mappedResults))
-      setSearchResults(prev => append ? [...prev, ...filteredResults] : filteredResults)
-      setTrendingPage(page)
-      setCanLoadMoreResults(results.length === pageSize)
+      const mappedResults = mapApiResults(results, source);
+      const filteredResults = await filterExistingAnimeResults(applyFiltersToResults(mappedResults));
+      setSearchResults(prev => append ? [...prev, ...filteredResults] : filteredResults);
+      setTrendingPage(page);
+      setCanLoadMoreResults(results.length === pageSize);
     } catch (error) {
-      console.error('Trending import error:', error)
-      alert(`Failed to fetch trending anime: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      console.error('Trending import error:', error);
+      alert(`Failed to fetch trending anime: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
-      setIsSearching(false)
+      setIsSearching(false);
     }
-  }
+  };
 
   const handleSeasonalImport = async (page: number = 1, append: boolean = false) => {
-    const currentDate = new Date()
-    const year = currentDate.getFullYear()
-    const month = currentDate.getMonth() + 1
+    const currentDate = new Date();
+    const year = currentDate.getFullYear();
+    const month = currentDate.getMonth() + 1;
     
-    let season = 'winter'
-    if (month >= 3 && month <= 5) season = 'spring'
-    else if (month >= 6 && month <= 8) season = 'summer'
-    else if (month >= 9 && month <= 11) season = 'fall'
+    let season = 'winter';
+    if (month >= 3 && month <= 5) season = 'spring';
+    else if (month >= 6 && month <= 8) season = 'summer';
+    else if (month >= 9 && month <= 11) season = 'fall';
 
-    setIsSearching(true)
-    setResultMode('seasonal')
+    setIsSearching(true);
+    setResultMode('seasonal');
     if (!append) {
-      setSearchResults([])
-      setSelectedAnime([])
-      setImportResult(null)
-      setSeasonalPage(1)
-      setCanLoadMoreResults(false)
+      setSearchResults([]);
+      setSelectedAnime([]);
+      setImportResult(null);
+      setSeasonalPage(1);
+      setCanLoadMoreResults(false);
     }
 
     try {
-      const pageSize = source === 'jikan' ? 25 : 50
-      let results: any[] = []
+      const pageSize = source === 'jikan' ? 25 : 50;
+      let results: any[] = [];
       
       if (source === 'anilist') {
-        results = await (AnimeImporterService as any).getSeasonalAniListAnime(year, season, pageSize, page)
+        results = await (AnimeImporterService as any).getSeasonalAniListAnime(year, season, pageSize, page);
       } else {
-        results = await AnimeImporterService.getSeasonalJikanAnime(year, season, pageSize, page)
+        results = await AnimeImporterService.getSeasonalJikanAnime(year, season, pageSize, page);
       }
 
-      const mappedResults = mapApiResults(results, source)
-      const filteredResults = await filterExistingAnimeResults(applyFiltersToResults(mappedResults))
-      setSearchResults(prev => append ? [...prev, ...filteredResults] : filteredResults)
-      setSeasonalPage(page)
-      setCanLoadMoreResults(results.length === pageSize)
+      const mappedResults = mapApiResults(results, source);
+      const filteredResults = await filterExistingAnimeResults(applyFiltersToResults(mappedResults));
+      setSearchResults(prev => append ? [...prev, ...filteredResults] : filteredResults);
+      setSeasonalPage(page);
+      setCanLoadMoreResults(results.length === pageSize);
     } catch (error) {
-      console.error('Seasonal import error:', error)
-      alert(`Failed to fetch seasonal anime: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      console.error('Seasonal import error:', error);
+      alert(`Failed to fetch seasonal anime: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
-      setIsSearching(false)
+      setIsSearching(false);
     }
-  }
+  };
 
   const handleLoadMoreResults = async () => {
-    if (isSearching || !canLoadMoreResults || !resultMode) return
+    if (isSearching || !canLoadMoreResults || !resultMode) return;
 
     if (resultMode === 'search') {
-      await handleSearch(searchQuery, searchPage + 1, true)
+      await handleSearch(searchQuery, searchPage + 1, true);
     } else if (resultMode === 'trending') {
-      await handleTrendingImport(trendingPage + 1, true)
+      await handleTrendingImport(trendingPage + 1, true);
     } else if (resultMode === 'seasonal') {
-      await handleSeasonalImport(seasonalPage + 1, true)
+      await handleSeasonalImport(seasonalPage + 1, true);
     }
-  }
+  };
 
   const handleSelectAll = () => {
     if (selectedAnime.length === searchResults.length) {
-      setSelectedAnime([])
+      setSelectedAnime([]);
     } else {
-      setSelectedAnime([...searchResults])
+      setSelectedAnime([...searchResults]);
     }
-  }
+  };
 
   const handleClearFilters = () => {
     setSearchFilters({
@@ -641,702 +641,637 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
       status: '',
       rating: '',
       sortBy: 'relevance'
-    })
-  }
+    });
+  };
 
   const handleApplyFilters = async () => {
     if (!searchQuery.trim()) {
-      await handleTrendingImport(1, false)
-      return
+      await handleTrendingImport(1, false);
+      return;
     }
-    await handleSearch(searchQuery, 1, false)
-  }
+    await handleSearch(searchQuery, 1, false);
+  };
+
+  const filteredGenres = availableGenres.filter(
+    genre => genre && typeof genre === 'string' && genre.toLowerCase().includes(searchFilters.genre.toLowerCase())
+  );
 
   return (
     <div className="space-y-6">
-        {/* Header */}
-        <motion.div 
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="text-center mb-2"
-        >
-          <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-3 flex items-center justify-center gap-3">
-            <i className="ri-download-cloud-2-line text-blue-600"></i>
-            Anime Import Hub
-          </h1>
-          <p className="text-slate-500 text-sm">
-            Discover, import, and manage your anime collection with advanced features
-          </p>
-        </motion.div>
+      {/* Premium Header */}
+      <motion.div 
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="text-center mb-4 bg-white/80 backdrop-blur-md p-6 rounded-2xl border border-slate-100 shadow-sm"
+      >
+        <h1 className="text-3xl font-extrabold bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 bg-clip-text text-transparent mb-2 flex items-center justify-center gap-3">
+          <i className="ri-download-cloud-2-line text-blue-600"></i>
+          Anime Import Hub
+        </h1>
+        <p className="text-slate-500 text-sm font-medium max-w-xl mx-auto">
+          Discover new series, fetch high-quality metadata, auto-build stubs, and scrape live video servers in the background instantly.
+        </p>
+      </motion.div>
 
-        {/* Main Import Interface */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-          className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg border border-white/20 overflow-hidden"
-        >
-          {/* Tab Navigation */}
-          <div className="bg-gradient-to-r from-blue-600 to-blue-700 p-6">
-            <div className="flex space-x-1 bg-white/20 rounded-2xl p-1">
-              {[
-                { id: 'search', label: 'Search Anime', icon: 'ri-search-line' },
-                { id: 'trending', label: 'Trending', icon: 'ri-fire-line' },
-                { id: 'seasonal', label: 'Seasonal', icon: 'ri-leaf-line' },
-                { id: 'debug', label: 'Tools', icon: 'ri-tools-line' }
-              ].map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id as any)}
-                  className={`flex-1 px-6 py-3 rounded-xl font-medium transition-all duration-200 ${
-                    activeTab === tab.id
-                      ? 'bg-white text-blue-600 shadow-lg'
-                      : 'text-white hover:bg-white/10'
-                  }`}
-                >
-                  <i className={`${tab.icon} mr-2`}></i>
-                  {tab.label}
-                </button>
-              ))}
-            </div>
+      {/* Main Import Panel */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.1 }}
+        className="bg-white/90 backdrop-blur-md rounded-2xl shadow-xl border border-slate-100 overflow-hidden"
+      >
+        {/* Tab Navigation Menu */}
+        <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 p-5 border-b border-indigo-900/30">
+          <div className="flex flex-wrap md:flex-nowrap gap-2 bg-white/5 backdrop-blur-md rounded-xl p-1.5 border border-white/5">
+            {[
+              { id: 'search', label: 'Search Anime', icon: 'ri-search-line' },
+              { id: 'trending', label: 'Trending Feed', icon: 'ri-fire-line' },
+              { id: 'seasonal', label: 'Seasonal Feed', icon: 'ri-leaf-line' },
+              { id: 'debug', label: 'Maintenance Tools', icon: 'ri-tools-line' }
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as any)}
+                className={`relative flex-1 flex items-center justify-center gap-2 px-5 py-3 rounded-lg text-sm font-bold transition-all duration-300 select-none ${
+                  activeTab === tab.id
+                    ? 'bg-white text-indigo-950 shadow-md transform scale-[1.02]'
+                    : 'text-white/70 hover:text-white hover:bg-white/5'
+                }`}
+              >
+                <i className={`${tab.icon} text-base`}></i>
+                {tab.label}
+              </button>
+            ))}
           </div>
+        </div>
 
-          <div className="p-8">
-            <AnimatePresence mode="wait">
-              {activeTab === 'search' && (
-                <motion.div
-                  key="search"
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 20 }}
-                  className="space-y-6"
-                >
-                  {/* Search Controls */}
-                  <div className="bg-gradient-to-r from-blue-50 to-slate-50 rounded-2xl p-6 border border-slate-200">
-                    <div className="flex flex-col lg:flex-row gap-4">
-                      <div className="flex-1">
-                        <label className="block text-sm font-semibold text-slate-700 mb-3">
-                          <i className="ri-crosshair-2-line mr-1"></i> Search Query
-                        </label>
-                        <Input
-                          type="text"
-                          value={searchQuery}
-                          onChange={(e) => setSearchQuery(e.target.value)}
-                          placeholder="Search for anime (e.g., Attack on Titan, Demon Slayer)"
-                          onKeyPress={(e) => e.key === 'Enter' && handleSearch(searchQuery)}
-                          className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
-                        />
-                      </div>
-                      
-                      <div className="lg:w-48">
-                        <label className="block text-sm font-semibold text-slate-700 mb-3">
-                          <i className="ri-database-2-line mr-1"></i> Data Source
-                        </label>
-                        <select
-                          value={source}
-                          onChange={(e) => setSource(e.target.value as 'jikan' | 'anilist')}
-                          className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
-                        >
-                          <option value="jikan">Jikan (MyAnimeList)</option>
-                          <option value="anilist">AniList</option>
-                        </select>
-                      </div>
-                      
-                      <div className="lg:w-32 flex items-end">
-                        <Button
-                          onClick={() => handleSearch(searchQuery)}
-                          disabled={isSearching || !searchQuery.trim()}
-                          className="w-full px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105"
-                        >
-                          {isSearching ? (
-                            <div className="flex items-center justify-center">
-                              <SparkleLoadingSpinner size="sm" />
-                              <span className="ml-2">Searching...</span>
-                            </div>
-                          ) : (
-                            <><i className="ri-search-line mr-1"></i> Search</>
-                          )}
-                        </Button>
-                      </div>
+        {/* Tab Content Body */}
+        <div className="p-6 md:p-8">
+          <AnimatePresence mode="wait">
+            {activeTab === 'search' && (
+              <motion.div
+                key="search"
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 10 }}
+                className="space-y-6"
+              >
+                {/* Search Workspace Box */}
+                <div className="bg-slate-50/50 rounded-2xl p-5 border border-slate-100 space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+                    <div className="md:col-span-7">
+                      <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">
+                        <i className="ri-search-eye-line mr-1 text-slate-400"></i> Search Query
+                      </label>
+                      <input
+                        type="text"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        placeholder="Search by title (e.g., Demon Slayer, Jujutsu Kaisen...)"
+                        onKeyPress={(e) => e.key === 'Enter' && handleSearch(searchQuery)}
+                        className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                      />
                     </div>
-                  </div>
-                </motion.div>
-              )}
-
-              {activeTab === 'trending' && (
-                <motion.div
-                  key="trending"
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 20 }}
-                  className="space-y-6"
-                >
-                  <div className="text-center">
-                    <h3 className="text-2xl font-bold text-slate-800 mb-4"><i className="ri-fire-line text-orange-500 mr-2"></i>Trending Anime</h3>
-                    <p className="text-slate-600 mb-6">Discover the most popular anime right now</p>
-                    <Button
-                      onClick={() => handleTrendingImport(1, false)}
-                      disabled={isSearching}
-                      className="px-8 py-4 bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105"
-                    >
-                      {isSearching ? (
-                        <div className="flex items-center">
-                          <SparkleLoadingSpinner size="sm" />
-                          <span className="ml-2">Loading...</span>
-                        </div>
-                      ) : (
-                        <><i className="ri-fire-line mr-1"></i> Load Trending Anime</>
-                      )}
-                    </Button>
-                  </div>
-                </motion.div>
-              )}
-
-              {activeTab === 'seasonal' && (
-                <motion.div
-                  key="seasonal"
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 20 }}
-                  className="space-y-6"
-                >
-                  <div className="text-center">
-                    <h3 className="text-2xl font-bold text-slate-800 mb-4"><i className="ri-leaf-line text-green-500 mr-2"></i>Current Season</h3>
-                    <p className="text-slate-600 mb-6">Explore anime from the current season</p>
-                    <Button
-                      onClick={() => handleSeasonalImport(1, false)}
-                      disabled={isSearching}
-                      className="px-8 py-4 bg-gradient-to-r from-green-500 to-teal-500 hover:from-green-600 hover:to-teal-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105"
-                    >
-                      {isSearching ? (
-                        <div className="flex items-center">
-                          <SparkleLoadingSpinner size="sm" />
-                          <span className="ml-2">Loading...</span>
-                        </div>
-                      ) : (
-                        <><i className="ri-leaf-line mr-1"></i> Load Current Season</>
-                      )}
-                    </Button>
-                  </div>
-                </motion.div>
-              )}
-
-              {activeTab === 'debug' && (
-                <motion.div
-                  key="debug"
-                  initial={{ opacity: 0, y: 12 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -12 }}
-                  transition={{ duration: 0.2 }}
-                  className="space-y-5"
-                >
-                  {/* Status Banner */}
-                  {message && (
-                    <div className={`flex items-start gap-3 p-4 rounded-xl text-sm font-medium border ${
-                      message.includes('❌') || message.includes('Error') || message.includes('error')
-                        ? 'bg-red-50 border-red-200 text-red-700'
-                        : message.includes('⏳') || message.includes('🔍') || message.includes('📺') || message.includes('🎭')
-                          ? 'bg-blue-50 border-blue-200 text-blue-700'
-                          : 'bg-emerald-50 border-emerald-200 text-emerald-700'
-                    }`}>
-                      <p className="whitespace-pre-wrap leading-relaxed">{message}</p>
-                      <button onClick={() => setMessage(null)} className="ml-auto shrink-0 opacity-60 hover:opacity-100 transition-opacity">
-                        <i className="ri-close-line text-lg"></i>
+                    
+                    <div className="md:col-span-3">
+                      <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">
+                        <i className="ri-database-2-line mr-1 text-slate-400"></i> Metadata Source
+                      </label>
+                      <select
+                        value={source}
+                        onChange={(e) => setSource(e.target.value as 'jikan' | 'anilist')}
+                        className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all cursor-pointer"
+                      >
+                        <option value="jikan">Jikan API (MyAnimeList)</option>
+                        <option value="anilist">AniList GraphQL API</option>
+                      </select>
+                    </div>
+                    
+                    <div className="md:col-span-2">
+                      <button
+                        onClick={() => handleSearch(searchQuery)}
+                        disabled={isSearching || !searchQuery.trim()}
+                        className="w-full px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-sm font-bold shadow-md hover:shadow-lg transition-all duration-200 flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isSearching ? (
+                          <>
+                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                            <span>Searching</span>
+                          </>
+                        ) : (
+                          <>
+                            <i className="ri-search-line text-sm"></i>
+                            <span>Search</span>
+                          </>
+                        )}
                       </button>
                     </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
+            {activeTab === 'trending' && (
+              <motion.div
+                key="trending"
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 10 }}
+                className="text-center py-6"
+              >
+                <div className="w-16 h-16 bg-orange-50 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-orange-100">
+                  <i className="ri-fire-line text-orange-500 text-3xl"></i>
+                </div>
+                <h3 className="text-xl font-bold text-slate-800 mb-2">Trending Anime</h3>
+                <p className="text-slate-500 text-sm mb-6 max-w-sm mx-auto">
+                  Fetch and load the highest-trending anime releases currently popular across the community.
+                </p>
+                <button
+                  onClick={() => handleTrendingImport(1, false)}
+                  disabled={isSearching}
+                  className="px-8 py-3 bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white rounded-xl text-sm font-bold shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 mx-auto disabled:opacity-50"
+                >
+                  {isSearching ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      <span>Loading...</span>
+                    </>
+                  ) : (
+                    <>
+                      <i className="ri-flashlight-line"></i>
+                      <span>Load Trending Feed</span>
+                    </>
                   )}
+                </button>
+              </motion.div>
+            )}
 
-                  {/* Tool Cards Grid */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {activeTab === 'seasonal' && (
+              <motion.div
+                key="seasonal"
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 10 }}
+                className="text-center py-6"
+              >
+                <div className="w-16 h-16 bg-green-50 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-green-100">
+                  <i className="ri-leaf-line text-green-500 text-3xl"></i>
+                </div>
+                <h3 className="text-xl font-bold text-slate-800 mb-2">Seasonal Broadcast Feed</h3>
+                <p className="text-slate-500 text-sm mb-6 max-w-sm mx-auto">
+                  Load anime from the current broadcast season (Winter, Spring, Summer, Fall) matching active media releases.
+                </p>
+                <button
+                  onClick={() => handleSeasonalImport(1, false)}
+                  disabled={isSearching}
+                  className="px-8 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white rounded-xl text-sm font-bold shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 mx-auto disabled:opacity-50"
+                >
+                  {isSearching ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      <span>Loading...</span>
+                    </>
+                  ) : (
+                    <>
+                      <i className="ri-leaf-line"></i>
+                      <span>Load Seasonal Feed</span>
+                    </>
+                  )}
+                </button>
+              </motion.div>
+            )}
 
-                    {/* ── Characters: Backfill ──────────────── */}
-                    <div className="group relative bg-white rounded-2xl border border-slate-200 hover:border-amber-300 hover:shadow-md transition-all duration-200 p-5">
+            {activeTab === 'debug' && (
+              <motion.div
+                key="debug"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="space-y-6"
+              >
+                {/* Active Maintenance Log banner */}
+                {message && (
+                  <div className={`flex items-start gap-3 p-4 rounded-xl text-sm font-medium border shadow-sm ${
+                    message.includes('❌') || message.includes('Error') || message.includes('error')
+                      ? 'bg-red-50 border-red-200 text-red-700'
+                      : message.includes('⏳') || message.includes('🔍') || message.includes('📺')
+                        ? 'bg-blue-50 border-blue-200 text-blue-700'
+                        : 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                  }`}>
+                    <p className="whitespace-pre-wrap leading-relaxed flex-1">{message}</p>
+                    <button onClick={() => setMessage(null)} className="shrink-0 opacity-60 hover:opacity-100 transition-opacity p-0.5 rounded-lg hover:bg-slate-200/50">
+                      <i className="ri-close-line text-lg"></i>
+                    </button>
+                  </div>
+                )}
+
+                {/* Maintenance Tools Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  {/* Tool 1: Backfill Characters */}
+                  <div className="bg-white rounded-2xl border border-slate-200 hover:border-amber-300 hover:shadow-md transition-all duration-200 p-5 flex flex-col justify-between h-48">
+                    <div>
                       <div className="flex items-center gap-3 mb-2">
-                        <span className="flex items-center justify-center w-9 h-9 rounded-xl bg-amber-100 text-amber-600"><i className="ri-magic-line text-lg"></i></span>
-                        <h4 className="font-semibold text-slate-800">Backfill Characters</h4>
+                        <span className="flex items-center justify-center w-9 h-9 rounded-xl bg-amber-100 text-amber-600">
+                          <i className="ri-magic-line text-lg"></i>
+                        </span>
+                        <h4 className="font-bold text-slate-800 text-sm">Backfill Characters</h4>
                       </div>
-                      <p className="text-slate-500 text-sm mb-4 leading-relaxed">Re-fetch missing voice actors & descriptions from AniList for all anime. Skips anime already complete.</p>
-                      <Button
-                        onClick={async () => {
-                          try {
-                            setMessage('🔍 Fetching anime list from database...')
+                      <p className="text-slate-500 text-xs leading-relaxed">
+                        Query AniList to download missing character bios and voice actor details for all database items. Skips populated profiles.
+                      </p>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        try {
+                          setMessage('🔍 Fetching anime list from database...');
+                          const { data: animeList, error: listError } = await supabase
+                            .from('anime')
+                            .select('id, title, mal_id')
+                            .order('title');
 
-                            // Get all anime from DB
-                            const { data: animeList, error: listError } = await supabase
-                              .from('anime')
-                              .select('id, title, mal_id')
-                              .order('title')
+                          if (listError || !animeList?.length) {
+                            setMessage(listError ? `Error: ${listError.message}` : 'No anime found in database');
+                            return;
+                          }
 
-                            if (listError || !animeList?.length) {
-                              setMessage(listError ? `Error: ${listError.message}` : 'No anime found in database')
-                              return
+                          let totalSuccess = 0;
+                          let totalErrors = 0;
+                          let totalSkipped = 0;
+                          const failedTitles: string[] = [];
+                          const total = animeList.length;
+
+                          for (let i = 0; i < total; i++) {
+                            const anime = animeList[i];
+                            const { data: existingChars } = await supabase
+                              .from('anime_characters')
+                              .select('id, voice_actor, description')
+                              .eq('anime_id', anime.id)
+                              .limit(10);
+
+                            if (existingChars && existingChars.length > 0) {
+                              const hasVoiceActors = existingChars.some(c => c.voice_actor);
+                              const hasDescriptions = existingChars.some(c => c.description);
+                              if (hasVoiceActors && hasDescriptions) {
+                                totalSkipped++;
+                                continue;
+                              }
                             }
 
-                            let totalSuccess = 0
-                            let totalErrors = 0
-                            let totalSkipped = 0
-                            const failedTitles: string[] = []
-                            const total = animeList.length
+                            setMessage(`🎭 [${i + 1}/${total}] Fetching characters for "${anime.title}"... (${totalSkipped} complete)`);
 
-                            for (let i = 0; i < total; i++) {
-                              const anime = animeList[i]
-
-                              // Skip anime that already have characters with voice actors
-                              const { data: existingChars } = await supabase
-                                .from('anime_characters')
-                                .select('id, voice_actor, description')
-                                .eq('anime_id', anime.id)
-                                .limit(10)
-
-                              if (existingChars && existingChars.length > 0) {
-                                const hasVoiceActors = existingChars.some(c => c.voice_actor)
-                                const hasDescriptions = existingChars.some(c => c.description)
-                                if (hasVoiceActors && hasDescriptions) {
-                                  totalSkipped++
-                                  continue
-                                }
-                              }
-
-                              setMessage(`🎭 [${i + 1}/${total}] Fetching characters for "${anime.title}"... (${totalSkipped} already complete)`)
-
-                              try {
-                                // Search AniList by title to find matching anime
-                                const searchQuery = `
-                                  query ($search: String) {
-                                    Media(search: $search, type: ANIME) {
-                                      id
-                                      characters(sort: [ROLE, RELEVANCE], perPage: 25) {
-                                        edges {
+                            try {
+                              const searchQuery = `
+                                query ($search: String) {
+                                  Media(search: $search, type: ANIME) {
+                                    id
+                                    characters(sort: [ROLE, RELEVANCE], perPage: 25) {
+                                      edges {
+                                        id
+                                        role
+                                        voiceActors(language: JAPANESE) {
                                           id
-                                          role
-                                          voiceActors(language: JAPANESE) {
+                                          name { full native }
+                                        }
+                                        voiceActorRoles {
+                                          voiceActor {
                                             id
                                             name { full native }
+                                            language
                                           }
-                                          voiceActorRoles {
-                                            voiceActor {
-                                              id
-                                              name { full native }
-                                              language
-                                            }
-                                          }
-                                          node {
-                                            id
-                                            name { full native alternative }
-                                            image { large medium }
-                                            description
-                                          }
+                                        }
+                                        node {
+                                          id
+                                          name { full native alternative }
+                                          image { large medium }
+                                          description
                                         }
                                       }
                                     }
                                   }
-                                `
-
-                                // Helper: fetch with retry on rate limit / CORS block
-                                const fetchAniList = async (body: string, attempt = 1): Promise<any> => {
-                                  try {
-                                    const r = await fetch('https://graphql.anilist.co', {
-                                      method: 'POST',
-                                      headers: { 'Content-Type': 'application/json' },
-                                      body
-                                    })
-                                    if (!r.ok) throw new Error(`HTTP ${r.status}`)
-                                    return await r.json()
-                                  } catch (err) {
-                                    if (attempt >= 3) throw err
-                                    const wait = attempt === 1 ? 30000 : 60000
-                                    setMessage(`⏳ [${i + 1}/${total}] Rate limited on "${anime.title}", waiting ${wait / 1000}s (attempt ${attempt}/3)...`)
-                                    await new Promise(r => setTimeout(r, wait))
-                                    return fetchAniList(body, attempt + 1)
-                                  }
                                 }
+                              `;
 
-                                const reqBody = JSON.stringify({ query: searchQuery, variables: { search: anime.title } })
-                                const data = await fetchAniList(reqBody)
-
-                                const media = data.data?.Media
-                                if (!media?.characters?.edges?.length) {
-                                  totalSkipped++
-                                  await new Promise(r => setTimeout(r, 3000))
-                                  continue
+                              const fetchAniList = async (body: string, attempt = 1): Promise<any> => {
+                                try {
+                                  const r = await fetch('https://graphql.anilist.co', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body
+                                  });
+                                  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                                  return await r.json();
+                                } catch (err) {
+                                  if (attempt >= 3) throw err;
+                                  const wait = attempt === 1 ? 30000 : 60000;
+                                  setMessage(`⏳ [${i + 1}/${total}] Rate limited on "${anime.title}", waiting ${wait / 1000}s (attempt ${attempt}/3)...`);
+                                  await new Promise(r => setTimeout(r, wait));
+                                  return fetchAniList(body, attempt + 1);
                                 }
+                              };
 
-                                const result = await (AnimeImporterService as any).importAnimeCharacters(anime.id, media)
-                                totalSuccess += result.success
-                                totalErrors += result.errors
-                              } catch (err) {
-                                console.error(`Failed to backfill characters for "${anime.title}":`, err)
-                                totalErrors++
-                                failedTitles.push(anime.title)
+                              const reqBody = JSON.stringify({ query: searchQuery, variables: { search: anime.title } });
+                              const data = await fetchAniList(reqBody);
+
+                              const media = data.data?.Media;
+                              if (!media?.characters?.edges?.length) {
+                                totalSkipped++;
+                                await new Promise(r => setTimeout(r, 3000));
+                                continue;
                               }
 
-                              // AniList rate limit: ~90 req/min — wait 3s between requests
-                              await new Promise(r => setTimeout(r, 3000))
+                              const result = await (AnimeImporterService as any).importAnimeCharacters(anime.id, media);
+                              totalSuccess += result.success;
+                              totalErrors += result.errors;
+                            } catch (err) {
+                              console.error(`Failed to backfill characters for "${anime.title}":`, err);
+                              totalErrors++;
+                              failedTitles.push(anime.title);
                             }
 
-                            setMessage(`✅ Character backfill complete! ${totalSuccess} characters updated across ${total} anime. ${totalSkipped > 0 ? `${totalSkipped} skipped (no data). ` : ''}${totalErrors > 0 ? `${totalErrors} errors. ` : ''}${failedTitles.length > 0 ? `\nFailed: ${failedTitles.join(', ')}` : ''}`)
-                          } catch (err) {
-                            console.error('Backfill error:', err)
-                            setMessage(`❌ Backfill failed: ${err instanceof Error ? err.message : err}`)
+                            await new Promise(r => setTimeout(r, 3000));
                           }
-                        }}
-                        disabled={isImporting}
-                        className="w-full bg-amber-500 hover:bg-amber-600 text-white py-2.5 rounded-xl font-medium text-sm transition-colors disabled:opacity-50"
-                      >
-                        {isImporting ? 'Running...' : 'Run Backfill'}
-                      </Button>
-                    </div>
 
-                    {/* ── Characters: Remove Duplicates ─────── */}
-                    <div className="group relative bg-white rounded-2xl border border-slate-200 hover:border-rose-300 hover:shadow-md transition-all duration-200 p-5">
+                          setMessage(`✅ Character backfill complete! ${totalSuccess} characters updated across ${total} anime. ${totalSkipped > 0 ? `${totalSkipped} skipped. ` : ''}${totalErrors > 0 ? `${totalErrors} errors. ` : ''}`);
+                        } catch (err) {
+                          setMessage(`❌ Backfill failed: ${err instanceof Error ? err.message : err}`);
+                        }
+                      }}
+                      disabled={isImporting}
+                      className="w-full bg-amber-500 hover:bg-amber-600 text-white py-2.5 rounded-xl font-bold text-xs shadow-sm hover:shadow-md transition-all cursor-pointer"
+                    >
+                      {isImporting ? 'Processing...' : 'Run Character Backfill'}
+                    </button>
+                  </div>
+
+                  {/* Tool 2: Remove Duplicates */}
+                  <div className="bg-white rounded-2xl border border-slate-200 hover:border-rose-300 hover:shadow-md transition-all duration-200 p-5 flex flex-col justify-between h-48">
+                    <div>
                       <div className="flex items-center gap-3 mb-2">
-                        <span className="flex items-center justify-center w-9 h-9 rounded-xl bg-rose-100 text-rose-600"><i className="ri-delete-bin-line text-lg"></i></span>
-                        <h4 className="font-semibold text-slate-800">Remove Duplicates</h4>
+                        <span className="flex items-center justify-center w-9 h-9 rounded-xl bg-rose-100 text-rose-600">
+                          <i className="ri-delete-bin-line text-lg"></i>
+                        </span>
+                        <h4 className="font-bold text-slate-800 text-sm">Clean Duplicates</h4>
                       </div>
-                      <p className="text-slate-500 text-sm mb-4 leading-relaxed">Scan all characters for name duplicates within the same anime and remove the entry with less data.</p>
-                      <Button
-                        onClick={async () => {
-                          try {
-                            setMessage('🔍 Scanning for duplicate characters...')
+                      <p className="text-slate-500 text-xs leading-relaxed">
+                        Scans the entire database for redundant anime character name mappings within individual series, keeping entries with the most complete bio profiles.
+                      </p>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        try {
+                          setMessage('🔍 Scanning for duplicate characters...');
+                          const { data: allChars, error: fetchErr } = await supabase
+                            .from('anime_characters')
+                            .select('id, anime_id, name, role, description, voice_actor')
+                            .order('anime_id');
 
-                            // Get all characters grouped by anime
-                            const { data: allChars, error: fetchErr } = await supabase
-                              .from('anime_characters')
-                              .select('id, anime_id, name, role, description, voice_actor')
-                              .order('anime_id')
+                          if (fetchErr || !allChars) {
+                            setMessage(`Error: ${fetchErr?.message || 'No characters found'}`);
+                            return;
+                          }
 
-                            if (fetchErr || !allChars) {
-                              setMessage(`Error: ${fetchErr?.message || 'No characters found'}`)
-                              return
-                            }
+                          const normalizeName = (name: string) =>
+                            name.toLowerCase().replace(/[.,\-'"""'']/g, '').split(/[\s,]+/).filter((w: string) => w.length > 1).sort().join(' ');
 
-                            // Normalize name for comparison
-                            const normalizeName = (name: string) =>
-                              name.toLowerCase().replace(/[.,\-'"""'']/g, '').split(/[\s,]+/).filter((w: string) => w.length > 1).sort().join(' ')
+                          const byAnime = new Map<string, typeof allChars>();
+                          for (const c of allChars) {
+                            const list = byAnime.get(c.anime_id) || [];
+                            list.push(c);
+                            byAnime.set(c.anime_id, list);
+                          }
 
-                            // Group by anime_id
-                            const byAnime = new Map<string, typeof allChars>()
-                            for (const c of allChars) {
-                              const list = byAnime.get(c.anime_id) || []
-                              list.push(c)
-                              byAnime.set(c.anime_id, list)
-                            }
+                          let totalRemoved = 0;
+                          const idsToDelete: string[] = [];
 
-                            let totalRemoved = 0
-                            const idsToDelete: string[] = []
-
-                            for (const [, chars] of byAnime) {
-                              // Find duplicates by normalized name
-                              const seen = new Map<string, typeof allChars[0]>()
-                              for (const c of chars) {
-                                const norm = normalizeName(c.name)
-                                const existing = seen.get(norm)
-                                if (existing) {
-                                  // Keep the one with more data (description or voice_actor)
-                                  const existingScore = (existing.description ? 1 : 0) + (existing.voice_actor ? 1 : 0)
-                                  const currentScore = (c.description ? 1 : 0) + (c.voice_actor ? 1 : 0)
-                                  if (currentScore > existingScore) {
-                                    idsToDelete.push(existing.id)
-                                    seen.set(norm, c)
-                                  } else {
-                                    idsToDelete.push(c.id)
-                                  }
-                                  totalRemoved++
+                          for (const [, chars] of byAnime) {
+                            const seen = new Map<string, typeof allChars[0]>();
+                            for (const c of chars) {
+                              const norm = normalizeName(c.name);
+                              const existing = seen.get(norm);
+                              if (existing) {
+                                const existingScore = (existing.description ? 1 : 0) + (existing.voice_actor ? 1 : 0);
+                                const currentScore = (c.description ? 1 : 0) + (c.voice_actor ? 1 : 0);
+                                if (currentScore > existingScore) {
+                                  idsToDelete.push(existing.id);
+                                  seen.set(norm, c);
                                 } else {
-                                  seen.set(norm, c)
+                                  idsToDelete.push(c.id);
                                 }
+                                totalRemoved++;
+                              } else {
+                                seen.set(norm, c);
                               }
                             }
-
-                            if (idsToDelete.length === 0) {
-                              setMessage('✅ No duplicate characters found!')
-                              return
-                            }
-
-                            setMessage(`🗑️ Removing ${idsToDelete.length} duplicate characters...`)
-
-                            // Delete in batches of 50
-                            for (let i = 0; i < idsToDelete.length; i += 50) {
-                              const batch = idsToDelete.slice(i, i + 50)
-                              await supabase.from('anime_characters').delete().in('id', batch)
-                            }
-
-                            setMessage(`✅ Removed ${totalRemoved} duplicate characters! Kept the ones with more details.`)
-                          } catch (err) {
-                            setMessage(`❌ Error: ${err instanceof Error ? err.message : err}`)
                           }
-                        }}
-                        disabled={isImporting}
-                        className="w-full bg-rose-500 hover:bg-rose-600 text-white py-2.5 rounded-xl font-medium text-sm transition-colors disabled:opacity-50"
-                      >
-                        {isImporting ? 'Scanning...' : 'Scan & Clean'}
-                      </Button>
-                    </div>
 
-                    {/* ── Episodes: Backfill All ────────────── */}
-                    <div className="group relative bg-white rounded-2xl border border-slate-200 hover:border-blue-300 hover:shadow-md transition-all duration-200 p-5">
-                      <div className="flex items-center gap-3 mb-2">
-                        <span className="flex items-center justify-center w-9 h-9 rounded-xl bg-blue-100 text-blue-600"><i className="ri-play-list-add-line text-lg"></i></span>
-                        <h4 className="font-semibold text-slate-800">Backfill Episodes</h4>
-                      </div>
-                      <p className="text-slate-500 text-sm mb-4 leading-relaxed">Create missing episode stubs from Jikan for all anime. Skips anime that already have all episodes.</p>
-                      <Button
-                        onClick={async () => {
-                          try {
-                            setMessage('🔍 Fetching anime list...')
-
-                            const { data: animeList, error: listError } = await supabase
-                              .from('anime')
-                              .select('id, title, mal_id, total_episodes')
-                              .not('mal_id', 'is', null)
-                              .order('title')
-
-                            if (listError || !animeList?.length) {
-                              setMessage(listError ? `Error: ${listError.message}` : 'No anime with MAL IDs found')
-                              return
-                            }
-
-                            let totalCreated = 0
-                            let totalSkipped = 0
-                            let totalFixed = 0
-                            const total = animeList.length
-
-                            for (let i = 0; i < total; i++) {
-                              const anime = animeList[i]
-                              setMessage(`📺 [${i + 1}/${total}] Checking episodes for "${anime.title}"...`)
-
-                              try {
-                                // Check how many episodes exist in DB
-                                const { count } = await supabase
-                                  .from('episodes')
-                                  .select('id', { count: 'exact', head: true })
-                                  .eq('anime_id', anime.id)
-
-                                const expectedEps = anime.total_episodes || 0
-                                const existingEps = count || 0
-
-                                // Skip if we already have all episodes
-                                if (expectedEps > 0 && existingEps >= expectedEps) {
-                                  totalSkipped++
-                                  continue
-                                }
-
-                                // Fetch and create stubs from Jikan
-                                const result = await AnimeImporterService.fetchEpisodesForExistingAnime(anime.id)
-                                totalCreated += result.created
-                                if (result.created > 0) {
-                                  totalFixed++
-                                  // Trigger scraping for episodes missing video_url
-                                  const { data: unscroped } = await supabase
-                                    .from('episodes')
-                                    .select('episode_number')
-                                    .eq('anime_id', anime.id)
-                                    .is('video_url', null)
-                                  if (unscroped?.length) {
-                                    const nums = unscroped.map(e => e.episode_number)
-                                    HiAnimeScraperService.batchScrapeEpisodes(anime.title, anime.id, nums).catch(() => {})
-                                  }
-                                  console.log(`📺 ${anime.title}: created ${result.created} stubs, triggered scrape`)
-                                }
-                              } catch (err) {
-                                console.warn(`⚠️ Failed for "${anime.title}":`, err)
-                              }
-
-                              // Jikan rate limit
-                              await new Promise(r => setTimeout(r, 500))
-                            }
-
-                            setMessage(`✅ Episode backfill complete! ${totalCreated} stubs created for ${totalFixed} anime. ${totalSkipped} already complete. Scraping triggered for new episodes.`)
-                          } catch (err) {
-                            setMessage(`❌ Error: ${err instanceof Error ? err.message : err}`)
+                          if (idsToDelete.length === 0) {
+                            setMessage('✅ No duplicate characters found!');
+                            return;
                           }
-                        }}
-                        disabled={isImporting}
-                        className="w-full bg-blue-500 hover:bg-blue-600 text-white py-2.5 rounded-xl font-medium text-sm transition-colors disabled:opacity-50"
-                      >
-                        {isImporting ? 'Running...' : 'Run Backfill'}
-                      </Button>
-                    </div>
 
-                    {/* ── Episodes: Fix Gaps ────────────────── */}
-                    <div className="group relative bg-white rounded-2xl border border-slate-200 hover:border-teal-300 hover:shadow-md transition-all duration-200 p-5">
+                          setMessage(`🗑️ Removing ${idsToDelete.length} duplicate characters...`);
+                          for (let i = 0; i < idsToDelete.length; i += 50) {
+                            const batch = idsToDelete.slice(i, i + 50);
+                            await supabase.from('anime_characters').delete().in('id', batch);
+                          }
+
+                          setMessage(`✅ Removed ${totalRemoved} duplicate characters successfully!`);
+                        } catch (err) {
+                          setMessage(`❌ Error: ${err instanceof Error ? err.message : err}`);
+                        }
+                      }}
+                      disabled={isImporting}
+                      className="w-full bg-rose-500 hover:bg-rose-600 text-white py-2.5 rounded-xl font-bold text-xs shadow-sm hover:shadow-md transition-all cursor-pointer"
+                    >
+                      {isImporting ? 'Scanning...' : 'Scan & Clean Duplicates'}
+                    </button>
+                  </div>
+
+                  {/* Tool 3: Backfill Episodes */}
+                  <div className="bg-white rounded-2xl border border-slate-200 hover:border-blue-300 hover:shadow-md transition-all duration-200 p-5 flex flex-col justify-between h-48">
+                    <div>
                       <div className="flex items-center gap-3 mb-2">
-                        <span className="flex items-center justify-center w-9 h-9 rounded-xl bg-teal-100 text-teal-600"><i className="ri-error-warning-line text-lg"></i></span>
-                        <h4 className="font-semibold text-slate-800">Fix Episode Gaps</h4>
+                        <span className="flex items-center justify-center w-9 h-9 rounded-xl bg-blue-100 text-blue-600">
+                          <i className="ri-play-list-add-line text-lg"></i>
+                        </span>
+                        <h4 className="font-bold text-slate-800 text-sm">Backfill Episodes</h4>
                       </div>
-                      <p className="text-slate-500 text-sm mb-4 leading-relaxed">Only targets anime where episodes are missing compared to total. Faster than full backfill.</p>
-                      <Button
-                        onClick={async () => {
-                          try {
-                            setMessage('🔍 Scanning for anime with missing episodes...')
+                      <p className="text-slate-500 text-xs leading-relaxed">
+                        Fetch and generate missing episode stubs automatically from Jikan API for all existing database anime records.
+                      </p>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        try {
+                          setMessage('🔍 Fetching anime list...');
+                          const { data: animeList, error: listError } = await supabase
+                            .from('anime')
+                            .select('id, title, mal_id, total_episodes')
+                            .not('mal_id', 'is', null)
+                            .order('title');
 
-                            const { data: animeList, error: listError } = await supabase
-                              .from('anime')
-                              .select('id, title, mal_id, total_episodes')
-                              .not('mal_id', 'is', null)
-                              .gt('total_episodes', 0)
-                              .order('title')
+                          if (listError || !animeList?.length) {
+                            setMessage(listError ? `Error: ${listError.message}` : 'No anime with MAL IDs found');
+                            return;
+                          }
 
-                            if (listError || !animeList?.length) {
-                              setMessage(listError ? `Error: ${listError.message}` : 'No anime found')
-                              return
-                            }
+                          let totalCreated = 0;
+                          let totalFixed = 0;
+                          let totalSkipped = 0;
+                          const total = animeList.length;
 
-                            const gapped: { title: string; expected: number; actual: number }[] = []
-                            let totalCreated = 0
+                          for (let i = 0; i < total; i++) {
+                            const anime = animeList[i];
+                            setMessage(`📺 [${i + 1}/${total}] Checking episodes for "${anime.title}"...`);
 
-                            for (const anime of animeList) {
+                            try {
                               const { count } = await supabase
                                 .from('episodes')
                                 .select('id', { count: 'exact', head: true })
-                                .eq('anime_id', anime.id)
+                                .eq('anime_id', anime.id);
 
-                              const expected = anime.total_episodes || 0
-                              const actual = count || 0
+                              const expectedEps = anime.total_episodes || 0;
+                              const existingEps = count || 0;
 
-                              if (actual < expected) {
-                                gapped.push({ title: anime.title, expected, actual })
-                                setMessage(`📺 Fixing "${anime.title}" (${actual}/${expected} episodes)...`)
+                              if (expectedEps > 0 && existingEps >= expectedEps) {
+                                totalSkipped++;
+                                continue;
+                              }
 
-                                try {
-                                  const result = await AnimeImporterService.fetchEpisodesForExistingAnime(anime.id)
-                                  totalCreated += result.created
-                                  // Trigger scraping for episodes missing video_url
-                                  if (result.created > 0) {
-                                    const { data: unscroped } = await supabase
-                                      .from('episodes')
-                                      .select('episode_number')
-                                      .eq('anime_id', anime.id)
-                                      .is('video_url', null)
-                                    if (unscroped?.length) {
-                                      const nums = unscroped.map(e => e.episode_number)
-                                      HiAnimeScraperService.batchScrapeEpisodes(anime.title, anime.id, nums).catch(() => {})
-                                    }
-                                  }
-                                } catch (err) {
-                                  console.warn(`Failed for "${anime.title}":`, err)
+                              const result = await AnimeImporterService.fetchEpisodesForExistingAnime(anime.id);
+                              totalCreated += result.created;
+                              if (result.created > 0) {
+                                totalFixed++;
+                                const { data: unscroped } = await supabase
+                                  .from('episodes')
+                                  .select('episode_number')
+                                  .eq('anime_id', anime.id)
+                                  .is('video_url', null);
+                                if (unscroped?.length) {
+                                  const nums = unscroped.map(e => e.episode_number);
+                                  HiAnimeScraperService.batchScrapeEpisodes(anime.title, anime.id, nums).catch(() => {});
                                 }
-
-                                await new Promise(r => setTimeout(r, 500))
                               }
+                            } catch (err) {
+                              console.warn(`⚠️ Failed for "${anime.title}":`, err);
                             }
 
-                            if (gapped.length === 0) {
-                              setMessage('✅ All anime have complete episode stubs!')
-                            } else {
-                              const details = gapped.map(g => `${g.title} (${g.actual}→${g.expected})`).join(', ')
-                              setMessage(`✅ Fixed ${gapped.length} anime with gaps. ${totalCreated} stubs created. Scraping triggered.\n${details}`)
-                            }
-                          } catch (err) {
-                            setMessage(`❌ Error: ${err instanceof Error ? err.message : err}`)
+                            await new Promise(r => setTimeout(r, 500));
                           }
-                        }}
-                        disabled={isImporting}
-                        className="w-full bg-teal-500 hover:bg-teal-600 text-white py-2.5 rounded-xl font-medium text-sm transition-colors disabled:opacity-50"
-                      >
-                        {isImporting ? 'Scanning...' : 'Fix Gaps'}
-                      </Button>
-                    </div>
 
-                    {/* ── Scrape Missing Videos ──────────────── */}
-                    <div className="group relative bg-white rounded-2xl border border-slate-200 hover:border-purple-300 hover:shadow-md transition-all duration-200 p-5 md:col-span-2">
+                          setMessage(`✅ Episode backfill complete! Created ${totalCreated} episode stubs across ${totalFixed} series.`);
+                        } catch (err) {
+                          setMessage(`❌ Error: ${err instanceof Error ? err.message : err}`);
+                        }
+                      }}
+                      disabled={isImporting}
+                      className="w-full bg-blue-500 hover:bg-blue-600 text-white py-2.5 rounded-xl font-bold text-xs shadow-sm hover:shadow-md transition-all cursor-pointer"
+                    >
+                      {isImporting ? 'Processing...' : 'Run Episode Backfill'}
+                    </button>
+                  </div>
+
+                  {/* Tool 4: Scrape Missing Streams */}
+                  <div className="bg-white rounded-2xl border border-slate-200 hover:border-purple-300 hover:shadow-md transition-all duration-200 p-5 flex flex-col justify-between h-48">
+                    <div>
                       <div className="flex items-center gap-3 mb-2">
-                        <span className="flex items-center justify-center w-9 h-9 rounded-xl bg-purple-100 text-purple-600"><i className="ri-movie-line text-lg"></i></span>
-                        <h4 className="font-semibold text-slate-800">Scrape Missing Videos</h4>
+                        <span className="flex items-center justify-center w-9 h-9 rounded-xl bg-purple-100 text-purple-600">
+                          <i className="ri-movie-line text-lg"></i>
+                        </span>
+                        <h4 className="font-bold text-slate-800 text-sm">Scrape Missing Streams</h4>
                       </div>
-                      <p className="text-slate-500 text-sm mb-4 leading-relaxed">Find all episodes with no video URL and trigger the scraper to fill them in. Requires the backend server to be running.</p>
-                      <Button
-                        onClick={async () => {
-                          try {
-                            setMessage('🔍 Finding episodes without video URLs...')
-
-                            // Get all episodes with null video_url, grouped by anime
-                            const { data: episodes, error } = await supabase
-                              .from('episodes')
-                              .select('anime_id, episode_number')
-                              .is('video_url', null)
-                              .order('anime_id')
-                              .order('episode_number')
-
-                            if (error) {
-                              setMessage(`❌ Error: ${error.message}`)
-                              return
-                            }
-
-                            if (!episodes?.length) {
-                              setMessage('✅ All episodes already have video URLs!')
-                              return
-                            }
-
-                            // Group by anime_id
-                            const byAnime = new Map<string, number[]>()
-                            for (const ep of episodes) {
-                              const list = byAnime.get(ep.anime_id) || []
-                              list.push(ep.episode_number)
-                              byAnime.set(ep.anime_id, list)
-                            }
-
-                            // Get anime titles
-                            const animeIds = [...byAnime.keys()]
-                            const { data: animeList } = await supabase
-                              .from('anime')
-                              .select('id, title')
-                              .in('id', animeIds)
-
-                            const titleMap = new Map(animeList?.map(a => [a.id, a.title]) || [])
-
-                            let totalQueued = 0
-                            let idx = 0
-                            const total = byAnime.size
-
-                            for (const [animeId, epNums] of byAnime) {
-                              idx++
-                              const title = titleMap.get(animeId) || 'Unknown'
-                              setMessage(`🎬 [${idx}/${total}] Queuing scrape for "${title}" (${epNums.length} episodes)...`)
-
-                              try {
-                                await HiAnimeScraperService.batchScrapeEpisodes(title, animeId, epNums)
-                                totalQueued += epNums.length
-                              } catch (err) {
-                                console.warn(`⚠️ Scrape failed for "${title}":`, err)
-                              }
-
-                              // Small delay between anime to avoid overwhelming the server
-                              await new Promise(r => setTimeout(r, 1000))
-                            }
-
-                            setMessage(`✅ Scraping complete! Processed ${totalQueued} episodes across ${total} anime.`)
-                          } catch (err) {
-                            setMessage(`❌ Error: ${err instanceof Error ? err.message : err}`)
-                          }
-                        }}
-                        disabled={isImporting}
-                        className="w-full bg-purple-500 hover:bg-purple-600 text-white py-2.5 rounded-xl font-medium text-sm transition-colors disabled:opacity-50"
-                      >
-                        {isImporting ? 'Scraping...' : 'Scrape All Missing'}
-                      </Button>
+                      <p className="text-slate-500 text-xs leading-relaxed">
+                        Identify all episodes in the database that are missing stream video URLs, and trigger Playwright batch scrapers to populate them.
+                      </p>
                     </div>
+                    <button
+                      onClick={async () => {
+                        try {
+                          setMessage('🔍 Finding episodes without video URLs...');
+                          const { data: episodes, error } = await supabase
+                            .from('episodes')
+                            .select('anime_id, episode_number')
+                            .is('video_url', null)
+                            .order('anime_id')
+                            .order('episode_number');
 
-                  </div>{/* end grid */}
-                </motion.div>
-              )}
-            </AnimatePresence>
+                          if (error) {
+                            setMessage(`❌ Error: ${error.message}`);
+                            return;
+                          }
 
-            {/* Advanced Filters */}
+                          if (!episodes?.length) {
+                            setMessage('✅ All episodes already have video URLs!');
+                            return;
+                          }
+
+                          const byAnime = new Map<string, number[]>();
+                          for (const ep of episodes) {
+                            const list = byAnime.get(ep.anime_id) || [];
+                            list.push(ep.episode_number);
+                            byAnime.set(ep.anime_id, list);
+                          }
+
+                          const animeIds = [...byAnime.keys()];
+                          const { data: animeList } = await supabase
+                            .from('anime')
+                            .select('id, title')
+                            .in('id', animeIds);
+
+                          const titleMap = new Map(animeList?.map(a => [a.id, a.title]) || []);
+
+                          let totalQueued = 0;
+                          let idx = 0;
+                          const total = byAnime.size;
+
+                          for (const [animeId, epNums] of byAnime) {
+                            idx++;
+                            const title = titleMap.get(animeId) || 'Unknown';
+                            setMessage(`🎬 [${idx}/${total}] Scraping "${title}" (${epNums.length} episodes)...`);
+
+                            try {
+                              await HiAnimeScraperService.batchScrapeEpisodes(title, animeId, epNums);
+                              totalQueued += epNums.length;
+                            } catch (err) {
+                              console.warn(`⚠️ Scrape failed for "${title}":`, err);
+                            }
+
+                            await new Promise(r => setTimeout(r, 1000));
+                          }
+
+                          setMessage(`✅ Completed! Triggered scraping for ${totalQueued} episodes across ${total} series.`);
+                        } catch (err) {
+                          setMessage(`❌ Error: ${err instanceof Error ? err.message : err}`);
+                        }
+                      }}
+                      disabled={isImporting}
+                      className="w-full bg-purple-500 hover:bg-purple-600 text-white py-2.5 rounded-xl font-bold text-xs shadow-sm hover:shadow-md transition-all cursor-pointer"
+                    >
+                      {isImporting ? 'Processing...' : 'Run Scraper Backfill'}
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Advanced Search Filters Card (Collapsible) */}
+          {activeTab === 'search' && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              transition={{ delay: 0.4 }}
-              className="mt-8"
+              transition={{ delay: 0.3 }}
+              className="mt-6 border-t border-slate-100 pt-6"
             >
               <div className="flex justify-between items-center mb-4">
-                <Button
+                <button
+                  type="button"
                   onClick={() => setShowAdvanced(!showAdvanced)}
-                  variant="secondary"
-                  className="px-4 py-2 rounded-xl border-2 border-blue-200 hover:border-blue-400 transition-all"
+                  className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm select-none"
                 >
-                  {showAdvanced ? <><i className="ri-arrow-down-s-line mr-1"></i> Hide Advanced</> : <><i className="ri-arrow-up-s-line mr-1"></i> Show Advanced</>}
-                </Button>
+                  <i className={`ri-arrow-${showAdvanced ? 'down' : 'up'}-s-line text-sm`}></i>
+                  {showAdvanced ? 'Hide Advanced Filters' : 'Show Advanced Filters'}
+                </button>
               </div>
 
               <AnimatePresence>
@@ -1345,497 +1280,566 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: 'auto' }}
                     exit={{ opacity: 0, height: 0 }}
-                    className="bg-gradient-to-r from-blue-50 to-slate-50 rounded-2xl p-6 border border-slate-200 overflow-hidden"
+                    className="bg-slate-50/50 rounded-2xl p-5 border border-slate-150 overflow-visible space-y-4"
                   >
-                    <h3 className="text-xl font-semibold mb-4 text-slate-800"><i className="ri-settings-3-line mr-2"></i>Advanced Filters</h3>
+                    <h3 className="text-xs font-bold text-slate-800 flex items-center gap-2 mb-1">
+                      <span className="w-1.5 h-3 bg-blue-500 rounded-full"></span>
+                      Advanced Query Filters
+                    </h3>
                     <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                       <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-2">Year</label>
-                        <Input
+                        <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">Release Year</label>
+                        <input
                           type="number"
                           value={searchFilters.year}
                           onChange={(e) => setSearchFilters({...searchFilters, year: e.target.value})}
-                          placeholder="2023"
-                          className="rounded-xl border border-slate-200 focus:border-blue-500"
+                          placeholder="e.g. 2024"
+                          className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
                         />
                       </div>
-                      <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-2">Genre</label>
-                        <Input
+
+                      {/* Genre Autocomplete Selector */}
+                      <div className="relative">
+                        <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">Genre Category</label>
+                        <input
                           type="text"
                           value={searchFilters.genre}
-                          onChange={(e) => setSearchFilters({...searchFilters, genre: e.target.value})}
-                          placeholder="Action"
-                          className="rounded-xl border border-slate-200 focus:border-blue-500"
+                          onChange={(e) => {
+                            setSearchFilters({...searchFilters, genre: e.target.value});
+                            setShowGenreDropdown(true);
+                          }}
+                          onFocus={() => setShowGenreDropdown(true)}
+                          onBlur={() => setTimeout(() => setShowGenreDropdown(false), 200)}
+                          placeholder="e.g. Action"
+                          className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
                         />
+                        {showGenreDropdown && filteredGenres.length > 0 && (
+                          <div className="absolute z-30 w-full mt-1.5 bg-white border border-slate-200 rounded-xl shadow-xl max-h-48 overflow-y-auto custom-scrollbar py-1">
+                            {filteredGenres.slice(0, 10).map((genre) => (
+                              <button
+                                key={genre}
+                                type="button"
+                                onMouseDown={() => {
+                                  setSearchFilters({...searchFilters, genre});
+                                  setShowGenreDropdown(false);
+                                }}
+                                className="w-full text-left px-4 py-2 hover:bg-blue-50 text-slate-700 hover:text-blue-700 text-sm font-semibold transition-colors flex items-center gap-2"
+                              >
+                                {genre}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
+
                       <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-2">Status</label>
+                        <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">Airing Status</label>
                         <select
                           value={searchFilters.status}
                           onChange={(e) => setSearchFilters({...searchFilters, status: e.target.value})}
-                          className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+                          className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all cursor-pointer"
                         >
-                          <option value="">All</option>
-                          <option value="ongoing">Ongoing</option>
-                          <option value="completed">Completed</option>
-                          <option value="upcoming">Upcoming</option>
+                          <option value="">All Statuses</option>
+                          <option value="ongoing">📡 Ongoing</option>
+                          <option value="completed">🏁 Completed</option>
+                          <option value="upcoming">🗓️ Upcoming</option>
                         </select>
                       </div>
+
                       <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-2">Min Rating</label>
-                        <Input
+                        <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">Min Rating (0-10)</label>
+                        <input
                           type="number"
                           step="0.1"
                           min="0"
                           max="10"
                           value={searchFilters.rating}
                           onChange={(e) => setSearchFilters({...searchFilters, rating: e.target.value})}
-                          placeholder="8.0"
-                          className="rounded-xl border border-slate-200 focus:border-blue-500"
+                          placeholder="e.g. 8.0"
+                          className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
                         />
                       </div>
+
                       <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-2">Sort By</label>
+                        <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">Sort Results By</label>
                         <select
                           value={searchFilters.sortBy}
                           onChange={(e) => setSearchFilters({...searchFilters, sortBy: e.target.value})}
-                          className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+                          className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all cursor-pointer"
                         >
-                          <option value="relevance">Relevance</option>
-                          <option value="rating">Rating</option>
-                          <option value="year">Year</option>
-                          <option value="title">Title</option>
-                          <option value="popularity">Popularity</option>
+                          <option value="relevance">🔍 Relevance</option>
+                          <option value="rating">⭐ Star Rating</option>
+                          <option value="year">🗓️ Release Year</option>
+                          <option value="title">🔤 Alphabetical</option>
+                          <option value="popularity">🔥 Popularity</option>
                         </select>
                       </div>
                     </div>
-                    <div className="flex gap-3 mt-6">
-                      <Button
+
+                    <div className="flex gap-2 pt-2">
+                      <button
                         onClick={handleClearFilters}
-                        variant="secondary"
-                        className="px-4 py-2 rounded-xl"
+                        className="px-4 py-2 border border-slate-200 hover:bg-slate-100 text-slate-600 rounded-xl text-xs font-semibold transition-all cursor-pointer"
                       >
                         <i className="ri-delete-bin-line mr-1"></i> Clear Filters
-                      </Button>
-                      <Button
+                      </button>
+                      <button
                         onClick={handleApplyFilters}
                         disabled={isSearching}
-                        className="px-4 py-2 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl"
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer"
                       >
-                        <i className="ri-search-line mr-1"></i> Apply Filters
-                      </Button>
+                        <i className="ri-filter-2-line mr-1"></i> Apply Filter Criteria
+                      </button>
                     </div>
                   </motion.div>
                 )}
               </AnimatePresence>
             </motion.div>
+          )}
 
-            {/* Import Settings */}
+          {/* Import Settings Panel */}
+          {activeTab !== 'debug' && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              transition={{ delay: 0.6 }}
-              className="mt-8"
+              transition={{ delay: 0.4 }}
+              className="mt-6 border-t border-slate-100 pt-6"
             >
-              <div className="bg-gradient-to-r from-green-50 to-blue-50 rounded-2xl p-6 border border-slate-200">
-                <h3 className="text-xl font-semibold mb-4 text-slate-800"><i className="ri-settings-4-line mr-2"></i>Import Settings</h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="bg-slate-50/50 rounded-2xl p-5 border border-slate-100">
+                <h3 className="text-xs font-bold text-slate-800 flex items-center gap-2 mb-4">
+                  <span className="w-1.5 h-3 bg-indigo-500 rounded-full"></span>
+                  Import Configuration Settings
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-2">Batch Size</label>
-                    <Input
+                    <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">Batch Processing Size</label>
+                    <input
                       type="number"
                       min="1"
                       max="20"
                       value={batchSize}
                       onChange={(e) => setBatchSize(parseInt(e.target.value) || 5)}
-                      className="rounded-xl border border-slate-200 focus:border-blue-500"
+                      className="w-full px-3.5 py-2 bg-white border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
                     />
                   </div>
+
+                  {/* Toggle switches for settings */}
                   <div className="flex items-center">
-                    <label className="flex items-center cursor-pointer">
+                    <label className="relative inline-flex items-center cursor-pointer select-none">
                       <input
                         type="checkbox"
                         checked={autoImport}
                         onChange={(e) => setAutoImport(e.target.checked)}
-                        className="w-5 h-5 text-green-600 bg-slate-100 border-slate-300 rounded focus:ring-green-500 focus:ring-2"
+                        className="sr-only peer"
                       />
-                      <span className="ml-3 text-sm font-medium text-slate-700">Auto Import</span>
+                      <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                      <span className="ml-3 text-sm font-bold text-slate-600">Background Auto-Import</span>
                     </label>
                   </div>
+
                   <div className="flex items-center">
-                    <label className="flex items-center cursor-pointer">
+                    <label className="relative inline-flex items-center cursor-pointer select-none">
                       <input
                         type="checkbox"
                         checked={showPreview}
                         onChange={(e) => setShowPreview(e.target.checked)}
-                        className="w-5 h-5 text-blue-600 bg-slate-100 border-slate-300 rounded focus:ring-blue-500 focus:ring-2"
+                        className="sr-only peer"
                       />
-                      <span className="ml-3 text-sm font-medium text-slate-700">Show Preview</span>
+                      <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                      <span className="ml-3 text-sm font-bold text-slate-600">Show Storyline Description</span>
                     </label>
                   </div>
                 </div>
               </div>
             </motion.div>
+          )}
 
-            {/* Import Progress */}
-            <AnimatePresence>
-              {importProgress && (
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.95 }}
-                  className="mt-8"
-                >
-                  <div className="bg-gradient-to-r from-blue-50 to-slate-50 rounded-2xl p-6 border border-slate-200">
-                    <h3 className="text-xl font-semibold mb-4 text-slate-800"><i className="ri-bar-chart-box-line mr-2"></i>Import Progress</h3>
-                    <div className="space-y-4">
-                      <div className="flex justify-between text-sm font-medium">
-                        <span>Progress: {importProgress.completed}/{importProgress.total}</span>
-                        <span>{importProgress.percentage}%</span>
-                      </div>
-                      <div className="w-full bg-slate-200 rounded-full h-3 overflow-hidden">
-                        <motion.div 
-                          className="bg-gradient-to-r from-blue-500 to-purple-500 h-3 rounded-full"
-                          initial={{ width: 0 }}
-                          animate={{ width: `${importProgress.percentage}%` }}
-                          transition={{ duration: 0.5 }}
-                        />
-                      </div>
-                      <div className="text-sm text-slate-600">
-                        Currently importing: <span className="font-semibold text-blue-600">{importProgress.current}</span>
-                      </div>
-                    </div>
+          {/* Import Progress Bar */}
+          <AnimatePresence>
+            {importProgress && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.98 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.98 }}
+                className="mt-6"
+              >
+                <div className="bg-gradient-to-r from-blue-50/50 to-indigo-50/50 rounded-2xl p-5 border border-blue-100 shadow-sm space-y-3">
+                  <div className="flex justify-between items-center text-xs font-bold text-slate-700">
+                    <span className="flex items-center gap-1.5">
+                      <div className="w-2.5 h-2.5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                      <span>Import Progress: {importProgress.completed} of {importProgress.total} Complete</span>
+                    </span>
+                    <span className="text-blue-600 text-sm">{importProgress.percentage}%</span>
                   </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* Scraping Status Banner */}
-            <AnimatePresence>
-              {scrapingAnimeId && message && (
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.95 }}
-                  className="mt-6"
-                >
-                  <div className={`rounded-2xl p-5 border ${
-                    message.startsWith('✅')
-                      ? 'bg-gradient-to-r from-green-50 to-emerald-50 border-green-200'
-                      : message.startsWith('⚠️')
-                      ? 'bg-gradient-to-r from-amber-50 to-yellow-50 border-amber-200'
-                      : 'bg-gradient-to-r from-teal-50 to-cyan-50 border-teal-200'
-                  }`}>
-                    <p className="font-medium text-slate-800">{message}</p>
+                  <div className="w-full bg-slate-200/80 rounded-full h-3 overflow-hidden border border-slate-100">
+                    <motion.div 
+                      className="bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 h-full rounded-full"
+                      initial={{ width: 0 }}
+                      animate={{ width: `${importProgress.percentage}%` }}
+                      transition={{ duration: 0.3 }}
+                    />
                   </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* Import Results */}
-            <AnimatePresence>
-              {importResult && (
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -20 }}
-                  className="mt-8"
-                >
-                  <div className="bg-gradient-to-r from-green-50 to-blue-50 rounded-2xl p-6 border border-slate-200">
-                    <h3 className="text-xl font-semibold mb-4 text-slate-800"><i className="ri-line-chart-line mr-2"></i>Import Results</h3>
-                    <div className="grid grid-cols-3 gap-4 mb-4">
-                      <div className="text-center p-4 bg-green-100 rounded-xl">
-                        <div className="text-2xl font-bold text-green-600">{importResult.imported}</div>
-                        <div className="text-sm text-green-700">Imported</div>
-                      </div>
-                      <div className="text-center p-4 bg-yellow-100 rounded-xl">
-                        <div className="text-2xl font-bold text-yellow-600">{importResult.skipped}</div>
-                        <div className="text-sm text-yellow-700">Skipped</div>
-                      </div>
-                      <div className="text-center p-4 bg-red-100 rounded-xl">
-                        <div className="text-2xl font-bold text-red-600">{importResult.errors.length}</div>
-                        <div className="text-sm text-red-700">Errors</div>
-                      </div>
-                    </div>
-                    
-                    {importResult.duplicates.length > 0 && (
-                      <div className="mb-4">
-                        <p className="text-sm font-medium text-slate-700 mb-2">Duplicates found:</p>
-                        <div className="flex flex-wrap gap-2">
-                          {importResult.duplicates.map((title, index) => (
-                            <span key={index} className="px-3 py-1 bg-yellow-100 text-yellow-800 rounded-full text-sm">
-                              {title}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    
-                    {importResult.errors.length > 0 && (
-                      <div>
-                        <p className="text-sm font-medium text-slate-700 mb-2">Errors:</p>
-                        <div className="space-y-1">
-                          {importResult.errors.map((error, index) => (
-                            <div key={index} className="text-sm text-red-600 bg-red-50 p-2 rounded-lg">
-                              • {error}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        </motion.div>
-
-        {/* Search Results */}
-        <AnimatePresence>
-          {searchResults.length > 0 && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.4 }}
-              className="mt-8"
-            >
-              <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg border border-white/20 overflow-hidden">
-                <div className="bg-gradient-to-r from-blue-600 to-blue-700 p-6">
-                  <div className="flex justify-between items-center">
-                    <h3 className="text-2xl font-bold text-white">
-                      <i className="ri-list-check mr-2"></i>Search Results ({searchResults.length})
-                    </h3>
-                    <div className="flex gap-3">
-                      <Button
-                        onClick={handleSelectAll}
-                        variant="secondary"
-                        className="bg-white/20 hover:bg-white/30 text-white border-white/30"
-                      >
-                        {selectedAnime.length === searchResults.length ? <><i className="ri-close-line mr-1"></i> Deselect All</> : <><i className="ri-check-double-line mr-1"></i> Select All</>}
-                      </Button>
-                      <Button
-                        onClick={() => setShowPreview(!showPreview)}
-                        variant="secondary"
-                        className="bg-white/20 hover:bg-white/30 text-white border-white/30"
-                      >
-                        <i className="ri-eye-line mr-1"></i> {showPreview ? 'Hide Preview' : 'Show Preview'}
-                      </Button>
-                      {selectedAnime.length > 0 && (
-                        <Button
-                          onClick={handleBulkImport}
-                          disabled={isImporting}
-                          variant="secondary"
-                          className="bg-white/20 hover:bg-white/30 text-white border-white/30 font-semibold px-6 py-2 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:scale-105"
-                        >
-                          {isImporting ? (
-                            <div className="flex items-center">
-                              <SparkleLoadingSpinner size="sm" />
-                              <span className="ml-2">Importing...</span>
-                            </div>
-                          ) : (
-                            <><i className="ri-download-line mr-1"></i> Import Selected ({selectedAnime.length})</>
-                          )}
-                        </Button>
-                      )}
-                    </div>
+                  <div className="text-xs text-slate-500 flex gap-1">
+                    <span>Currently Processing:</span>
+                    <span className="font-bold text-indigo-600 truncate">{importProgress.current}</span>
                   </div>
                 </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-                <div className="p-8">
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                    {searchResults.map((anime, index) => {
-                      const isSelected = selectedAnime.some(selected => 
-                        selected.title === anime.title && selected.source === anime.source
-                      )
-                      
-                      return (
-                        <motion.div
-                          key={`${anime.title}-${anime.source}-${index}`}
-                          initial={{ opacity: 0, y: 20 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: index * 0.1 }}
-                          className="group"
-                        >
-                          <div className={`relative bg-white rounded-2xl shadow-lg hover:shadow-2xl transition-all duration-300 transform hover:scale-105 border-2 ${
-                            isSelected ? 'border-blue-500 shadow-blue-200' : 'border-slate-200 hover:border-blue-300'
-                          } overflow-hidden`}>
-                            {anime.poster_url && (
-                              <div className="relative h-48 overflow-hidden">
-                                <img
-                                  src={anime.poster_url}
-                                  alt={anime.title}
-                                  className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
-                                  width={300}
-                                  height={192}
-                                  loading="lazy"
-                                  decoding="async"
-                                  onError={(e) => {
-                                    e.currentTarget.style.display = 'none'
-                                  }}
-                                />
-                                <div className="absolute top-2 right-2 bg-black/50 text-white px-2 py-1 rounded-lg text-xs">
-                                  {anime.source.toUpperCase()}
-                                </div>
-                                {isSelected && (
-                                  <div className="absolute top-2 left-2 bg-blue-500 text-white p-2 rounded-full">
-                                    <i className="ri-check-line"></i>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                            
-                            <div className="p-4">
-                              <h4 className="font-bold text-lg mb-2 line-clamp-2 group-hover:text-blue-600 transition-colors">
-                                {anime.title}
-                              </h4>
-                              {anime.title_japanese && (
-                                <p className="text-sm text-slate-500 mb-2 line-clamp-1">{anime.title_japanese}</p>
-                              )}
-                              <div className="flex items-center justify-between text-sm text-slate-600 mb-3">
-                                <div className="flex items-center space-x-2">
-                                  {anime.year && <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded-full">{anime.year}</span>}
-                                  {anime.type && <span className="bg-green-100 text-green-800 px-2 py-1 rounded-full">{anime.type}</span>}
-                                </div>
-                                {anime.rating && (
-                                  <div className="flex items-center text-yellow-600">
-                                    <i className="ri-star-fill text-xs"></i>
-                                    <span className="font-semibold ml-1">{anime.rating}/10</span>
-                                  </div>
-                                )}
-                              </div>
-                              {anime.genres && anime.genres.length > 0 && (
-                                <div className="flex flex-wrap gap-1 mb-4">
-                                  {anime.genres.slice(0, 3).map((genre, idx) => (
-                                    <span key={idx} className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full">
-                                      {genre}
-                                    </span>
-                                  ))}
-                                </div>
-                              )}
+          {/* Scraping Progress Status Banner */}
+          <AnimatePresence>
+            {scrapingAnimeId && message && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.98 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.98 }}
+                className="mt-6"
+              >
+                <div className={`rounded-2xl p-5 border shadow-sm ${
+                  message.startsWith('✅')
+                    ? 'bg-gradient-to-r from-green-50 to-emerald-50 border-green-200 text-emerald-800'
+                    : message.startsWith('⚠️')
+                      ? 'bg-gradient-to-r from-amber-50 to-yellow-50 border-amber-200 text-amber-800'
+                      : 'bg-gradient-to-r from-teal-50 to-cyan-50 border-teal-200 text-teal-800'
+                }`}>
+                  <p className="font-semibold text-sm flex items-center gap-2">
+                    <i className="ri-loader-3-line text-lg animate-spin shrink-0"></i>
+                    {message}
+                  </p>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-                              <div className="flex gap-2">
-                                <Button
-                                  onClick={() => handleSelectAnime(anime)}
-                                  className={`flex-1 px-3 py-2 rounded-xl font-medium transition-all ${
-                                    isSelected 
-                                      ? 'bg-blue-500 text-white hover:bg-blue-600' 
-                                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                                  }`}
-                                >
-                                  {isSelected ? <><i className="ri-check-line mr-1"></i> Selected</> : <><i className="ri-checkbox-blank-line mr-1"></i> Select</>}
-                                </Button>
-                                <Button
-                                  onClick={() => handleQuickImport(anime)}
-                                  disabled={isImporting}
-                                  className="px-3 py-2 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-xl font-medium transition-all transform hover:scale-105"
-                                  title="Import metadata + episode stubs only"
-                                >
-                                  <i className="ri-download-line"></i>
-                                </Button>
-                                <Button
-                                  onClick={() => handleImportAndScrape(anime)}
-                                  disabled={isImporting}
-                                  className="px-3 py-2 bg-gradient-to-r from-green-500 to-teal-500 hover:from-green-600 hover:to-teal-600 text-white rounded-xl font-medium transition-all transform hover:scale-105"
-                                  title="Import + auto-scrape all episodes"
-                                >
-                                  <i className="ri-rocket-line"></i>
-                                </Button>
-                              </div>
-
-                              {showPreview && anime.description && (
-                                <motion.div
-                                  initial={{ opacity: 0, height: 0 }}
-                                  animate={{ opacity: 1, height: 'auto' }}
-                                  className="mt-4 pt-4 border-t border-slate-200"
-                                >
-                                  <p className="text-xs text-slate-600 line-clamp-3">
-                                    {anime.description}
-                                  </p>
-                                </motion.div>
-                              )}
-                            </div>
-                          </div>
-                        </motion.div>
-                      )
-                    })}
+          {/* Import Final Results banner */}
+          <AnimatePresence>
+            {importResult && (
+              <motion.div
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -15 }}
+                className="mt-6"
+              >
+                <div className="bg-slate-50/50 rounded-2xl p-5 border border-slate-200 space-y-4">
+                  <h3 className="text-xs font-bold text-slate-800 flex items-center gap-2">
+                    <span className="w-1.5 h-3 bg-emerald-500 rounded-full"></span>
+                    Import Results Summary
+                  </h3>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="text-center p-3.5 bg-emerald-50 border border-emerald-100 rounded-xl">
+                      <div className="text-2xl font-extrabold text-emerald-600">{importResult.imported}</div>
+                      <div className="text-[11px] font-bold text-emerald-700 uppercase tracking-wider mt-0.5">Success</div>
+                    </div>
+                    <div className="text-center p-3.5 bg-amber-50 border border-amber-100 rounded-xl">
+                      <div className="text-2xl font-extrabold text-amber-600">{importResult.skipped}</div>
+                      <div className="text-[11px] font-bold text-amber-700 uppercase tracking-wider mt-0.5">Skipped</div>
+                    </div>
+                    <div className="text-center p-3.5 bg-rose-50 border border-rose-100 rounded-xl">
+                      <div className="text-2xl font-extrabold text-rose-600">{importResult.errors.length}</div>
+                      <div className="text-[11px] font-bold text-rose-700 uppercase tracking-wider mt-0.5">Errors</div>
+                    </div>
                   </div>
-
-                  {canLoadMoreResults && resultMode && (
-                    <div className="mt-8 flex justify-center">
-                      <Button
-                        onClick={handleLoadMoreResults}
-                        disabled={isSearching}
-                        className="px-8 py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all duration-200"
-                      >
-                        {isSearching ? (
-                          <div className="flex items-center">
-                            <SparkleLoadingSpinner size="sm" />
-                            <span className="ml-2">Loading more...</span>
+                  
+                  {importResult.duplicates.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Duplicates detected (skipped):</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {importResult.duplicates.map((title, index) => (
+                          <span key={index} className="px-2.5 py-1 bg-amber-50 text-amber-700 rounded-full text-xs font-semibold border border-amber-200">
+                            {title}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {importResult.errors.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Encountered errors:</p>
+                      <div className="space-y-1.5">
+                        {importResult.errors.map((error, index) => (
+                          <div key={index} className="text-xs text-rose-700 bg-rose-50 p-2.5 rounded-lg border border-rose-100 font-semibold flex gap-2">
+                            <span>•</span>
+                            <span>{error}</span>
                           </div>
-                        ) : (
-                          <><i className="ri-more-line mr-1"></i> View More</>
-                        )}
-                      </Button>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      </motion.div>
 
-        {/* Import History */}
-        <AnimatePresence>
-          {importHistory.length > 0 && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.8 }}
-              className="mt-8"
-            >
-              <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg border border-white/20 overflow-hidden">
-                <div className="bg-gradient-to-r from-slate-600 to-slate-800 p-6">
-                  <h3 className="text-2xl font-bold text-white"><i className="ri-history-line mr-2"></i>Recent Import History</h3>
+      {/* Grid: Search results */}
+      <AnimatePresence>
+        {searchResults.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+            className="bg-white/80 backdrop-blur-md rounded-2xl shadow-xl border border-slate-100 overflow-hidden"
+          >
+            {/* Header control toolbar */}
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-5 border-b border-indigo-700/20 flex flex-col sm:flex-row justify-between items-center gap-4">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2 select-none">
+                <i className="ri-list-check-2"></i>
+                Discovered Catalog Results ({searchResults.length})
+              </h3>
+              <div className="flex gap-2 flex-wrap">
+                <button
+                  onClick={handleSelectAll}
+                  className="px-4 py-2 bg-white/20 hover:bg-white/30 text-white border border-white/10 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1"
+                >
+                  <i className="ri-check-double-line text-sm"></i>
+                  {selectedAnime.length === searchResults.length ? 'Deselect All' : 'Select All'}
+                </button>
+                
+                {selectedAnime.length > 0 && (
+                  <button
+                    onClick={handleBulkImport}
+                    disabled={isImporting}
+                    className="px-5 py-2 bg-white text-blue-600 hover:bg-blue-50 border border-white rounded-xl text-xs font-extrabold shadow-md hover:shadow-lg transition-all flex items-center gap-1 disabled:opacity-50"
+                  >
+                    {isImporting ? (
+                      <>
+                        <div className="w-3.5 h-3.5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                        <span>Importing</span>
+                      </>
+                    ) : (
+                      <>
+                        <i className="ri-download-line text-sm"></i>
+                        <span>Import Selection ({selectedAnime.length})</span>
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Results Grid Cards */}
+            <div className="p-6 md:p-8">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                {searchResults.map((anime, index) => {
+                  const isSelected = selectedAnime.some(selected => 
+                    selected.title === anime.title && selected.source === anime.source
+                  );
+                  
+                  return (
+                    <motion.div
+                      key={`${anime.title}-${anime.source}-${index}`}
+                      initial={{ opacity: 0, y: 15 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: index * 0.05 }}
+                      className="group"
+                    >
+                      <div className={`relative bg-white rounded-2xl shadow-md hover:shadow-xl transition-all duration-300 transform hover:scale-[1.03] border-2 overflow-hidden flex flex-col h-full ${
+                        isSelected ? 'border-blue-500 shadow-blue-100 ring-2 ring-blue-500/10' : 'border-slate-200/60 hover:border-blue-400'
+                      }`}>
+                        {/* Poster visual */}
+                        {anime.poster_url && (
+                          <div className="relative h-48 bg-slate-900 overflow-hidden">
+                            <img
+                              src={anime.poster_url}
+                              alt={anime.title}
+                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 opacity-90 group-hover:opacity-100"
+                              width={300}
+                              height={192}
+                              loading="lazy"
+                              decoding="async"
+                              onError={(e) => {
+                                e.currentTarget.style.display = 'none';
+                              }}
+                            />
+                            {/* Accent source badge */}
+                            <div className="absolute top-2.5 right-2.5 bg-black/60 backdrop-blur-md text-white px-2 py-0.5 rounded-lg text-[10px] font-bold tracking-widest uppercase border border-white/5">
+                              {anime.source}
+                            </div>
+                            
+                            {/* Selection check box toggle */}
+                            <button
+                              onClick={() => handleSelectAnime(anime)}
+                              className={`absolute top-2.5 left-2.5 w-7 h-7 rounded-full flex items-center justify-center border transition-all cursor-pointer ${
+                                isSelected 
+                                  ? 'bg-blue-500 border-blue-400 text-white shadow-md' 
+                                  : 'bg-black/40 hover:bg-black/60 border-white/30 text-transparent hover:text-white'
+                              }`}
+                            >
+                              <i className="ri-check-line text-sm font-bold"></i>
+                            </button>
+                          </div>
+                        )}
+                        
+                        {/* Card metadata details */}
+                        <div className="p-4 flex-1 flex flex-col justify-between space-y-3">
+                          <div className="space-y-1">
+                            <h4 className="font-extrabold text-sm text-slate-800 line-clamp-2 leading-snug group-hover:text-blue-600 transition-colors cursor-pointer" title={anime.title}>
+                              {anime.title}
+                            </h4>
+                            {anime.title_japanese && (
+                              <p className="text-[11px] font-semibold text-slate-400 line-clamp-1 italic">{anime.title_japanese}</p>
+                            )}
+                          </div>
+
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between text-[11px] text-slate-500 font-bold border-b border-slate-100 pb-2">
+                              <div className="flex items-center gap-1">
+                                {anime.year && <span className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded-md border border-blue-100">{anime.year}</span>}
+                                {anime.type && <span className="bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-md border border-emerald-100 uppercase">{anime.type}</span>}
+                              </div>
+                              {anime.rating && (
+                                <div className="flex items-center text-yellow-600 gap-0.5">
+                                  <i className="ri-star-fill text-xs"></i>
+                                  <span>{anime.rating.toFixed(1)}/10</span>
+                                </div>
+                              )}
+                            </div>
+
+                            {anime.genres && anime.genres.length > 0 && (
+                              <div className="flex flex-wrap gap-1">
+                                {anime.genres.slice(0, 3).map((genre, idx) => (
+                                  <span key={idx} className="text-[9px] font-extrabold bg-slate-50 text-slate-500 px-2 py-0.5 rounded-md border border-slate-150">
+                                    {genre}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Quick import control action bar */}
+                          <div className="flex gap-1.5 pt-2">
+                            <button
+                              onClick={() => handleSelectAnime(anime)}
+                              className={`flex-1 px-2 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center justify-center gap-1 ${
+                                isSelected 
+                                  ? 'bg-blue-50 border-blue-200 text-blue-600' 
+                                  : 'bg-slate-50 border-slate-200 hover:bg-slate-100 text-slate-600 hover:text-slate-800'
+                              }`}
+                            >
+                              <i className={`ri-${isSelected ? 'checkbox-circle' : 'add-circle'}-line text-sm`}></i>
+                              <span>{isSelected ? 'Selected' : 'Select'}</span>
+                            </button>
+                            <button
+                              onClick={() => handleQuickImport(anime)}
+                              disabled={isImporting}
+                              className="w-10 h-8 bg-purple-500 hover:bg-purple-600 disabled:opacity-50 text-white rounded-xl flex items-center justify-center transition-all cursor-pointer shadow-sm hover:shadow-md"
+                              title="Quick Import: Metadata & Stub episodes only"
+                            >
+                              <i className="ri-download-line text-sm font-bold"></i>
+                            </button>
+                            <button
+                              onClick={() => handleImportAndScrape(anime)}
+                              disabled={isImporting}
+                              className="w-10 h-8 bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-600 hover:to-emerald-600 disabled:opacity-50 text-white rounded-xl flex items-center justify-center transition-all cursor-pointer shadow-sm hover:shadow-md"
+                              title="Hyper Scrape: Import metadata + instantly scrape live video streams"
+                            >
+                              <i className="ri-rocket-line text-sm font-bold animate-pulse"></i>
+                            </button>
+                          </div>
+
+                          {/* Preview Storyline block */}
+                          {showPreview && anime.description && (
+                            <motion.div
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: 'auto' }}
+                              className="mt-2 pt-3 border-t border-slate-100"
+                            >
+                              <p className="text-[10px] text-slate-500 leading-normal line-clamp-3 italic">
+                                {anime.description}
+                              </p>
+                            </motion.div>
+                          )}
+                        </div>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </div>
+
+              {/* Load More results toolbar */}
+              {canLoadMoreResults && resultMode && (
+                <div className="mt-8 flex justify-center">
+                  <button
+                    onClick={handleLoadMoreResults}
+                    disabled={isSearching}
+                    className="px-8 py-3 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white rounded-xl text-sm font-bold shadow-lg hover:shadow-xl transition-all cursor-pointer flex items-center gap-1.5 select-none"
+                  >
+                    {isSearching ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        <span>Loading Data Feed</span>
+                      </>
+                    ) : (
+                      <>
+                        <i className="ri-more-line"></i>
+                        <span>Load Additional Catalog Items</span>
+                      </>
+                    )}
+                  </button>
                 </div>
-                <div className="p-8">
-                  <div className="space-y-4">
-                    {importHistory.slice(0, 5).map((item, index) => (
-                      <motion.div
-                        key={item.id}
-                        initial={{ opacity: 0, x: -20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: index * 0.1 }}
-                        className="flex justify-between items-center p-4 bg-gradient-to-r from-slate-50 to-blue-50 rounded-2xl border border-slate-200 hover:shadow-lg transition-all"
-                      >
-                        <div>
-                          <p className="font-semibold text-slate-800">{item.query}</p>
-                          <p className="text-sm text-slate-600">
-                            {new Date(item.timestamp).toLocaleString()} • {item.source.toUpperCase()}
-                          </p>
-                        </div>
-                        <div className="flex gap-4 text-sm">
-                          <span className="flex items-center text-green-600">
-                            <span className="w-2 h-2 bg-green-500 rounded-full mr-2"></span>
-                            <i className="ri-check-line mr-1"></i> {item.result.imported}
-                          </span>
-                          <span className="flex items-center text-yellow-600">
-                            <span className="w-2 h-2 bg-yellow-500 rounded-full mr-2"></span>
-                            <i className="ri-alert-line mr-1"></i> {item.result.skipped}
-                          </span>
-                          <span className="flex items-center text-red-600">
-                            <span className="w-2 h-2 bg-red-500 rounded-full mr-2"></span>
-                            <i className="ri-close-line mr-1"></i> {item.result.errors.length}
-                          </span>
-                        </div>
-                      </motion.div>
-                    ))}
-                  </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* History Log cards (Collapsible) */}
+      <AnimatePresence>
+        {importHistory.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+            className="mt-6"
+          >
+            <div className="bg-white/80 backdrop-blur-md rounded-2xl shadow-xl border border-slate-100 overflow-hidden">
+              <div className="bg-gradient-to-r from-slate-700 to-slate-800 p-5 border-b border-slate-600/10">
+                <h3 className="text-base font-bold text-white flex items-center gap-2 select-none">
+                  <i className="ri-history-line"></i>
+                  Recent Import Logs
+                </h3>
+              </div>
+              <div className="p-6">
+                <div className="space-y-3">
+                  {importHistory.slice(0, 5).map((item, index) => (
+                    <motion.div
+                      key={item.id}
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: index * 0.05 }}
+                      className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 p-4 bg-slate-50/50 hover:bg-slate-50 border border-slate-250 hover:border-slate-300 rounded-xl hover:shadow-sm transition-all"
+                    >
+                      <div className="space-y-0.5">
+                        <p className="font-extrabold text-sm text-slate-700 line-clamp-1">{item.query}</p>
+                        <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">
+                          {new Date(item.timestamp).toLocaleString()} • Source: {item.source}
+                        </p>
+                      </div>
+                      
+                      {/* Metric logs */}
+                      <div className="flex gap-4 items-center shrink-0 border-t sm:border-t-0 pt-2.5 sm:pt-0">
+                        <span className="flex items-center text-xs font-bold text-green-600 bg-green-50 border border-green-200 px-2 py-0.5 rounded-md">
+                          <i className="ri-check-line mr-0.5"></i> {item.result.imported} Success
+                        </span>
+                        <span className="flex items-center text-xs font-bold text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md">
+                          <i className="ri-alert-line mr-0.5"></i> {item.result.skipped} Skip
+                        </span>
+                        <span className="flex items-center text-xs font-bold text-rose-600 bg-rose-50 border border-rose-250 px-2 py-0.5 rounded-md">
+                          <i className="ri-close-line mr-0.5"></i> {item.result.errors.length} Fail
+                        </span>
+                      </div>
+                    </motion.div>
+                  ))}
                 </div>
               </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
-  )
-}
+  );
+};

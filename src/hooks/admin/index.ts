@@ -19,65 +19,22 @@ const adminCache = {
 const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes
 const ADMIN_CACHE_DURATION = 10 * 60 * 1000 // 10 minutes for admin status
 
-// Module-level: always invalidate admin cache on auth change,
-// even if no useAdmin() hook is currently mounted.
-onAuthUserChanged(() => {
-  adminCache.adminStatus = null
-  adminCache.lastFetch.adminStatus = 0
-})
+import { useCurrentUser, useAuthLoading } from '../auth/selectors'
+import { useAuthContext } from '../../contexts/auth/AuthContext'
 
 export function useAdmin() {
-  const [isAdmin, setIsAdmin] = useState<boolean>(adminCache.adminStatus || false)
-  const [loading, setLoading] = useState(adminCache.adminStatus === null)
-  const [error, setError] = useState<string | null>(null)
+  const user = useCurrentUser()
+  const authLoading = useAuthLoading()
+  const { isInitialized } = useAuthContext()
 
-  const checkAdminStatus = useCallback(async (forceRefresh = false) => {
-    const now = Date.now()
-    const isExpired = now - adminCache.lastFetch.adminStatus > ADMIN_CACHE_DURATION
-    
-    // Use cache if available and not expired, unless force refresh
-    if (adminCache.adminStatus !== null && !isExpired && !forceRefresh) {
-      setIsAdmin(adminCache.adminStatus)
-      setLoading(false)
-      return
-    }
-
-    try {
-      setLoading(true)
-      setError(null)
-      const adminStatus = await AdminService.isAdmin()
-      
-      // Update cache
-      adminCache.adminStatus = adminStatus
-      adminCache.lastFetch.adminStatus = now
-      
-      setIsAdmin(adminStatus)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to check admin status')
-      setIsAdmin(false)
-      adminCache.adminStatus = false
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    checkAdminStatus()
-
-    // Invalidate admin cache when the auth user changes
-    const unsub = onAuthUserChanged(() => {
-      adminCache.adminStatus = null
-      adminCache.lastFetch.adminStatus = 0
-      checkAdminStatus(true)
-    })
-    return unsub
-  }, []) // Remove checkAdminStatus dependency to prevent re-running
+  const isAdmin = user?.role === 'admin'
+  const loading = !isInitialized || authLoading
 
   return {
     isAdmin,
     loading,
-    error,
-    refetch: () => checkAdminStatus(true)
+    error: null,
+    refetch: async () => {} // driven automatically by auth context
   }
 }
 

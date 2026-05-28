@@ -1,4 +1,4 @@
-import { supabase, isSupabaseConfigured } from '../../lib/database/supabase'
+import { supabase } from '../../lib/database/supabase'
 import type { Tables } from '../../lib/database/supabase'
 
 type Anime = Tables<'anime'>
@@ -8,6 +8,8 @@ const API_BASE = import.meta.env.DEV ? '' : (import.meta.env.VITE_BACKEND_URL ||
 
 export interface CreateAnimeData {
   title: string
+  title_english?: string
+  title_romaji?: string
   title_japanese?: string
   description?: string
   poster_url?: string
@@ -15,13 +17,15 @@ export interface CreateAnimeData {
   trailer_url?: string
   rating?: number
   year?: number
-  status?: 'ongoing' | 'completed' | 'upcoming'
-  type?: 'tv' | 'movie' | 'ova' | 'special'
+  status?: 'ongoing' | 'completed' | 'upcoming' | 'pending' | 'draft' | 'published'
+  type?: 'tv' | 'movie' | 'ova' | 'ona' | 'special'
   genres?: string[]
   studios?: string[]
   total_episodes?: number
   duration?: number
   age_rating?: 'G' | 'PG' | 'PG-13' | 'R' | '18+'
+  mal_id?: number
+  nine_anime_slug?: string
 }
 
 export interface CreateEpisodeData {
@@ -34,6 +38,7 @@ export interface CreateEpisodeData {
   duration?: number
   is_premium?: boolean
   air_date?: string
+  video_servers?: Array<{ name: string; url: string; lang?: string }>
 }
 
 export type UpdateAnimeData = Partial<{ [K in keyof CreateAnimeData]: CreateAnimeData[K] | null }>

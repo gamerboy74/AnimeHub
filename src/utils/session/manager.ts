@@ -35,9 +35,10 @@ class SessionManager {
     
     // Add a timeout to prevent infinite loading
     setTimeout(() => {
-      if (this.state.loading && this.state.isInitialized) {
+      if (this.state.loading) {
         console.warn('SessionManager: Loading timeout reached, forcing loading to false')
         this.state.loading = false
+        this.state.isInitialized = true
         this.notifyListeners()
       }
     }, 10000) // 10 second timeout

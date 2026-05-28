@@ -766,11 +766,16 @@ export class AdminService {
     status?: string
     genre?: string
     type?: string
+    sortBy?: string
+    sortOrder?: 'asc' | 'desc'
   }): Promise<{ anime: any[], total: number }> {
     try {
       const offset = (page - 1) * limit
-
       const searchTerm = filters?.search?.trim()
+
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Request timeout')), 8000)
+      )
 
       let countQuery = supabase
         .from('anime')
@@ -781,7 +786,11 @@ export class AdminService {
       }
 
       if (filters?.status && filters.status !== 'all') {
-        countQuery = countQuery.eq('status', filters.status)
+        if (filters.status === 'published') {
+          countQuery = countQuery.in('status', ['published', 'ongoing', 'completed', 'upcoming'])
+        } else {
+          countQuery = countQuery.eq('status', filters.status)
+        }
       }
 
       if (filters?.type && filters.type !== 'all') {
@@ -792,7 +801,10 @@ export class AdminService {
         countQuery = countQuery.contains('genres', [filters.genre])
       }
 
-      const { count, error: countError } = await countQuery
+      const { count, error: countError } = await Promise.race([
+        countQuery,
+        timeoutPromise
+      ]) as any
 
       if (countError) throw countError
 
@@ -803,14 +815,21 @@ export class AdminService {
           episodes:episodes(id, title, episode_number, duration, video_url, created_at),
           reviews:reviews(id, rating, created_at)
         `)
-        .order('created_at', { ascending: false })
+
+      const sortBy = filters?.sortBy || 'created_at'
+      const sortOrder = filters?.sortOrder || 'desc'
+      dataQuery = dataQuery.order(sortBy, { ascending: sortOrder === 'asc' })
 
       if (searchTerm) {
         dataQuery = dataQuery.or(`title.ilike.%${searchTerm}%,title_japanese.ilike.%${searchTerm}%,description.ilike.%${searchTerm}%`)
       }
 
       if (filters?.status && filters.status !== 'all') {
-        dataQuery = dataQuery.eq('status', filters.status)
+        if (filters.status === 'published') {
+          dataQuery = dataQuery.in('status', ['published', 'ongoing', 'completed', 'upcoming'])
+        } else {
+          dataQuery = dataQuery.eq('status', filters.status)
+        }
       }
 
       if (filters?.type && filters.type !== 'all') {
@@ -821,38 +840,74 @@ export class AdminService {
         dataQuery = dataQuery.contains('genres', [filters.genre])
       }
 
-      const { data: anime, error } = await dataQuery.range(offset, offset + limit - 1)
+      const { data: anime, error } = await Promise.race([
+        dataQuery.range(offset, offset + limit - 1),
+        timeoutPromise
+      ]) as any
 
       if (error) throw error
 
-      // Calculate additional stats for each anime
-      const enrichedAnime = await Promise.all(anime?.map(async (item) => {
-        // Get unique viewers count (users who have watched any episode of this anime)
-        const episodeIds = item.episodes?.map((ep: any) => ep.id) || [];
-        const { data: viewers } = episodeIds.length > 0
-          ? await supabase
-            .from('user_watch_progress_detailed')
-            .select('user_id')
-            .in('episode_id', episodeIds)
-            .not('user_id', 'is', null)
-          : { data: [] };
+      // Bulk calculate additional stats for all fetched anime in just 2 optimized queries
+      const animeIds = anime?.map((item: any) => item.id) || []
+      const allEpisodeIds = anime?.flatMap((item: any) => item.episodes?.map((ep: any) => ep.id) || []) || []
 
-        const uniqueViewers = new Set(viewers?.map((v: any) => v.user_id) || []).size
-
-        // Get content reports count for this anime
-        let reports = null;
+      // 1. Bulk query unique viewers in a single query
+      const viewersByEpisode: Record<string, string[]> = {}
+      if (allEpisodeIds.length > 0) {
         try {
-          const { data: reportsData } = await supabase
-            .from('content_reports')
-            .select('id')
-            .eq('content_id', item.id)
-            .eq('content_type', 'anime');
-          reports = reportsData;
-        } catch (error) {
-          // If content_reports table doesn't exist, just return empty array
-          console.warn('content_reports table not found, skipping reports count');
-          reports = [];
+          const { data: viewers } = await Promise.race([
+            supabase
+              .from('user_watch_progress_detailed')
+              .select('user_id, episode_id')
+              .in('episode_id', allEpisodeIds)
+              .not('user_id', 'is', null),
+            timeoutPromise
+          ]) as any
+
+          viewers?.forEach((v: any) => {
+            if (!viewersByEpisode[v.episode_id]) {
+              viewersByEpisode[v.episode_id] = []
+            }
+            viewersByEpisode[v.episode_id].push(v.user_id)
+          })
+        } catch (viewerErr) {
+          console.error('Error fetching watch progress bulk data:', viewerErr)
         }
+      }
+
+      // 2. Bulk query content reports in a single query
+      const reportsByAnime: Record<string, number> = {}
+      if (animeIds.length > 0) {
+        try {
+          const { data: reportsData } = await Promise.race([
+            supabase
+              .from('content_reports')
+              .select('id, content_id')
+              .in('content_id', animeIds)
+              .eq('content_type', 'anime'),
+            timeoutPromise
+          ]) as any
+
+          reportsData?.forEach((r: any) => {
+            reportsByAnime[r.content_id] = (reportsByAnime[r.content_id] || 0) + 1
+          })
+        } catch (error) {
+          console.warn('content_reports table not found, skipping reports count')
+        }
+      }
+
+      // 3. Map enrichments synchronously
+      const enrichedAnime = anime?.map((item: any) => {
+        const episodeIds = item.episodes?.map((ep: any) => ep.id) || []
+        const animeViewers = new Set<string>()
+        episodeIds.forEach((epId: string) => {
+          const epViewers = viewersByEpisode[epId]
+          if (epViewers) {
+            epViewers.forEach(uid => animeViewers.add(uid))
+          }
+        })
+
+        const reportsCount = reportsByAnime[item.id] || 0
 
         return {
           ...item,
@@ -861,10 +916,10 @@ export class AdminService {
             ? (item.reviews.reduce((sum: number, review: any) => sum + review.rating, 0) / item.reviews.length).toFixed(1)
             : 'N/A',
           total_reviews: item.reviews?.length || 0,
-          views: uniqueViewers,
-          reports: reports?.length || 0
+          views: animeViewers.size,
+          reports: reportsCount
         }
-      }) || [])
+      }) || []
 
       return {
         anime: enrichedAnime,
@@ -1072,7 +1127,7 @@ export class AdminService {
     try {
       const { data: episodes, error } = await supabase
         .from('episodes')
-        .select('id, episode_number, title, description, duration, thumbnail_url, video_url, created_at')
+        .select('id, episode_number, title, description, duration, thumbnail_url, video_url, created_at, is_premium, air_date, video_servers')
         .eq('anime_id', animeId)
         .order('episode_number', { ascending: true })
         .limit(50) // Reduced limit for faster queries

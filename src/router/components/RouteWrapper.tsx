@@ -16,9 +16,9 @@ interface RouteWrapperProps {
   path: string;
 }
 
-export function RouteWrapper({ children, path }: RouteWrapperProps) {
+export function RouteWrapper({ children }: RouteWrapperProps) {
   const location = useLocation();
-  const params = useParams<Record<string, string>>();
+  const params = useParams() as Record<string, string>;
   
   // Check route guards
   const guard = useRouteGuard(location.pathname, params);
@@ -73,11 +73,19 @@ export function RouteWrapper({ children, path }: RouteWrapperProps) {
     >
       <Suspense
         fallback={
-          <div className="min-h-screen bg-gradient-to-br from-green-50 via-yellow-50 to-pink-50 flex items-center justify-center">
-            <div className="text-center">
-              <SparkleLoadingSpinner size="xl" text="Loading page..." />
+          location.pathname.startsWith('/admin') ? (
+            <div className="h-[60vh] flex items-center justify-center w-full">
+              <div className="text-center">
+                <SparkleLoadingSpinner size="lg" text="Loading dashboard content..." />
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="min-h-screen bg-gradient-to-br from-green-50 via-yellow-50 to-pink-50 flex items-center justify-center">
+              <div className="text-center">
+                <SparkleLoadingSpinner size="xl" text="Loading page..." />
+              </div>
+            </div>
+          )
         }
       >
         {children}
