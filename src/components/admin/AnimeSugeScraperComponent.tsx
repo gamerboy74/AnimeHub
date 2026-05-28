@@ -1,14 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { useQueryClient } from '@tanstack/react-query';
-import { ReAnimeScraperService } from '../../services/scrapers/reanime';
+import { AnimeSugeScraperService } from '../../services/scrapers/animesuge';
 import { AdminAnimeService } from '../../services/admin/anime';
 import { AnimeImporterService } from '../../services/anime/importer';
 import Button from '../../components/base/Button';
 import Input from '../../components/base/Input';
 import { SparkleLoadingSpinner } from '../../components/base/LoadingSpinner';
 import { ScrapedEpisodesModal } from './ScrapedEpisodesModal';
-
 
 interface Anime {
   id: string;
@@ -37,11 +36,11 @@ interface BatchScrapeResult {
   };
 }
 
-interface ReAnimeScraperComponentProps {
+interface AnimeSugeScraperComponentProps {
   initialSelectedAnime?: Anime | null;
 }
 
-export const ReAnimeScraperComponent: React.FC<ReAnimeScraperComponentProps> = ({ initialSelectedAnime }) => {
+export const AnimeSugeScraperComponent: React.FC<AnimeSugeScraperComponentProps> = ({ initialSelectedAnime }) => {
   const queryClient = useQueryClient();
   const [isLoading, setIsLoading] = useState(false);
   const [animeList, setAnimeList] = useState<Anime[]>([]);
@@ -56,12 +55,13 @@ export const ReAnimeScraperComponent: React.FC<ReAnimeScraperComponentProps> = (
   const [success, setSuccess] = useState<string | null>(null);
   const [lang, setLang] = useState<'sub' | 'dub'>('sub');
   const [overwriteExisting, setOverwriteExisting] = useState(false);
-
+  
   // Scraped episodes modal state
   const [showScrapedEpisodes, setShowScrapedEpisodes] = useState(false);
   const [scrapedEpisodesData, setScrapedEpisodesData] = useState<any>(null);
   const [episodesAddedCount, setEpisodesAddedCount] = useState(0);
   const [currentScrapedEpisodes, setCurrentScrapedEpisodes] = useState<any[]>([]);
+  const [existingEpisodes, setExistingEpisodes] = useState<Set<number>>(new Set());
 
   // Progress tracking state
   const [progressMessages, setProgressMessages] = useState<string[]>([]);
@@ -87,7 +87,7 @@ export const ReAnimeScraperComponent: React.FC<ReAnimeScraperComponentProps> = (
 
   // Load anime list on component mount
   useEffect(() => {
-    console.log('🎯 ReAnimeScraperComponent mounted');
+    console.log('🎯 AnimeSugeScraperComponent mounted');
     loadAnimeList();
   }, []);
 
@@ -133,13 +133,37 @@ export const ReAnimeScraperComponent: React.FC<ReAnimeScraperComponentProps> = (
     setBatchResult(null);
     setCurrentScrapedEpisodes([]);
     setEpisodesAddedCount(0);
-
+    
     // Check existing episodes for this anime
     await checkExistingEpisodes(anime.id);
   };
 
-  const checkExistingEpisodes = async (_animeId: string) => {
-    // Stubbed since database state is directly managed in real-time by the backend.
+  const checkExistingEpisodes = async (animeId: string) => {
+    // Validate UUID format
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(animeId)) {
+      console.warn('Invalid anime ID format, skipping existing episodes check');
+      return;
+    }
+
+    try {
+      const API_BASE = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+      const response = await fetch(`${API_BASE}/api/anime/${animeId}/episodes`);
+      if (response.ok) {
+        const contentType = response.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          const data = await response.json();
+          const existingNumbers = new Set<number>(data.episodes?.map((ep: any) => ep.episode_number as number) || []);
+          setExistingEpisodes(existingNumbers);
+        } else {
+          console.warn('Response is not JSON, skipping existing episodes check');
+        }
+      } else {
+        console.warn(`Failed to fetch episodes: ${response.status}`);
+      }
+    } catch (error) {
+      console.error('Error checking existing episodes:', error);
+    }
   };
 
   const handleSingleScrape = async () => {
@@ -153,24 +177,58 @@ export const ReAnimeScraperComponent: React.FC<ReAnimeScraperComponentProps> = (
     setSuccess(null);
 
     try {
-      const result = await ReAnimeScraperService.scrapeAnimeEpisode(
-        selectedAnime.title,
+      const targetQuery = selectedAnime.title;
+      const result = await AnimeSugeScraperService.scrapeAnimeEpisode(
+        targetQuery,
         episodeNumber,
-        { lang, animeId: selectedAnime.id }
+        { lang, animeId: selectedAnime.id, overwrite: overwriteExisting }
       );
 
       setScrapeResult(result);
-
+      
       if (result.success) {
         // Refresh local database knowledge of existing episodes
         queryClient.invalidateQueries({ queryKey: ['admin-anime'] });
         checkExistingEpisodes(selectedAnime.id);
+        
+        // Expose sources directly in result list
+        const sources = result.episodeData?.sources;
+        if (sources) {
+          const scrapedEpisodes = sources.map((s: any) => ({
+            number: episodeNumber,
+            title: `Episode ${episodeNumber} (${s.label})`,
+            streamUrl: s.iframeUrl,
+            lang: s.lang || lang,
+            servers: sources.map((src: any) => ({
+              name: src.label,
+              url: src.iframeUrl,
+              lang: src.lang || lang
+            })),
+            embeddingProtected: false,
+            scrapedAt: new Date().toISOString(),
+            isExisting: existingEpisodes.has(episodeNumber)
+          }));
+          setCurrentScrapedEpisodes(scrapedEpisodes);
+        } else if (result.streamUrl) {
+          setCurrentScrapedEpisodes([{
+            number: episodeNumber,
+            title: `Episode ${episodeNumber}`,
+            streamUrl: result.streamUrl,
+            lang,
+            servers: [{ name: "AnimeSuge active", url: result.streamUrl, lang }],
+            embeddingProtected: false,
+            scrapedAt: new Date().toISOString(),
+            isExisting: existingEpisodes.has(episodeNumber)
+          }]);
+        }
 
         setSuccess(`Episode ${episodeNumber} scraped and saved successfully!`);
         setTimeout(() => setSuccess(null), 5000);
       } else {
-        setError(result.error || 'Scraping failed');
-        setTimeout(() => setError(null), 5000);
+        const errMsg = result.error || 'Scraping failed';
+        setError(errMsg);
+        // Keep error visible for 15s so user can read it
+        setTimeout(() => setError(null), 15000);
       }
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Unknown error occurred');
@@ -196,49 +254,125 @@ export const ReAnimeScraperComponent: React.FC<ReAnimeScraperComponentProps> = (
       episodeNumbers = [parseInt(episodeRange)];
     }
 
+    if (episodeNumbers.some(isNaN) || episodeNumbers.length === 0) {
+      setError('Please enter a valid episode range (e.g. 1-5 or 1,2,3)');
+      return;
+    }
+
     setIsLoading(true);
     setError(null);
     setSuccess(null);
     setBatchResult(null);
+    setProgressMessages([]);
+    setCurrentProgress(null);
+    setEpisodeStatuses({});
 
     try {
+      setProgressMessages(prev => [...prev, '📺 Ensuring episode stubs exist in database...']);
       await AnimeImporterService.fetchEpisodesForExistingAnime(selectedAnime.id);
     } catch (stubErr) {
       console.warn('⚠️ Episode stub creation skipped:', stubErr);
     }
+    
+    const initialStatuses: Record<number, { status: 'pending' }> = {};
+    episodeNumbers.forEach(ep => {
+      initialStatuses[ep] = { status: 'pending' };
+    });
+    setEpisodeStatuses(initialStatuses);
+
+    const scrapedEpisodes: any[] = [];
+    const failedEpisodes: any[] = [];
 
     try {
-      const result = await ReAnimeScraperService.batchScrapeEpisodes(
-        selectedAnime.title,
+      const targetQuery = selectedAnime.title;
+      await AnimeSugeScraperService.batchScrapeEpisodesWithProgress(
+        targetQuery,
         selectedAnime.id,
         episodeNumbers,
+        (event) => {
+          switch (event.type) {
+            case 'start':
+              setProgressMessages(prev => [...prev, `🎬 Starting AnimeSuge batch scrape for ${event.total || 0} episodes...`]);
+              setCurrentProgress({
+                current: 0,
+                total: event.total || 0,
+                successCount: 0,
+                errorCount: 0
+              });
+              break;
+            
+            case 'progress':
+              setProgressMessages(prev => [...prev, `⏳ Scraping Episode ${event.episode}...`]);
+              setEpisodeStatuses(prev => ({
+                ...prev,
+                [event.episode!]: { status: 'scraping' }
+              }));
+              break;
+            
+            case 'success':
+              setProgressMessages(prev => [...prev, `✅ Episode ${event.episode} scraped successfully!`]);
+              setEpisodeStatuses(prev => ({
+                ...prev,
+                [event.episode!]: { status: 'success', message: 'Scraped' }
+              }));
+              setCurrentProgress(prev => prev ? {
+                ...prev,
+                current: event.current || prev.current,
+                successCount: prev.successCount + 1
+              } : null);
+              
+              if (event.episode && event.url) {
+                scrapedEpisodes.push({
+                  number: event.episode,
+                  title: event.title || `Episode ${event.episode}`,
+                  streamUrl: event.url,
+                  lang,
+                  servers: event.sources || [{ name: "AnimeSuge active", url: event.url, lang }],
+                  embeddingProtected: false,
+                  scrapedAt: new Date().toISOString(),
+                  isExisting: existingEpisodes.has(event.episode)
+                });
+              }
+              break;
+            
+            case 'error':
+              setProgressMessages(prev => [...prev, `❌ Episode ${event.episode} failed: ${event.error || 'Unknown error'}`]);
+              setEpisodeStatuses(prev => ({
+                ...prev,
+                [event.episode!]: { status: 'error', message: event.error || 'Failed' }
+              }));
+              setCurrentProgress(prev => prev ? {
+                ...prev,
+                current: event.current || prev.current,
+                errorCount: prev.errorCount + 1
+              } : null);
+              
+              if (event.episode) {
+                failedEpisodes.push({
+                  number: event.episode,
+                  title: `Episode ${event.episode}`,
+                  error: event.error || 'Unknown error'
+                });
+              }
+              break;
+            
+            case 'complete':
+              setProgressMessages(prev => [...prev, `🎉 Scraping complete! ${scrapedEpisodes.length} successful, ${failedEpisodes.length} failed.`]);
+              
+              // Set the results directly on the page
+              setCurrentScrapedEpisodes(scrapedEpisodes);
+              
+              // Invalidate queries so that DB lists refresh
+              queryClient.invalidateQueries({ queryKey: ['admin-anime'] });
+              checkExistingEpisodes(selectedAnime.id);
+              
+              setSuccess(`Scraped & saved ${scrapedEpisodes.length} out of ${event.total || episodeNumbers.length} episodes successfully!`);
+              setTimeout(() => setSuccess(null), 5000);
+              break;
+          }
+        },
         { lang, overwrite: overwriteExisting }
       );
-
-      if (result.success && result.results) {
-        const scrapedEpisodes = result.results
-          .filter((r: any) => r.success)
-          .map((r: any) => ({
-            number: r.episodeData?.episodeNumber || 1,
-            title: `Episode ${r.episodeData?.episodeNumber || 1}`,
-            streamUrl: r.streamUrl,
-            embeddingProtected: false,
-            embeddingReason: null,
-            scrapedAt: new Date().toISOString(),
-            isExisting: true
-          }));
-
-        setCurrentScrapedEpisodes(scrapedEpisodes);
-
-        // Refresh local database knowledge of existing episodes
-        queryClient.invalidateQueries({ queryKey: ['admin-anime'] });
-        checkExistingEpisodes(selectedAnime.id);
-        setSuccess(`Batch scraping completed: ${scrapedEpisodes.length}/${episodeNumbers.length} episodes scraped successfully!`);
-        setTimeout(() => setSuccess(null), 5000);
-      } else {
-        setError(result.error || 'Batch scraping failed');
-        setTimeout(() => setError(null), 5000);
-      }
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Unknown error occurred');
       setTimeout(() => setError(null), 5000);
@@ -269,7 +403,7 @@ export const ReAnimeScraperComponent: React.FC<ReAnimeScraperComponentProps> = (
     } catch (stubErr) {
       console.warn('⚠️ Episode stub creation skipped:', stubErr);
     }
-
+    
     const initialStatuses: Record<number, { status: 'pending' }> = {};
     episodeNumbers.forEach(ep => {
       initialStatuses[ep] = { status: 'pending' };
@@ -280,14 +414,15 @@ export const ReAnimeScraperComponent: React.FC<ReAnimeScraperComponentProps> = (
     const failedEpisodes: any[] = [];
 
     try {
-      await ReAnimeScraperService.batchScrapeEpisodesWithProgress(
-        selectedAnime.title,
+      const targetQuery = selectedAnime.title;
+      await AnimeSugeScraperService.batchScrapeEpisodesWithProgress(
+        targetQuery,
         selectedAnime.id,
         episodeNumbers,
         (event) => {
           switch (event.type) {
             case 'start':
-              setProgressMessages(prev => [...prev, `🎬 Starting batch scrape for ${event.total || 0} episodes...`]);
+              setProgressMessages(prev => [...prev, `🎬 Starting AnimeSuge batch scrape for ${event.total || 0} episodes...`]);
               setCurrentProgress({
                 current: 0,
                 total: event.total || 0,
@@ -295,7 +430,7 @@ export const ReAnimeScraperComponent: React.FC<ReAnimeScraperComponentProps> = (
                 errorCount: 0
               });
               break;
-
+            
             case 'progress':
               setProgressMessages(prev => [...prev, `⏳ Scraping Episode ${event.episode}...`]);
               setEpisodeStatuses(prev => ({
@@ -303,7 +438,7 @@ export const ReAnimeScraperComponent: React.FC<ReAnimeScraperComponentProps> = (
                 [event.episode!]: { status: 'scraping' }
               }));
               break;
-
+            
             case 'success':
               setProgressMessages(prev => [...prev, `✅ Episode ${event.episode} scraped successfully!`]);
               setEpisodeStatuses(prev => ({
@@ -315,21 +450,21 @@ export const ReAnimeScraperComponent: React.FC<ReAnimeScraperComponentProps> = (
                 current: event.current || prev.current,
                 successCount: prev.successCount + 1
               } : null);
-
+              
               if (event.episode && event.url) {
                 scrapedEpisodes.push({
                   number: event.episode,
                   title: event.title || `Episode ${event.episode}`,
                   streamUrl: event.url,
-                  lang,  // carry current lang state so handleAddEpisode can forward it
-                  servers: event.sources || [{ name: "Re:ANIME active", url: event.url, lang }],
+                  lang,
+                  servers: event.sources || [{ name: "AnimeSuge active", url: event.url, lang }],
                   embeddingProtected: false,
                   scrapedAt: new Date().toISOString(),
-                  isExisting: true
+                  isExisting: existingEpisodes.has(event.episode)
                 });
               }
               break;
-
+            
             case 'error':
               setProgressMessages(prev => [...prev, `❌ Episode ${event.episode} failed: ${event.error || 'Unknown error'}`]);
               setEpisodeStatuses(prev => ({
@@ -341,7 +476,7 @@ export const ReAnimeScraperComponent: React.FC<ReAnimeScraperComponentProps> = (
                 current: event.current || prev.current,
                 errorCount: prev.errorCount + 1
               } : null);
-
+              
               if (event.episode) {
                 failedEpisodes.push({
                   number: event.episode,
@@ -350,17 +485,17 @@ export const ReAnimeScraperComponent: React.FC<ReAnimeScraperComponentProps> = (
                 });
               }
               break;
-
+            
             case 'complete':
               setProgressMessages(prev => [...prev, `🎉 Scraping complete! ${scrapedEpisodes.length} successful, ${failedEpisodes.length} failed.`]);
-
-              // Set the results directly on the page instead of opening a modal
+              
+              // Set the results directly on the page
               setCurrentScrapedEpisodes(scrapedEpisodes);
-
+              
               // Invalidate queries so that DB lists refresh
               queryClient.invalidateQueries({ queryKey: ['admin-anime'] });
               checkExistingEpisodes(selectedAnime.id);
-
+              
               setSuccess(`Scraped & saved ${scrapedEpisodes.length} out of ${event.total || episodeNumbers.length} episodes successfully!`);
               setTimeout(() => setSuccess(null), 5000);
               break;
@@ -383,7 +518,7 @@ export const ReAnimeScraperComponent: React.FC<ReAnimeScraperComponentProps> = (
 
   const handleAddEpisode = async (episode: any) => {
     if (!selectedAnime) return;
-
+    
     try {
       const API_BASE = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
       const response = await fetch(`${API_BASE}/api/add-scraped-episode`, {
@@ -395,26 +530,29 @@ export const ReAnimeScraperComponent: React.FC<ReAnimeScraperComponentProps> = (
             number: episode.number,
             title: episode.title,
             streamUrl: episode.streamUrl,
-            lang: episode.lang || lang,   // pass lang so server doesn't default to 'sub'
-            servers: (episode.servers || [{ name: "Re:ANIME active", url: episode.streamUrl }])
+            lang: episode.lang || lang,
+            servers: (episode.servers || [{ name: "AnimeSuge active", url: episode.streamUrl }])
               .map((s: any) => ({ ...s, lang: s.lang || episode.lang || lang })),
-            description: `Scraped from Re:ANIME`,
+            description: `Scraped from AnimeSuge`,
             isPremium: false
           }
         })
       });
 
       const result = await response.json();
-
+      
       if (result.success) {
-        setCurrentScrapedEpisodes(prev =>
-          prev.map(ep =>
-            ep.number === episode.number
+        setCurrentScrapedEpisodes(prev => 
+          prev.map(ep => 
+            ep.number === episode.number 
               ? { ...ep, isExisting: true, addedAt: new Date().toISOString() }
               : ep
           )
         );
-
+        
+        // Update existing episodes set
+        setExistingEpisodes(prev => new Set([...prev, episode.number]));
+        
         setEpisodesAddedCount(prev => prev + 1);
         setSuccess(`Episode ${episode.number} added successfully!`);
         setTimeout(() => setSuccess(null), 3000);
@@ -436,12 +574,12 @@ export const ReAnimeScraperComponent: React.FC<ReAnimeScraperComponentProps> = (
         animate={{ opacity: 1, y: 0 }}
         className="text-center mb-2"
       >
-        <h2 className="text-3xl font-bold bg-gradient-to-r from-rose-500 to-red-600 bg-clip-text text-transparent mb-2 flex items-center justify-center gap-3">
-          <i className="ri-fire-line text-red-500 text-3xl"></i>
-          Re:ANIME Episode Scraper
+        <h2 className="text-3xl font-bold bg-gradient-to-r from-violet-500 to-indigo-600 bg-clip-text text-transparent mb-2 flex items-center justify-center gap-3">
+          <i className="ri-vidicon-line text-violet-500 text-3xl"></i>
+          AnimeSuge Episode Scraper
         </h2>
         <p className="text-slate-500 text-sm">
-          Scrape episodes from reanime.to for your anime collection
+          Scrape episodes from animesuge.cz for your anime collection
         </p>
       </motion.div>
 
@@ -453,12 +591,12 @@ export const ReAnimeScraperComponent: React.FC<ReAnimeScraperComponentProps> = (
         className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg border border-white/20 p-6"
       >
         <h3 className="text-lg font-bold text-slate-800 mb-5 flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-rose-500 to-red-600 flex items-center justify-center">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center">
             <i className="ri-tv-2-line text-white text-sm"></i>
           </div>
           Select Anime
         </h3>
-
+        
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-2">
@@ -469,44 +607,47 @@ export const ReAnimeScraperComponent: React.FC<ReAnimeScraperComponentProps> = (
               placeholder="Type anime name to search..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-rose-500 focus:ring-2 focus:ring-rose-200 transition-all"
+              className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-violet-500 focus:ring-2 focus:ring-violet-200 transition-all"
             />
           </div>
 
           {selectedAnime && (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.97 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="bg-gradient-to-r from-rose-50 to-red-50 border border-rose-200/60 rounded-xl p-4"
-            >
-              <div className="flex items-center space-x-4">
-                {selectedAnime.poster_url && (
-                  <img
-                    src={selectedAnime.poster_url}
-                    alt={selectedAnime.title}
-                    className="w-16 h-20 object-cover rounded-xl shadow-md"
-                    width={64}
-                    height={80}
-                    loading="lazy"
-                    decoding="async"
-                  />
-                )}
-                <div className="flex-1">
-                  <h4 className="font-bold text-slate-800">{selectedAnime.title}</h4>
-                  <div className="flex items-center gap-2 mt-1">
-                    <span className="inline-flex items-center text-xs font-medium bg-rose-100 text-rose-700 px-2.5 py-1 rounded-full">
-                      <i className="ri-play-circle-line mr-1"></i>{selectedAnime.total_episodes} episodes
-                    </span>
-                    <span className="inline-flex items-center text-xs font-medium bg-green-100 text-green-700 px-2.5 py-1 rounded-full">
-                      {selectedAnime.status}
-                    </span>
+            <>
+              <motion.div
+                initial={{ opacity: 0, scale: 0.97 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="bg-gradient-to-r from-violet-50 to-indigo-50 border border-violet-200/60 rounded-xl p-4"
+              >
+                <div className="flex items-center space-x-4">
+                  {selectedAnime.poster_url && (
+                    <img
+                      src={selectedAnime.poster_url}
+                      alt={selectedAnime.title}
+                      className="w-16 h-20 object-cover rounded-xl shadow-md"
+                      width={64}
+                      height={80}
+                      loading="lazy"
+                      decoding="async"
+                    />
+                  )}
+                  <div className="flex-1">
+                    <h4 className="font-bold text-slate-800">{selectedAnime.title}</h4>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="inline-flex items-center text-xs font-medium bg-violet-100 text-violet-700 px-2.5 py-1 rounded-full">
+                        <i className="ri-play-circle-line mr-1"></i>{selectedAnime.total_episodes} episodes
+                      </span>
+                      <span className="inline-flex items-center text-xs font-medium bg-green-100 text-green-700 px-2.5 py-1 rounded-full">
+                        {selectedAnime.status}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="text-violet-500">
+                    <i className="ri-checkbox-circle-fill text-2xl"></i>
                   </div>
                 </div>
-                <div className="text-rose-500">
-                  <i className="ri-checkbox-circle-fill text-2xl"></i>
-                </div>
-              </div>
-            </motion.div>
+              </motion.div>
+
+            </>
           )}
 
           <div className="max-h-60 overflow-y-auto border border-slate-200/60 rounded-xl bg-white/50">
@@ -525,9 +666,10 @@ export const ReAnimeScraperComponent: React.FC<ReAnimeScraperComponentProps> = (
                 {filteredAnime.map((anime) => (
                   <motion.div
                     key={anime.id}
-                    whileHover={{ backgroundColor: 'rgba(244, 63, 94, 0.04)' }}
-                    className={`p-3 cursor-pointer transition-all duration-150 ${selectedAnime?.id === anime.id ? 'bg-rose-50/80 border-l-4 border-l-rose-500' : 'border-l-4 border-l-transparent'
-                      }`}
+                    whileHover={{ backgroundColor: 'rgba(124, 58, 237, 0.04)' }}
+                    className={`p-3 cursor-pointer transition-all duration-150 ${
+                      selectedAnime?.id === anime.id ? 'bg-violet-50/80 border-l-4 border-l-violet-500' : 'border-l-4 border-l-transparent'
+                    }`}
                     onClick={() => handleAnimeSelect(anime)}
                   >
                     <div className="flex items-center space-x-3">
@@ -549,7 +691,7 @@ export const ReAnimeScraperComponent: React.FC<ReAnimeScraperComponentProps> = (
                         </p>
                       </div>
                       {selectedAnime?.id === anime.id && (
-                        <i className="ri-check-line text-rose-500 text-lg"></i>
+                        <i className="ri-check-line text-violet-500 text-lg"></i>
                       )}
                     </div>
                   </motion.div>
@@ -571,26 +713,28 @@ export const ReAnimeScraperComponent: React.FC<ReAnimeScraperComponentProps> = (
           {/* Language Preference Card */}
           <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg border border-white/20 p-6 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-rose-500 to-red-600 flex items-center justify-center">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center">
                 <i className="ri-global-line text-white text-sm"></i>
               </div>
               <div>
                 <h3 className="text-sm font-bold text-slate-800">Language Preference</h3>
-                <p className="text-xs text-slate-500">Re:ANIME has separate Sub and Dub links</p>
+                <p className="text-xs text-slate-500">AnimeSuge has separate Sub and Dub links</p>
               </div>
             </div>
             <div className="flex gap-2 bg-slate-100 p-1 rounded-xl">
               <button
                 onClick={() => setLang('sub')}
-                className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${lang === 'sub' ? 'bg-rose-500 text-white shadow-sm' : 'text-slate-600 hover:text-slate-800'
-                  }`}
+                className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  lang === 'sub' ? 'bg-violet-500 text-white shadow-sm' : 'text-slate-600 hover:text-slate-800'
+                }`}
               >
                 Subbed
               </button>
               <button
                 onClick={() => setLang('dub')}
-                className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${lang === 'dub' ? 'bg-rose-500 text-white shadow-sm' : 'text-slate-600 hover:text-slate-800'
-                  }`}
+                className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  lang === 'dub' ? 'bg-violet-500 text-white shadow-sm' : 'text-slate-600 hover:text-slate-800'
+                }`}
               >
                 Dubbed
               </button>
@@ -600,7 +744,7 @@ export const ReAnimeScraperComponent: React.FC<ReAnimeScraperComponentProps> = (
           {/* Overwrite/Rescrape Preference Card */}
           <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg border border-white/20 p-6 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-rose-500 to-red-600 flex items-center justify-center">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center">
                 <i className="ri-refresh-line text-white text-sm"></i>
               </div>
               <div>
@@ -615,7 +759,7 @@ export const ReAnimeScraperComponent: React.FC<ReAnimeScraperComponentProps> = (
                 onChange={(e) => setOverwriteExisting(e.target.checked)}
                 className="sr-only peer"
               />
-              <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-rose-500"></div>
+              <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-500"></div>
             </label>
           </div>
         </motion.div>
@@ -630,18 +774,18 @@ export const ReAnimeScraperComponent: React.FC<ReAnimeScraperComponentProps> = (
           className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg border border-white/20 p-6"
         >
           <h3 className="text-lg font-bold text-slate-800 mb-5 flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-rose-500 to-red-600 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center">
               <i className="ri-crosshair-2-line text-white text-sm"></i>
             </div>
             Scraping Options
           </h3>
-
+          
           <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
             {/* Single Episode */}
-            <div className="bg-gradient-to-br from-slate-50 to-rose-50/30 rounded-xl p-5 border border-slate-200/60 space-y-3">
+            <div className="bg-gradient-to-br from-slate-50 to-violet-50/30 rounded-xl p-5 border border-slate-200/60 space-y-3">
               <div className="flex items-center gap-2 mb-1">
-                <div className="w-7 h-7 rounded-md bg-rose-100 flex items-center justify-center">
-                  <i className="ri-movie-2-line text-rose-600 text-sm"></i>
+                <div className="w-7 h-7 rounded-md bg-violet-100 flex items-center justify-center">
+                  <i className="ri-movie-2-line text-violet-600 text-sm"></i>
                 </div>
                 <h4 className="font-semibold text-slate-700 text-sm">Single Episode</h4>
               </div>
@@ -656,17 +800,17 @@ export const ReAnimeScraperComponent: React.FC<ReAnimeScraperComponentProps> = (
               <Button
                 onClick={handleSingleScrape}
                 disabled={isLoading}
-                className="w-full bg-gradient-to-r from-rose-500 to-red-600 hover:from-rose-600 hover:to-red-700 text-white rounded-xl font-medium shadow-md hover:shadow-lg transition-all"
+                className="w-full bg-gradient-to-r from-violet-500 to-indigo-600 hover:from-violet-600 hover:to-indigo-700 text-white rounded-xl font-medium shadow-md hover:shadow-lg transition-all"
               >
                 {isLoading ? <SparkleLoadingSpinner size="sm" /> : <><i className="ri-movie-2-line mr-1"></i> Scrape Episode</>}
               </Button>
             </div>
 
             {/* Batch Episodes */}
-            <div className="bg-gradient-to-br from-slate-50 to-pink-50/30 rounded-xl p-5 border border-slate-200/60 space-y-3">
+            <div className="bg-gradient-to-br from-slate-50 to-fuchsia-50/30 rounded-xl p-5 border border-slate-200/60 space-y-3">
               <div className="flex items-center gap-2 mb-1">
-                <div className="w-7 h-7 rounded-md bg-pink-100 flex items-center justify-center">
-                  <i className="ri-stack-line text-pink-600 text-sm"></i>
+                <div className="w-7 h-7 rounded-md bg-fuchsia-100 flex items-center justify-center">
+                  <i className="ri-stack-line text-fuchsia-600 text-sm"></i>
                 </div>
                 <h4 className="font-semibold text-slate-700 text-sm">Batch Episodes</h4>
               </div>
@@ -680,17 +824,17 @@ export const ReAnimeScraperComponent: React.FC<ReAnimeScraperComponentProps> = (
               <Button
                 onClick={handleBatchScrape}
                 disabled={isLoading}
-                className="w-full bg-gradient-to-r from-pink-500 to-rose-600 hover:from-pink-600 hover:to-rose-700 text-white rounded-xl font-medium shadow-md hover:shadow-lg transition-all"
+                className="w-full bg-gradient-to-r from-fuchsia-500 to-violet-600 hover:from-fuchsia-600 hover:to-violet-700 text-white rounded-xl font-medium shadow-md hover:shadow-lg transition-all"
               >
                 {isLoading ? <SparkleLoadingSpinner size="sm" /> : <><i className="ri-stack-line mr-1"></i> Batch Scrape</>}
               </Button>
             </div>
 
             {/* All Episodes */}
-            <div className="bg-gradient-to-br from-slate-50 to-red-50/30 rounded-xl p-5 border border-slate-200/60 space-y-3">
+            <div className="bg-gradient-to-br from-slate-50 to-indigo-50/30 rounded-xl p-5 border border-slate-200/60 space-y-3">
               <div className="flex items-center gap-2 mb-1">
-                <div className="w-7 h-7 rounded-md bg-red-100 flex items-center justify-center">
-                  <i className="ri-rocket-line text-red-600 text-sm"></i>
+                <div className="w-7 h-7 rounded-md bg-indigo-100 flex items-center justify-center">
+                  <i className="ri-rocket-line text-indigo-600 text-sm"></i>
                 </div>
                 <h4 className="font-semibold text-slate-700 text-sm">All Episodes</h4>
               </div>
@@ -700,7 +844,7 @@ export const ReAnimeScraperComponent: React.FC<ReAnimeScraperComponentProps> = (
               <Button
                 onClick={handleScrapeAllEpisodes}
                 disabled={isLoading}
-                className="w-full bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 text-white rounded-xl font-medium shadow-md hover:shadow-lg transition-all"
+                className="w-full bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-600 hover:to-violet-700 text-white rounded-xl font-medium shadow-md hover:shadow-lg transition-all"
               >
                 {isLoading ? <SparkleLoadingSpinner size="sm" /> : <><i className="ri-rocket-line mr-1"></i> Scrape All</>}
               </Button>
@@ -731,7 +875,7 @@ export const ReAnimeScraperComponent: React.FC<ReAnimeScraperComponentProps> = (
               </div>
             )}
           </div>
-
+          
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
             {Object.entries(episodeStatuses).map(([episodeNum, status]) => {
               const bgColor = {
@@ -740,7 +884,7 @@ export const ReAnimeScraperComponent: React.FC<ReAnimeScraperComponentProps> = (
                 success: 'bg-green-50 text-green-700 border-green-300',
                 error: 'bg-red-50 text-red-700 border-red-300'
               }[status.status];
-
+              
               const icon = {
                 pending: 'ri-time-line',
                 scraping: 'ri-loader-4-line',
@@ -751,8 +895,9 @@ export const ReAnimeScraperComponent: React.FC<ReAnimeScraperComponentProps> = (
               return (
                 <div
                   key={episodeNum}
-                  className={`p-3 rounded-xl border transition-all ${bgColor} ${status.status === 'scraping' ? 'animate-pulse shadow-md' : ''
-                    }`}
+                  className={`p-3 rounded-xl border transition-all ${bgColor} ${
+                    status.status === 'scraping' ? 'animate-pulse shadow-md' : ''
+                  }`}
                 >
                   <div className="flex items-center justify-between">
                     <span className="font-bold text-xs">EP {episodeNum}</span>
@@ -818,9 +963,25 @@ export const ReAnimeScraperComponent: React.FC<ReAnimeScraperComponentProps> = (
 
           <div className="space-y-4">
             {error && (
-              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm flex items-center gap-2">
-                <i className="ri-error-warning-line text-lg"></i>
-                <div>{error}</div>
+              <div className="bg-red-50 border border-red-200 rounded-xl overflow-hidden">
+                <div className="px-4 py-3 flex items-start gap-2">
+                  <i className="ri-error-warning-line text-red-500 text-lg mt-0.5 shrink-0"></i>
+                  <div className="min-w-0">
+                    <p className="text-red-700 text-sm font-semibold">Scraping Failed</p>
+                    <p className="text-red-600 text-xs mt-1 break-words">{error}</p>
+                  </div>
+                </div>
+                {(error.toLowerCase().includes('not found') || error.toLowerCase().includes('no results') || error.toLowerCase().includes('could not find')) && (
+                  <div className="px-4 py-3 bg-amber-50 border-t border-amber-200 text-xs text-amber-800 flex items-start gap-2">
+                    <i className="ri-lightbulb-line text-amber-500 text-base shrink-0 mt-0.5"></i>
+                    <div>
+                      <strong>Tip:</strong> The title search couldn't find this anime on AnimeSuge.
+                      Go to <a href="https://animesuge.cz" target="_blank" rel="noreferrer" className="underline font-semibold">animesuge.cz</a>,
+                      search for the anime there, then paste the full URL (e.g. <code className="bg-amber-100 px-1 rounded">https://animesuge.cz/anime/naruto-...</code>)
+                      into the <strong>"Custom Search Query or Watch URL"</strong> field above.
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -835,10 +996,11 @@ export const ReAnimeScraperComponent: React.FC<ReAnimeScraperComponentProps> = (
             {scrapeResult && (
               <div className="space-y-3 mb-4">
                 <h4 className="font-semibold text-slate-700 text-sm flex items-center gap-1.5">
-                  <i className="ri-movie-2-line text-rose-500"></i> Single Episode Result
+                  <i className="ri-movie-2-line text-violet-500"></i> Single Episode Result
                 </h4>
-                <div className={`p-4 rounded-xl ${scrapeResult.success ? 'bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200/60' : 'bg-gradient-to-r from-red-50 to-rose-50 border border-red-200/60'
-                  }`}>
+                <div className={`p-4 rounded-xl ${
+                  scrapeResult.success ? 'bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200/60' : 'bg-gradient-to-r from-red-50 to-rose-50 border border-red-200/60'
+                }`}>
                   {scrapeResult.success ? (
                     <div>
                       <p className="text-green-800 font-semibold text-sm flex items-center gap-1"><i className="ri-check-double-line mr-1 text-lg"></i>Episode scraped and saved successfully!</p>
@@ -850,7 +1012,7 @@ export const ReAnimeScraperComponent: React.FC<ReAnimeScraperComponentProps> = (
                         <span>•</span>
                         <span>{selectedAnime?.title}</span>
                         <span>•</span>
-                        <span className="font-semibold bg-rose-100 text-rose-700 px-2 py-0.5 rounded text-[10px] uppercase">{lang}</span>
+                        <span className="font-semibold bg-violet-100 text-violet-700 px-2 py-0.5 rounded text-[10px] uppercase">{lang}</span>
                       </div>
                     </div>
                   ) : (
@@ -885,16 +1047,16 @@ export const ReAnimeScraperComponent: React.FC<ReAnimeScraperComponentProps> = (
               <div className="space-y-3">
                 <h4 className="font-bold text-slate-800 text-sm">Scraped Episodes ({currentScrapedEpisodes.length})</h4>
                 <div className="max-h-96 overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-xl bg-white">
-                  {currentScrapedEpisodes.map((episode) => (
-                    <div key={episode.number} className="p-3 flex items-center justify-between gap-4">
-                      <div className="min-w-0">
+                  {currentScrapedEpisodes.map((episode, idx) => (
+                    <div key={`${episode.number}-${idx}`} className="p-3 flex items-center justify-between gap-4">
+                      <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <span className="font-bold text-sm text-slate-800">EP {episode.number}</span>
                           <span className="text-xs text-slate-500 truncate">{episode.title}</span>
                         </div>
                         <div className="text-[10px] text-slate-400 font-mono truncate mt-0.5 max-w-lg">{episode.streamUrl}</div>
                       </div>
-
+                      
                       <div className="flex items-center gap-2">
                         {episode.isExisting ? (
                           <span className="text-xs font-semibold text-green-600 bg-green-50 border border-green-200 px-2.5 py-1 rounded-lg flex items-center gap-1">
@@ -904,7 +1066,7 @@ export const ReAnimeScraperComponent: React.FC<ReAnimeScraperComponentProps> = (
                           <Button
                             onClick={() => handleAddEpisode(episode)}
                             size="sm"
-                            className="bg-rose-500 hover:bg-rose-600 text-white rounded-lg flex items-center gap-1 shadow-sm"
+                            className="bg-violet-500 hover:bg-violet-600 text-white rounded-lg flex items-center gap-1 shadow-sm"
                           >
                             <i className="ri-add-line"></i> Add Episode
                           </Button>
@@ -938,3 +1100,5 @@ export const ReAnimeScraperComponent: React.FC<ReAnimeScraperComponentProps> = (
     </div>
   );
 };
+
+export default AnimeSugeScraperComponent;

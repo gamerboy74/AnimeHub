@@ -1,4 +1,5 @@
 import { getBrowser, supabase } from "../index.js";
+import { extractSeasonNumber } from "../utils/seasonExtractor.js";
 
 export class SanjiAnimeScraperService {
   static BASE_URL = "https://sanjianime.com";
@@ -45,6 +46,7 @@ export class SanjiAnimeScraperService {
         `${this.BASE_URL}/search?q=${encodeURIComponent(inputUrl)}`,
       ];
 
+      const targetSeason = extractSeasonNumber(inputUrl);
       let matchedAnimeUrl = "";
       for (const searchUrl of searchUrls) {
         try {
@@ -57,13 +59,23 @@ export class SanjiAnimeScraperService {
               .filter((link) => link.href && (link.href.includes("/anime/") || link.href.includes("/watch/")))
           );
 
+          // Filter out any links that do not match our target season
+          const filteredLinks = links.filter((link) => {
+            const resultSeason = extractSeasonNumber(link.text);
+            const isMatch = targetSeason === resultSeason;
+            if (!isMatch) {
+              console.log(`   ⏭️ Skipping result "${link.text}" (Season ${resultSeason}) - mismatch with target (Season ${targetSeason})`);
+            }
+            return isMatch;
+          });
+
           const normalizedTitle = inputUrl.toLowerCase().replace(/[^a-z0-9]/g, "");
-          const directMatch = links.find((link) => {
+          const directMatch = filteredLinks.find((link) => {
             const normalizedText = link.text.toLowerCase().replace(/[^a-z0-9]/g, "");
             return normalizedText && (normalizedText.includes(normalizedTitle) || normalizedTitle.includes(normalizedText));
           });
 
-          matchedAnimeUrl = directMatch?.href || links[0]?.href || "";
+          matchedAnimeUrl = directMatch?.href || filteredLinks[0]?.href || "";
           if (matchedAnimeUrl) break;
         } catch (error) {
           console.log(`⚠️ Search URL failed: ${searchUrl} — ${error.message}`);
@@ -71,7 +83,7 @@ export class SanjiAnimeScraperService {
       }
 
       if (!matchedAnimeUrl) {
-        throw new Error(`Could not find search result for "${inputUrl}"`);
+        throw new Error(`Could not find a secure search result matching "${inputUrl}" (Season ${targetSeason}) on Sanji Anime.`);
       }
 
       animeUrl = matchedAnimeUrl;

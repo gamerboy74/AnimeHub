@@ -1,4 +1,5 @@
 import { getBrowser } from "../index.js";
+import { extractSeasonNumber } from "../utils/seasonExtractor.js";
 
 export class ReAnimeScraperService {
   static BASE_URL = "https://reanime.to";
@@ -80,11 +81,18 @@ export class ReAnimeScraperService {
 
       const animeLinks = links.filter(l => l.href && (l.href.includes('/anime/') || l.href.includes('/watch/')));
 
+      const targetSeason = extractSeasonNumber(inputUrl);
       const cleanStr = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
       const targetClean = cleanStr(inputUrl);
 
       let matchedLink = null;
       for (const link of animeLinks) {
+        const resultSeason = extractSeasonNumber(link.text);
+        if (targetSeason !== resultSeason) {
+          console.log(`   ⏭️ Skipping result "${link.text}" (Season ${resultSeason}) - mismatch with target (Season ${targetSeason})`);
+          continue;
+        }
+
         const textClean = cleanStr(link.text);
         if (textClean && (textClean.includes(targetClean) || targetClean.includes(textClean))) {
           matchedLink = link.href;
@@ -93,13 +101,8 @@ export class ReAnimeScraperService {
         }
       }
 
-      if (!matchedLink && animeLinks.length > 0) {
-        matchedLink = animeLinks[0].href;
-        console.log(`⚠️ No exact title match, using first search result: ${matchedLink}`);
-      }
-
       if (!matchedLink) {
-        throw new Error(`Could not find search result for "${inputUrl}"`);
+        throw new Error(`Could not find a secure search result matching "${inputUrl}" (Season ${targetSeason}) on Re:ANIME.`);
       }
 
       // If the match is already a watch URL, parse, set params, and return

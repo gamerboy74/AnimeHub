@@ -139,6 +139,22 @@ interface ImportResult {
 export class AnimeImporterService {
   private static readonly JIKAN_BASE_URL = 'https://api.jikan.moe/v4'
   private static readonly ANILIST_BASE_URL = 'https://graphql.anilist.co'
+
+  static async getJikanAnimeByMalId(malId: number): Promise<JikanAnime | null> {
+    try {
+      const response = await fetch(`${this.JIKAN_BASE_URL}/anime/${malId}/full`)
+
+      if (!response.ok) {
+        throw new Error(`Jikan API error: ${response.status}`)
+      }
+
+      const data = await response.json()
+      return data.data || null
+    } catch (error) {
+      console.error('Error fetching Jikan anime by MAL ID:', error)
+      return null
+    }
+  }
   
   // Search anime from Jikan API
   static async searchJikanAnime(query: string, limit: number = 20, page: number = 1): Promise<JikanAnime[]> {

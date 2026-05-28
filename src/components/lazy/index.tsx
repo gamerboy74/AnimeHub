@@ -11,6 +11,7 @@ export const LazyEditEpisodeModal = lazy(() => import('../admin/EditEpisodeModal
 export const LazyNineAnimeScraperComponent = lazy(() => import('../admin/NineAnimeScraperComponent').then(m => ({ default: m.NineAnimeScraperComponent })));
 export const LazyReAnimeScraperComponent = lazy(() => import('../admin/ReAnimeScraperComponent').then(m => ({ default: m.ReAnimeScraperComponent })));
 export const LazySanjiAnimeScraperComponent = lazy(() => import('../admin/SanjiAnimeScraperComponent').then(m => ({ default: m.SanjiAnimeScraperComponent })));
+export const LazyAnimeSugeScraperComponent = lazy(() => import('../admin/AnimeSugeScraperComponent').then(m => ({ default: m.AnimeSugeScraperComponent })));
 export const LazyHiAnimeScraperComponent = lazy(() => import('../admin/HiAnimeScraperComponent').then(m => ({ default: m.HiAnimeScraperComponent })));
 export const LazyEnhancedAnimeImporter = lazy(() => import('../admin/EnhancedAnimeImporter').then(m => ({ default: m.EnhancedAnimeImporter })));
 export const LazyLargeAnimeScraper = lazy(() => import('../admin/LargeAnimeScraper'));

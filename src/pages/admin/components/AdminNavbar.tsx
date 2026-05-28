@@ -24,6 +24,7 @@ export default function AdminNavbar({ collapsed, onToggleCollapse }: AdminNavbar
         { name: 'Dashboard', path: '/admin', icon: 'ri-dashboard-line' },
         { name: 'Anime', path: '/admin/anime', icon: 'ri-movie-2-line' },
         { name: 'Users', path: '/admin/users', icon: 'ri-group-line' },
+        { name: 'Requests', path: '/admin/requests', icon: 'ri-rocket-line' },
       ]
     },
     {

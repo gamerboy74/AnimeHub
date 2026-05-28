@@ -173,7 +173,7 @@ export class AnimeService {
       if (cached) return cached
 
       // Use backend API with Redis caching - add timeout
-      const apiUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001'
+      const apiUrl = import.meta.env.DEV ? '' : (import.meta.env.VITE_BACKEND_URL || '')
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 5000) // 5 second timeout
       
@@ -209,7 +209,7 @@ export class AnimeService {
   static async getTrendingAnime(limit: number = 10) {
     try {
       // Use backend API with Redis caching - add timeout
-      const apiUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001'
+      const apiUrl = import.meta.env.DEV ? '' : (import.meta.env.VITE_BACKEND_URL || '')
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 5000) // 5 second timeout
       
@@ -242,7 +242,7 @@ export class AnimeService {
   static async getPopularAnime(limit: number = 12) {
     try {
       // Use backend API with Redis caching - add timeout
-      const apiUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001'
+      const apiUrl = import.meta.env.DEV ? '' : (import.meta.env.VITE_BACKEND_URL || '')
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 5000) // 5 second timeout
       
@@ -275,7 +275,7 @@ export class AnimeService {
   static async getRecentAnime(limit: number = 6) {
     try {
       // Use backend API with Redis caching - add timeout
-      const apiUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001'
+      const apiUrl = import.meta.env.DEV ? '' : (import.meta.env.VITE_BACKEND_URL || '')
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 5000) // 5 second timeout
       

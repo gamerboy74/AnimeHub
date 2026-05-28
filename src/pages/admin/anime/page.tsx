@@ -12,6 +12,7 @@ import { EnhancedAnimeImporter } from '../../../components/admin/EnhancedAnimeIm
 import { NineAnimeScraperComponent } from '../../../components/admin/NineAnimeScraperComponent';
 import { ReAnimeScraperComponent } from '../../../components/admin/ReAnimeScraperComponent';
 import { SanjiAnimeScraperComponent } from '../../../components/admin/SanjiAnimeScraperComponent';
+import { AnimeSugeScraperComponent } from '../../../components/admin/AnimeSugeScraperComponent';
 import { ScrapedEpisodesModal } from '../../../components/admin/ScrapedEpisodesModal';
 import LargeAnimeScraper from '../../../components/admin/LargeAnimeScraper';
 import { SparkleLoadingSpinner } from '../../../components/base/LoadingSpinner';
@@ -50,7 +51,7 @@ export default function AnimeManagement() {
   const [selectedAnimeForEdit, setSelectedAnimeForEdit] = useState<any>(null);
   const [showImporter, setShowImporter] = useState(false);
   const [showScraper, setShowScraper] = useState(false);
-  const [activeScraperTab, setActiveScraperTab] = useState<'9anime' | 'reanime' | 'sanjianime'>('9anime');
+  const [activeScraperTab, setActiveScraperTab] = useState<'9anime' | 'reanime' | 'sanjianime' | 'animesuge'>('9anime');
   const [showScrapedEpisodesModal, setShowScrapedEpisodesModal] = useState(false);
   const [scrapedEpisodes, setScrapedEpisodes] = useState<any[]>([]);
   const [failedEpisodes, setFailedEpisodes] = useState<any[]>([]);
@@ -1571,7 +1572,7 @@ This action cannot be undone.`,
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.9, y: 30 }}
             className={`relative w-full max-w-6xl max-h-[90vh] overflow-hidden rounded-3xl border shadow-2xl transition-all duration-300 ${
-              activeScraperTab === '9anime' ? 'border-indigo-200/60' : 'border-rose-200/60'
+              activeScraperTab === '9anime' ? 'border-indigo-200/60' : activeScraperTab === 'animesuge' ? 'border-violet-200/60' : 'border-rose-200/60'
             }`}
             onClick={(e) => e.stopPropagation()}
           >
@@ -1579,6 +1580,8 @@ This action cannot be undone.`,
               className={`absolute inset-0 transition-all duration-500 bg-gradient-to-br ${
                 activeScraperTab === '9anime'
                   ? 'from-indigo-600/85 via-purple-600/85 to-pink-500/80'
+                  : activeScraperTab === 'animesuge'
+                  ? 'from-violet-600/85 via-indigo-600/85 to-purple-500/80'
                   : 'from-rose-600/85 via-red-600/85 to-amber-500/80'
               }`}
             />
@@ -1590,12 +1593,12 @@ This action cannot be undone.`,
                   activeScraperTab === 'reanime' ? 'animate-pulse' : ''
                 }`}>
                   <i className={`text-white text-2xl transition-all duration-300 ${
-                    activeScraperTab === '9anime' ? 'ri-search-line' : activeScraperTab === 'reanime' ? 'ri-fire-line' : 'ri-play-circle-line'
+                    activeScraperTab === '9anime' ? 'ri-search-line' : activeScraperTab === 'reanime' ? 'ri-fire-line' : activeScraperTab === 'sanjianime' ? 'ri-play-circle-line' : 'ri-vidicon-line'
                   }`}></i>
                 </div>
                 <div>
                   <h2 className="text-2xl font-bold text-white drop-shadow">
-                    {activeScraperTab === '9anime' ? '9Anime Scraper' : activeScraperTab === 'reanime' ? 'Re:ANIME Scraper' : 'Sanji Anime Scraper'}
+                    {activeScraperTab === '9anime' ? '9Anime Scraper' : activeScraperTab === 'reanime' ? 'Re:ANIME Scraper' : activeScraperTab === 'sanjianime' ? 'Sanji Anime Scraper' : 'AnimeSuge.cz Scraper'}
                   </h2>
                   <p className="text-white/80 text-sm">Streamed progress with SSE</p>
                 </div>
@@ -1636,6 +1639,17 @@ This action cannot be undone.`,
                   <i className="ri-play-circle-line"></i>
                   Sanji Anime
                 </button>
+                <button
+                  onClick={() => setActiveScraperTab('animesuge')}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-300 flex items-center gap-1.5 ${
+                    activeScraperTab === 'animesuge'
+                      ? 'bg-white text-violet-700 shadow-md scale-105'
+                      : 'text-white/80 hover:text-white hover:bg-white/10'
+                  }`}
+                >
+                  <i className="ri-vidicon-line"></i>
+                  AnimeSuge.cz
+                </button>
               </div>
 
               <button
@@ -1654,8 +1668,10 @@ This action cannot be undone.`,
                   <NineAnimeScraperComponent initialSelectedAnime={selectedAnimeForScraping} />
                 ) : activeScraperTab === 'reanime' ? (
                   <ReAnimeScraperComponent initialSelectedAnime={selectedAnimeForScraping} />
-                ) : (
+                ) : activeScraperTab === 'sanjianime' ? (
                   <SanjiAnimeScraperComponent initialSelectedAnime={selectedAnimeForScraping} />
+                ) : (
+                  <AnimeSugeScraperComponent initialSelectedAnime={selectedAnimeForScraping} />
                 )}
               </div>
             </div>

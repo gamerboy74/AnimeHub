@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { useQueryClient } from '@tanstack/react-query';
 import { SanjiAnimeScraperService } from '../../services/scrapers/sanjianime';
@@ -69,6 +69,15 @@ export const SanjiAnimeScraperComponent: React.FC<SanjiAnimeScraperComponentProp
     status: 'pending' | 'scraping' | 'success' | 'error';
     message?: string;
   }>>({});
+
+  const logContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // Auto-scroll console logs area to bottom on new messages
+  useEffect(() => {
+    if (logContainerRef.current) {
+      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+    }
+  }, [progressMessages]);
 
   useEffect(() => {
     console.log('🎯 SanjiAnimeScraperComponent mounted');
@@ -673,7 +682,10 @@ export const SanjiAnimeScraperComponent: React.FC<SanjiAnimeScraperComponentProp
 
           {/* Real-time Logs Console */}
           {progressMessages.length > 0 && (
-            <div className="mt-6 p-4 bg-slate-900 text-slate-300 rounded-xl border border-slate-800 font-mono text-xs max-h-40 overflow-y-auto space-y-1">
+            <div
+              ref={logContainerRef}
+              className="mt-6 p-4 bg-slate-900 text-slate-300 rounded-xl border border-slate-800 font-mono text-xs max-h-40 overflow-y-auto space-y-1 scroll-smooth"
+            >
               {progressMessages.map((msg, idx) => (
                 <div key={idx} className="flex gap-2">
                   <span className="text-slate-500">[{idx + 1}]</span>

@@ -232,7 +232,8 @@ export default function SmartVideoPlayer({
     const isMegaSource = !!(source.url.match(/mega(play|cloud|backup|cdn|stream)/i) || source.url.includes('mega.'));
     const isByseSource = source.url.includes('bysesayeveum.com/e/');
     const isCleanProxySource = source.url.startsWith('/api/mega-embed/') || source.url.startsWith('/api/vidmoly-embed/') || source.url.startsWith('/api/video-embed/');
-    if (isMegaSource || isByseSource || isCleanProxySource) {
+    const isDirectIframeOnly = !!(source.url.match(/(vidwish|streamwish|streamtape|streamhide|doodstream|voe|filemoon|mixdrop|rapidcloud|upstream)/i));
+    if (isMegaSource || isByseSource || isCleanProxySource || isDirectIframeOnly) {
       setResolvedHls(null);
       setHlsResolving(false);
       return;

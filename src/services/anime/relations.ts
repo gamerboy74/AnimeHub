@@ -87,7 +87,7 @@ export class AnimeRelationsService {
         .single()
 
       if (currentError || !currentAnime) {
-        console.error('Error fetching current anime:', commonError)
+        console.error('Error fetching current anime:', currentError)
         return []
       }
 
@@ -105,12 +105,12 @@ export class AnimeRelationsService {
       
       // Add genre filters if available
       if (genres && genres.length > 0) {
-        genreFilters = genres.map(genre => `genres.cs.{${genre}}`).join(',')
+        genreFilters = genres.map((genre: string) => `genres.cs.{${genre}}`).join(',')
       }
 
       // Add studio filters if available
       if (studios && studios.length > 0) {
-        studioFilters = studios.map(studio => `studios.cs.{${studio}}`).join(',')
+        studioFilters = studios.map((studio: string) => `studios.cs.{${studio}}`).join(',')
       }
 
       // Apply filters

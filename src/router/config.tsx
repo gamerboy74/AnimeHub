@@ -22,6 +22,7 @@ const AdminDashboard = lazy(() => import('../pages/admin/page'));
 const AdminAnime = lazy(() => import('../pages/admin/anime/page'));
 const AdminUsers = lazy(() => import('../pages/admin/users/page'));
 const AdminReports = lazy(() => import('../pages/admin/reports/page'));
+const AdminRequests = lazy(() => import('../pages/admin/requests/page'));
 const AdminAnalytics = lazy(() => import('../pages/admin/analytics/page'));
 const AdminPerformance = lazy(() => import('../pages/admin/performance/page'));
 const AdminSettings = lazy(() => import('../pages/admin/settings/page'));
@@ -117,6 +118,10 @@ const routes: RouteObject[] = [
       {
         path: 'reports',
         element: <RouteWrapper path="/admin/reports"><AdminReports /></RouteWrapper>
+      },
+      {
+        path: 'requests',
+        element: <RouteWrapper path="/admin/requests"><AdminRequests /></RouteWrapper>
       },
       {
         path: 'analytics',

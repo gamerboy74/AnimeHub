@@ -150,10 +150,10 @@ const AnimeCard = React.memo(function AnimeCard(props: AnimeCardProps) {
   const prefetchAnimeDetail = () => {
     void prefetchRoute(`/anime/${props._id}`);
 
-    const userId = user?.id ?? null;
+    const userId = user?.id;
     void queryClient.prefetchQuery({
       queryKey: queryKeys.anime.byId(props._id, userId),
-      queryFn: () => AnimeService.getAnimeById(props._id, userId ?? undefined),
+      queryFn: () => AnimeService.getAnimeById(props._id, userId),
       staleTime: 10 * 60 * 1000,
     });
   };

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useQueryClient } from '@tanstack/react-query';
 import { HiAnimeScraperService } from '../../services/scrapers/hianime';
@@ -52,6 +52,15 @@ export const HiAnimeScraperComponent: React.FC = () => {
     successCount: number;
     errorCount: number;
   } | null>(null);
+
+  const logContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // Auto-scroll console logs area to bottom on new messages
+  useEffect(() => {
+    if (logContainerRef.current) {
+      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+    }
+  }, [progressMessages]);
 
   // Load anime list for selection
   React.useEffect(() => {
@@ -525,7 +534,10 @@ export const HiAnimeScraperComponent: React.FC = () => {
             )}
           </div>
           
-          <div className="bg-slate-50/80 rounded-xl border border-slate-200/60 p-4 max-h-72 overflow-y-auto">
+          <div
+            ref={logContainerRef}
+            className="bg-slate-50/80 rounded-xl border border-slate-200/60 p-4 max-h-72 overflow-y-auto scroll-smooth"
+          >
             <div className="space-y-1 font-mono text-xs">
               {progressMessages.map((msg, idx) => (
                 <div key={idx} className="text-slate-600 whitespace-pre-wrap leading-relaxed">

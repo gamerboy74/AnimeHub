@@ -70,6 +70,8 @@ export default function AdminLayout() {
       setActiveTab('anime')
     } else if (path.includes('/admin/users')) {
       setActiveTab('users')
+    } else if (path.includes('/admin/requests')) {
+      setActiveTab('requests')
     } else if (path.includes('/admin/settings')) {
       setActiveTab('settings')
     } else {

@@ -4,7 +4,7 @@ import type { Tables } from '../../lib/database/supabase'
 type Anime = Tables<'anime'>
 type Episode = Tables<'episodes'>
 
-const API_BASE = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001'
+const API_BASE = import.meta.env.DEV ? '' : (import.meta.env.VITE_BACKEND_URL || '')
 
 export interface CreateAnimeData {
   title: string

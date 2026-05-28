@@ -49,6 +49,22 @@ export interface ContentReport {
   resolution_notes?: string
 }
 
+export interface AnimeRequest {
+  id: string
+  user_id: string | null
+  title: string
+  mal_id: number | null
+  notes: string | null
+  status: 'pending' | 'approved' | 'rejected'
+  vote_count: number
+  created_at: string
+  updated_at: string
+  requester?: {
+    username: string | null
+    email: string | null
+  } | null
+}
+
 export interface AnalyticsData {
   userGrowth: Array<{ date: string; users: number }>
   animeViews: Array<{ anime: string; views: number }>
@@ -496,6 +512,115 @@ export class AdminService {
     } catch (error) {
       console.error('Error creating content report:', error)
       throw new Error('Failed to create content report')
+    }
+  }
+
+  static async updateAnimeRequestStatus(requestId: string, status: AnimeRequest['status']): Promise<boolean> {
+    try {
+      const API_BASE = import.meta.env.DEV ? '' : (import.meta.env.VITE_BACKEND_URL || '')
+      const response = await fetch(`${API_BASE}/api/admin/anime-requests/${requestId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ status }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData.error || 'Failed to update anime request status')
+      }
+
+      const result = await response.json()
+      if (!result.success) throw new Error(result.error || 'Failed to update anime request status')
+
+      return true
+    } catch (error) {
+      console.error('Error updating anime request status:', error)
+      throw new Error(error instanceof Error ? error.message : 'Failed to update anime request status')
+    }
+  }
+
+  static async getAnimeRequests(page: number = 1, limit: number = 20, filters?: {
+    search?: string
+    status?: string
+  }): Promise<{ requests: AnimeRequest[], total: number }> {
+    try {
+      const offset = (page - 1) * limit
+      const searchTerm = filters?.search?.trim()
+
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        window.setTimeout(() => reject(new Error('Request timeout')), 10000)
+      })
+
+      let countQuery = supabase
+        .from('anime_requests')
+        .select('id', { count: 'exact', head: true })
+
+      if (searchTerm) {
+        countQuery = countQuery.or(`title.ilike.%${searchTerm}%,notes.ilike.%${searchTerm}%`)
+      }
+
+      if (filters?.status && filters.status !== 'all') {
+        countQuery = countQuery.eq('status', filters.status)
+      }
+
+      const { count, error: countError } = await Promise.race([
+        countQuery,
+        timeoutPromise,
+      ]) as { count: number | null; error: { message?: string } | null }
+
+      if (countError) throw countError
+
+      let dataQuery = supabase
+        .from('anime_requests')
+        .select('*')
+        .order('vote_count', { ascending: false })
+        .order('created_at', { ascending: false })
+
+      if (searchTerm) {
+        dataQuery = dataQuery.or(`title.ilike.%${searchTerm}%,notes.ilike.%${searchTerm}%`)
+      }
+
+      if (filters?.status && filters.status !== 'all') {
+        dataQuery = dataQuery.eq('status', filters.status)
+      }
+
+      const { data, error } = await Promise.race([
+        dataQuery.range(offset, offset + limit - 1),
+        timeoutPromise,
+      ]) as { data: AnimeRequest[] | null; error: { message?: string } | null }
+
+      if (error) throw error
+
+      const requests = data || []
+
+      const userIds = Array.from(new Set(requests.map(request => request.user_id).filter((userId): userId is string => Boolean(userId))))
+
+      let requestersById = new Map<string, { username: string | null; email: string | null }>()
+      if (userIds.length > 0) {
+        const { data: users, error: usersError } = await supabase
+          .from('users')
+          .select('id, username, email')
+          .in('id', userIds)
+
+        if (!usersError) {
+          requestersById = new Map(
+            (users || []).map(user => [user.id, { username: user.username, email: user.email }])
+          )
+        }
+      }
+
+      return {
+        requests: requests.map(request => ({
+          ...request,
+          requester: request.user_id ? requestersById.get(request.user_id) || null : null,
+        })),
+        total: count || 0
+      }
+    } catch (error) {
+      console.error('Error fetching anime requests:', error)
+      throw new Error('Failed to fetch anime requests')
     }
   }
 

@@ -111,6 +111,17 @@ export const routeMetadata: Record<string, RouteMetadata> = {
       { label: 'User Management', path: '/admin/users' },
     ],
   },
+  '/admin/requests': {
+    title: 'Anime Requests - Admin - AnimeHub',
+    requiresAuth: true,
+    requiresAdmin: true,
+    noIndex: true,
+    breadcrumbs: [
+      { label: 'Home', path: '/' },
+      { label: 'Admin', path: '/admin' },
+      { label: 'Anime Requests', path: '/admin/requests' },
+    ],
+  },
 };
 
 /**

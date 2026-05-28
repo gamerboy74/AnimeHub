@@ -63,6 +63,19 @@ export class VideoService {
         lowerUrl.includes('bysesayeveum.com') ||  // 9anime alternate embed host
         lowerUrl.includes('f75s.com') ||           // bysesayeveum embeddable frame host
         lowerUrl.includes('vidmoly.') ||          // vidmoly embed host (.biz, .net)
+        lowerUrl.includes('vidwish') ||           // vidwish embed host
+        lowerUrl.includes('streamwish') ||        // streamwish embed host
+        lowerUrl.includes('streamtape') ||        // streamtape embed host
+        lowerUrl.includes('streamhide') ||        // streamhide embed host
+        lowerUrl.includes('doodstream') ||        // doodstream embed host
+        lowerUrl.includes('gostream') ||          // gostream embed host
+        lowerUrl.includes('vidstreaming') ||      // vidstreaming embed host
+        lowerUrl.includes('streamvid') ||         // streamvid embed host
+        lowerUrl.includes('voe') ||               // voe embed host
+        lowerUrl.includes('filemoon') ||          // filemoon embed host
+        lowerUrl.includes('mixdrop') ||           // mixdrop embed host
+        lowerUrl.includes('rapidcloud') ||        // rapidcloud embed host
+        lowerUrl.includes('upstream') ||          // upstream embed host
         lowerUrl.match(/\/e\/[a-z0-9]+$/i)) {     // Generic /e/<id> embed pattern
       return 'iframe';
     }

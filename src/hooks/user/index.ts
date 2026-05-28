@@ -6,7 +6,27 @@ import { UserService } from '../../services/user'
 import type { Tables } from '../../lib/database/supabase'
 
 type Anime = Tables<'anime'>
-type UserProgress = Tables<'user_progress'>
+
+export interface UserProgressDetailed {
+  id: string
+  user_id: string
+  episode_id: string
+  progress_seconds: number
+  is_completed: boolean
+  last_watched: string
+  episode: {
+    id: string
+    episode_number: number
+    title: string | null
+    anime_id: string
+    duration: number | null
+    anime: {
+      id: string
+      title: string
+      poster_url: string | null
+    }
+  }
+}
 
 interface ContinueWatching {
   id: string
@@ -17,11 +37,20 @@ interface ContinueWatching {
   progressSeconds: number
   duration: number
   thumbnail?: string
-  anime: Anime
+  anime?: {
+    id: string
+    title: string
+    poster_url: string | null
+    rating?: number | null
+    year?: number | null
+    genres?: string[] | null
+    status?: string | null
+    total_episodes?: number | null
+  }
 }
 
 export function useUserProgress(userId?: string) {
-  const [progress, setProgress] = useState<UserProgress[]>([])
+  const [progress, setProgress] = useState<UserProgressDetailed[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -291,13 +320,27 @@ export function useUserWatchlist(userId?: string) {
   }
 }
 
+export interface UserStats {
+  completedEpisodes: number
+  totalFavorites: number
+  totalWatchlist: number
+  totalReviews: number
+  totalEpisodesWatched: number
+  watchTime: string
+  watchTimeHours: number
+  currentlyWatching: number
+}
+
 export function useUserStats(userId?: string) {
-  const [stats, setStats] = useState({
+  const [stats, setStats] = useState<UserStats>({
     completedEpisodes: 0,
-    totalEpisodes: 0,
-    favoritesCount: 0,
-    watchlistCount: 0,
-    reviewsCount: 0
+    totalFavorites: 0,
+    totalWatchlist: 0,
+    totalReviews: 0,
+    totalEpisodesWatched: 0,
+    watchTime: '0 hours',
+    watchTimeHours: 0,
+    currentlyWatching: 0
   })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -306,10 +349,13 @@ export function useUserStats(userId?: string) {
     if (!userId) {
       setStats({
         completedEpisodes: 0,
-        totalEpisodes: 0,
-        favoritesCount: 0,
-        watchlistCount: 0,
-        reviewsCount: 0
+        totalFavorites: 0,
+        totalWatchlist: 0,
+        totalReviews: 0,
+        totalEpisodesWatched: 0,
+        watchTime: '0 hours',
+        watchTimeHours: 0,
+        currentlyWatching: 0
       })
       setLoading(false)
       return

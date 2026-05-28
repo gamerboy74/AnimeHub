@@ -313,8 +313,6 @@ export default function AnimeDetailPage() {
               </Link>
             </div>
           </div>
-                        onMouseEnter={() => prefetchOnHover(`/player/${animeId}/${ep.number}`)}
-                        onFocus={() => prefetchOnHover(`/player/${animeId}/${ep.number}`)}
         </div>
       </div>
     );
@@ -713,6 +711,8 @@ export default function AnimeDetailPage() {
                           to={`/player/${anime.id}/${episodeNumber}`}
                           className="block"
                           aria-label={`Watch episode ${episodeNumber} of ${anime.title}`}
+                          onMouseEnter={() => prefetchOnHover(`/player/${anime.id}/${episodeNumber}`)}
+                          onFocus={() => prefetchOnHover(`/player/${anime.id}/${episodeNumber}`)}
                         >
                           <div className="flex items-center space-x-4">
                             <div

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { useQueryClient } from '@tanstack/react-query';
 import { HiAnimeScraperService } from '../../services/scrapers/hianime';
@@ -75,6 +75,15 @@ export const NineAnimeScraperComponent: React.FC<NineAnimeScraperComponentProps>
     status: 'pending' | 'scraping' | 'success' | 'error';
     message?: string;
   }>>({});
+
+  const logContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // Auto-scroll console logs area to bottom on new messages
+  useEffect(() => {
+    if (logContainerRef.current) {
+      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+    }
+  }, [progressMessages]);
 
   // Load anime list on component mount
   useEffect(() => {
@@ -822,7 +831,10 @@ export const NineAnimeScraperComponent: React.FC<NineAnimeScraperComponentProps>
           </div>
           {/* Real-time Logs Console */}
           {progressMessages.length > 0 && (
-            <div className="mt-6 p-4 bg-slate-900 text-slate-300 rounded-xl border border-slate-800 font-mono text-xs max-h-40 overflow-y-auto space-y-1">
+            <div
+              ref={logContainerRef}
+              className="mt-6 p-4 bg-slate-900 text-slate-300 rounded-xl border border-slate-800 font-mono text-xs max-h-40 overflow-y-auto space-y-1 scroll-smooth"
+            >
               {progressMessages.map((msg, idx) => (
                 <div key={idx} className="flex gap-2">
                   <span className="text-slate-500">[{idx + 1}]</span>

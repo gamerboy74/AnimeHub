@@ -1,6 +1,7 @@
 import * as cheerio from "cheerio";
 import axios from "axios";
 import { getBrowser, enqueue, supabase } from "../index.js";
+import { extractSeasonNumber } from "../utils/seasonExtractor.js";
 
 export function normalizeDuration(val) {
   if (!val) return 1440; // Default to 24 minutes (1440 seconds)
@@ -68,7 +69,12 @@ export class NineAnimeScraperService {
         );
 
         if (!searchResult.success) {
-          throw new Error(searchResult.error || "Search failed");
+          console.log(`ℹ️ 9anime Season/Anime not found: ${searchResult.error}. Gracefully skipping.`);
+          return {
+            success: true,
+            skipped: true,
+            error: searchResult.error || "Anime/Season not found on 9anime",
+          };
         }
 
         const { animeLink, animeId } = searchResult;
@@ -213,7 +219,7 @@ export class NineAnimeScraperService {
               embeddingReason: episodeResult.embeddingReason,
               scrapedAt: new Date().toISOString(),
             });
-            
+
             // Save to DB so that anime without initial episode stubs actually get stored.
             if (dbAnimeId && episodeResult.streamUrl) {
               await this.saveEpisodeToDatabase({
@@ -288,11 +294,11 @@ export class NineAnimeScraperService {
       // Build a normalized title slug from the provided animeTitle (if any)
       const titleSlug = animeTitle
         ? animeTitle.toLowerCase()
-            .replace(/[^a-z0-9\s-]/g, '')
-            .replace(/\s+/g, '-')
-            .replace(/-+/g, '-')
-            .replace(/[^a-z0-9-]/g, '')
-            .trim()
+          .replace(/[^a-z0-9\s-]/g, '')
+          .replace(/\s+/g, '-')
+          .replace(/-+/g, '-')
+          .replace(/[^a-z0-9-]/g, '')
+          .trim()
         : '';
 
       // Extract anime slug from the URL for filtering; prefer explicit titleSlug if available
@@ -512,8 +518,7 @@ export class NineAnimeScraperService {
         !videoUrl.match(/mega(play|cloud|backup|cdn|stream)/i);
 
       console.log(
-        `${isProtected ? "⚠️" : "✅"} Embedding protection: ${
-          isProtected ? "DETECTED" : "NONE"
+        `${isProtected ? "⚠️" : "✅"} Embedding protection: ${isProtected ? "DETECTED" : "NONE"
         }`
       );
       if (isProtected) {
@@ -538,7 +543,7 @@ export class NineAnimeScraperService {
     try {
       const cached = await cacheGet(`search:${animeTitle}:${episodeNumber}`);
       if (cached) return cached;
-    } catch {}
+    } catch { }
     try {
       // =====================================================================
       // STEP 0: Check if we already have a verified 9anime slug in the DB
@@ -576,7 +581,7 @@ export class NineAnimeScraperService {
                     // Save the verified season slug back to DB
                     await this.saveVerifiedSlug(dbAnimeId, seasonSlug);
                     const result = { success: true, animeLink: seasonUrl, animeId: seasonSlug };
-                    try { await cacheSet(`search:${animeTitle}:${episodeNumber}`, result, 300_000); } catch {}
+                    try { await cacheSet(`search:${animeTitle}:${episodeNumber}`, result, 300_000); } catch { }
                     return result;
                   } else {
                     console.log(`⚠️ Season-specific slug page exists but title mismatch (similarity: ${similarity.toFixed(2)})`);
@@ -597,10 +602,10 @@ export class NineAnimeScraperService {
               });
               if (testResp.status === 200) {
                 const result = { success: true, animeLink: slugUrl, animeId: baseSlug };
-                try { await cacheSet(`search:${animeTitle}:${episodeNumber}`, result, 300_000); } catch {}
+                try { await cacheSet(`search:${animeTitle}:${episodeNumber}`, result, 300_000); } catch { }
                 return result;
               }
-            } catch {}
+            } catch { }
 
             // Episode URL didn't work — verify the slug itself is still valid via episode 1
             if (episodeNumber > 1) {
@@ -620,7 +625,7 @@ export class NineAnimeScraperService {
                     slugValid: true,
                   };
                 }
-              } catch {}
+              } catch { }
             }
 
             console.log("⚠️ Cached slug no longer works, re-resolving...");
@@ -657,13 +662,13 @@ export class NineAnimeScraperService {
             // Verify this is actually the right anime by checking page content
             const pageTitle = this.extractPageTitle(testResponse.data);
             const similarity = this.titleSimilarity(animeTitle, pageTitle);
-            
+
             if (similarity >= 0.75) {
               console.log(`✅ Direct URL verified (similarity: ${similarity.toFixed(2)}): ${directUrl}`);
               // Save the verified slug to DB for future use
               await this.saveVerifiedSlug(dbAnimeId, slug);
               const result = { success: true, animeLink: directUrl, animeId: slug };
-              try { await cacheSet(`search:${animeTitle}:${episodeNumber}`, result, 300_000); } catch {}
+              try { await cacheSet(`search:${animeTitle}:${episodeNumber}`, result, 300_000); } catch { }
               return result;
             } else {
               console.log(`⚠️ Direct URL exists but title mismatch (similarity: ${similarity.toFixed(2)}): page="${pageTitle}" vs expected="${animeTitle}"`);
@@ -685,7 +690,7 @@ export class NineAnimeScraperService {
           // Save verified slug
           const foundSlug = searchResult.animeId;
           await this.saveVerifiedSlug(dbAnimeId, foundSlug);
-          try { await cacheSet(`search:${animeTitle}:${episodeNumber}`, searchResult, 300_000); } catch {}
+          try { await cacheSet(`search:${animeTitle}:${episodeNumber}`, searchResult, 300_000); } catch { }
           return searchResult;
         }
       }
@@ -695,7 +700,7 @@ export class NineAnimeScraperService {
       // =====================================================================
       console.log("🔍 All variants failed, trying Jikan API title resolution...");
       const jikanTitles = await this.resolveViaTitleFromJikan(animeTitle);
-      
+
       for (const jikanTitle of jikanTitles) {
         // Skip if we already tried this
         if (titleVariants.some(v => v.toLowerCase() === jikanTitle.toLowerCase())) continue;
@@ -725,17 +730,17 @@ export class NineAnimeScraperService {
             // Also update the English title in DB if we found one
             await this.updateTitleEnglish(dbAnimeId, jikanTitle);
             const result = { success: true, animeLink: directUrl, animeId: slug };
-            try { await cacheSet(`search:${animeTitle}:${episodeNumber}`, result, 300_000); } catch {}
+            try { await cacheSet(`search:${animeTitle}:${episodeNumber}`, result, 300_000); } catch { }
             return result;
           }
-        } catch {}
+        } catch { }
 
         // Also try searching 9anime with the Jikan title
         const searchResult = await this.search9animeByKeyword(jikanTitle, animeTitle, episodeNumber);
         if (searchResult.success) {
           await this.saveVerifiedSlug(dbAnimeId, searchResult.animeId);
           await this.updateTitleEnglish(dbAnimeId, jikanTitle);
-          try { await cacheSet(`search:${animeTitle}:${episodeNumber}`, searchResult, 300_000); } catch {}
+          try { await cacheSet(`search:${animeTitle}:${episodeNumber}`, searchResult, 300_000); } catch { }
           return searchResult;
         }
       }
@@ -754,19 +759,7 @@ export class NineAnimeScraperService {
   // =========================================================================
   // Check if two titles refer to different seasons of the same show
   static hasDifferentSeason(originalTitle, resolvedTitle) {
-    const seasonRegex = /(?:season\s*(\d+)|(\d+)(?:st|nd|rd|th)\s*season)/i;
-    const origMatch = originalTitle.match(seasonRegex);
-    const resolvedMatch = resolvedTitle.match(seasonRegex);
-
-    // One title has an explicit season and the other doesn't → different season
-    // (e.g. "[Oshi No Ko]" vs "[Oshi No Ko] Season 2")
-    if ((!origMatch && resolvedMatch) || (origMatch && !resolvedMatch)) return true;
-    // Neither has a season number → same (both are season 1 / base title)
-    if (!origMatch && !resolvedMatch) return false;
-    // Both have season numbers — compare them
-    const origSeason = origMatch[1] || origMatch[2];
-    const resolvedSeason = resolvedMatch[1] || resolvedMatch[2];
-    return origSeason !== resolvedSeason;
+    return extractSeasonNumber(originalTitle) !== extractSeasonNumber(resolvedTitle);
   }
 
   static buildSlug(title) {
@@ -788,7 +781,7 @@ export class NineAnimeScraperService {
   // =========================================================================
   static async getTitleVariants(animeTitle, dbAnimeId) {
     const variants = new Set();
-    
+
     // Always add the provided title first
     variants.add(animeTitle);
 
@@ -884,7 +877,7 @@ export class NineAnimeScraperService {
       // Collect all candidate links with their text
       const candidates = [];
       const linkSelectors = 'a[href*="/category/"], a[href*="/anime/"], a[href*="/v/"], a[href*="/watch/"], a[href*="-episode-"]';
-      
+
       $(linkSelectors).each((i, el) => {
         const href = $(el).attr("href") || "";
         const text = $(el).text().trim();
@@ -897,15 +890,25 @@ export class NineAnimeScraperService {
       console.log(`🔍 Found ${candidates.length} candidate links for "${searchTitle}"`);
 
       // Score each candidate by title similarity
-      const scoredCandidates = candidates.map(c => ({
-        ...c,
-        similarity: Math.max(
-          this.titleSimilarity(originalTitle, c.text),
-          this.titleSimilarity(searchTitle, c.text),
-          this.titleSimilarity(originalTitle, this.slugToTitle(c.href)),
-          this.titleSimilarity(searchTitle, this.slugToTitle(c.href))
-        ),
-      }));
+      const scoredCandidates = candidates.map(c => {
+        const textTitle = c.text;
+        const hrefTitle = this.slugToTitle(c.href);
+
+        // If candidate refers to a different season, reject it entirely (score = 0)
+        if (this.hasDifferentSeason(originalTitle, textTitle) || this.hasDifferentSeason(originalTitle, hrefTitle)) {
+          return { ...c, similarity: 0 };
+        }
+
+        return {
+          ...c,
+          similarity: Math.max(
+            this.titleSimilarity(originalTitle, textTitle),
+            this.titleSimilarity(searchTitle, textTitle),
+            this.titleSimilarity(originalTitle, hrefTitle),
+            this.titleSimilarity(searchTitle, hrefTitle)
+          ),
+        };
+      });
 
       // Sort by similarity descending
       scoredCandidates.sort((a, b) => b.similarity - a.similarity);
@@ -1211,9 +1214,9 @@ export class NineAnimeScraperService {
       const edgeKey =
         pb.decrypt_keys && pb.decrypt_keys.edge_1 && pb.decrypt_keys.edge_2
           ? Buffer.concat([
-              b64Decode(pb.decrypt_keys.edge_1),
-              b64Decode(pb.decrypt_keys.edge_2),
-            ])
+            b64Decode(pb.decrypt_keys.edge_1),
+            b64Decode(pb.decrypt_keys.edge_2),
+          ])
           : null;
 
       // Try payload1 with key_parts, then payload2 with edge keys
@@ -1253,7 +1256,7 @@ export class NineAnimeScraperService {
           console.log("🔄 Fallback: using embed_frame_url:", embedData.embed_frame_url);
           return embedData.embed_frame_url;
         }
-      } catch {}
+      } catch { }
       return null;
     } catch (e) {
       console.log("⚠️ bysesayeveum HLS extraction failed:", e.message);
@@ -1600,7 +1603,7 @@ export class NineAnimeScraperService {
     try {
       const cached = await cacheGet(`stream:${animeId}:${episodeNumber}`);
       if (cached) return cached;
-    } catch {}
+    } catch { }
     let browser;
     let context;
 
@@ -1615,8 +1618,7 @@ export class NineAnimeScraperService {
       // Verify browser has newContext method
       if (typeof browser.newContext !== "function") {
         throw new Error(
-          `Browser instance does not have newContext method. Browser type: ${typeof browser}, has newContext: ${
-            "newContext" in browser
+          `Browser instance does not have newContext method. Browser type: ${typeof browser}, has newContext: ${"newContext" in browser
           }`
         );
       }
@@ -2104,7 +2106,7 @@ export class NineAnimeScraperService {
       );
       try {
         await cacheSet(`stream:${animeId}:${episodeNumber}`, payload, 120_000);
-      } catch {}
+      } catch { }
       return payload;
     } catch (error) {
       console.error("❌ Error in extractVideoWithPuppeteer:", error.message);
@@ -2235,7 +2237,7 @@ export class NineAnimeScraperService {
             .eq('id', animeId)
             .single();
           thumbnailUrl = animeRow?.poster_url || null;
-        } catch {}
+        } catch { }
 
         const episodeData = {
           animeId: animeId,
