@@ -69,7 +69,7 @@ const IN_MEMORY_MAX_ENTRIES = parseInt(
 let redis = null; // Redis disabled
 console.log("✅ Using in-memory cache for performance optimization");
 
-async function cacheGet(key) {
+export async function cacheGet(key) {
   // Using in-memory cache only
   const entry = inMemoryCache.get(key);
   if (!entry) return null;
@@ -79,7 +79,7 @@ async function cacheGet(key) {
   }
   return entry.value;
 }
-async function cacheSet(key, value, ttlMs = 60_000) {
+export async function cacheSet(key, value, ttlMs = 60_000) {
   // Using in-memory cache only
   inMemoryCache.set(key, { value, expiresAt: Date.now() + ttlMs });
   // LRU-style trim when exceeding capacity
@@ -126,7 +126,7 @@ function cacheMiddleware(ttlMs = 60_000) {
         res.set("X-Cache", "MISS");
         try {
           void cacheSet(key, body, ttlMs);
-        } catch {}
+        } catch { }
         return originalJson(body);
       };
       next();
@@ -192,7 +192,7 @@ app.post("/api/perf-metrics", async (req, res) => {
       const content = await fs.readFile(filePath, "utf-8");
       existing = JSON.parse(content);
       if (!Array.isArray(existing)) existing = [];
-    } catch {}
+    } catch { }
     existing.push(payload);
     await fs.writeFile(filePath, JSON.stringify(existing, null, 2));
     res.json({ success: true });
@@ -1111,7 +1111,7 @@ app.post("/api/scrape-reanime-episode", async (req, res) => {
         url: s.iframeUrl,
         lang: s.lang || scrapeLang
       }));
-      
+
       if (videoServers.length === 0 && result.streamUrl) {
         videoServers.push({
           name: "Re:ANIME active",
@@ -1733,6 +1733,29 @@ app.post("/api/batch-scrape-animesuge-episodes-stream", async (req, res) => {
         }
 
         if (scrapeResult.success && scrapeResult.streamUrl) {
+          // If we resolved a watchUrl, cache it for subsequent episodes in this batch!
+          const resolvedWatch = scrapeResult.watchUrl || scrapeResult.episodeData?.watchUrl;
+          if (resolvedWatch && !baseWatchUrl) {
+            try {
+              const urlObj = new URL(resolvedWatch);
+              urlObj.pathname = urlObj.pathname.replace(/\/ep-\d+$/i, "");
+              baseWatchUrl = urlObj.toString();
+              console.log(`💾 AnimeSuge dynamically cached watch URL for this batch: ${baseWatchUrl}`);
+
+              // Also save to database scraper_urls
+              const { data: existing } = await supabase
+                .from("anime")
+                .select("scraper_urls")
+                .eq("id", animeId)
+                .single();
+              const merged = { ...(existing?.scraper_urls || {}), [cacheKey]: baseWatchUrl };
+              await supabase.from("anime").update({ scraper_urls: merged }).eq("id", animeId);
+              console.log(`💾 AnimeSuge database cache saved: ${baseWatchUrl}`);
+            } catch (err) {
+              console.warn("⚠️ Failed to dynamically cache AnimeSuge watch URL:", err.message);
+            }
+          }
+
           // Save to database
           const { data: existingEpisode } = await supabase
             .from("episodes")
@@ -1746,7 +1769,7 @@ app.post("/api/batch-scrape-animesuge-episodes-stream", async (req, res) => {
             url: s.iframeUrl,
             lang: (s.lang || requestedLang).toLowerCase()
           }));
-          
+
           if (videoServers.length === 0 && scrapeResult.streamUrl) {
             videoServers.push({
               name: "AnimeSuge active",
@@ -2097,6 +2120,30 @@ app.post("/api/batch-scrape-reanime-episodes-stream", async (req, res) => {
         );
 
         if (scrapeResult.success && scrapeResult.streamUrl) {
+          // If we resolved a watchUrl, cache it for subsequent episodes in this batch!
+          const resolvedWatch = scrapeResult.watchUrl || scrapeResult.episodeData?.watchUrl;
+          if (resolvedWatch && !baseWatchUrl) {
+            try {
+              const urlObj = new URL(resolvedWatch);
+              urlObj.searchParams.delete("ep");
+              urlObj.searchParams.delete("lang");
+              baseWatchUrl = urlObj.toString();
+              console.log(`💾 Re:ANIME dynamically cached watch URL for this batch: ${baseWatchUrl}`);
+
+              // Save to DB cache
+              const { data: existing } = await supabase
+                .from("anime")
+                .select("scraper_urls")
+                .eq("id", animeId)
+                .single();
+              const merged = { ...(existing?.scraper_urls || {}), [cacheKey]: baseWatchUrl };
+              await supabase.from("anime").update({ scraper_urls: merged }).eq("id", animeId);
+              console.log(`💾 Re:ANIME database cache saved: ${baseWatchUrl}`);
+            } catch (err) {
+              console.warn("⚠️ Failed to dynamically cache Re:ANIME watch URL:", err.message);
+            }
+          }
+
           // Save to database
           const { data: existingEpisode } = await supabase
             .from("episodes")
@@ -2112,7 +2159,7 @@ app.post("/api/batch-scrape-reanime-episodes-stream", async (req, res) => {
             url: s.iframeUrl,
             lang: s.lang || scrapeLang
           }));
-          
+
           if (videoServers.length === 0 && scrapeResult.streamUrl) {
             videoServers.push({
               name: "Re:ANIME active",
@@ -2273,8 +2320,8 @@ app.post("/api/batch-scrape-sanjianime-episodes-stream", async (req, res) => {
         (s) =>
           (s.lang || "").toLowerCase() === lang.toLowerCase() &&
           ((s.name || "").toLowerCase().includes("sanji") ||
-           (s.name || "").toLowerCase().includes("server") ||
-           (s.url || "").includes("sanjianime.com"))
+            (s.name || "").toLowerCase().includes("server") ||
+            (s.url || "").includes("sanjianime.com"))
       );
     }
 
@@ -2436,6 +2483,29 @@ app.post("/api/batch-scrape-sanjianime-episodes-stream", async (req, res) => {
         );
 
         if (scrapeResult.success && scrapeResult.streamUrl) {
+          // If we resolved a watchUrl, cache it for subsequent episodes in this batch!
+          const resolvedWatch = scrapeResult.watchUrl || scrapeResult.episodeData?.watchUrl;
+          if (resolvedWatch && !baseWatchUrl) {
+            try {
+              const urlObj = new URL(resolvedWatch);
+              urlObj.pathname = urlObj.pathname.replace(/\/episode-\d+$/i, "");
+              baseWatchUrl = urlObj.toString();
+              console.log(`💾 Sanji Anime dynamically cached watch URL for this batch: ${baseWatchUrl}`);
+
+              // Save to DB cache
+              const { data: existing } = await supabase
+                .from("anime")
+                .select("scraper_urls")
+                .eq("id", animeId)
+                .single();
+              const merged = { ...(existing?.scraper_urls || {}), [cacheKey]: baseWatchUrl };
+              await supabase.from("anime").update({ scraper_urls: merged }).eq("id", animeId);
+              console.log(`💾 Sanji Anime database cache saved: ${baseWatchUrl}`);
+            } catch (err) {
+              console.warn("⚠️ Failed to dynamically cache Sanji Anime watch URL:", err.message);
+            }
+          }
+
           // Save to database
           const { data: existingEpisode } = await supabase
             .from("episodes")
@@ -3531,9 +3601,9 @@ app.post("/api/add-scraped-episode", async (req, res) => {
       );
 
       // Preserve existing beautiful title if it exists and is not generic "Episode X"
-      const hasBeautifulTitle = existingEpisode.title && 
-                                !existingEpisode.title.toLowerCase().startsWith("episode") &&
-                                existingEpisode.title.trim() !== String(episodeData.number);
+      const hasBeautifulTitle = existingEpisode.title &&
+        !existingEpisode.title.toLowerCase().startsWith("episode") &&
+        existingEpisode.title.trim() !== String(episodeData.number);
 
       const titleToUpdate = hasBeautifulTitle ? existingEpisode.title : episodeData.title;
 
@@ -3560,11 +3630,10 @@ app.post("/api/add-scraped-episode", async (req, res) => {
           video_url: episodeData.streamUrl,
           video_servers: mergedServers,
           duration: episodeData.duration || 1440, // Default to 24 minutes if not provided
-          description: `Scraped from 9anime.org.lv - ${
-            episodeData.embeddingProtected
+          description: `Scraped from 9anime.org.lv - ${episodeData.embeddingProtected
               ? "May have embedding protection"
               : "Embedding friendly"
-          }`,
+            }`,
         })
         .eq("anime_id", animeId)
         .eq("episode_number", episodeData.number)
@@ -3588,11 +3657,10 @@ app.post("/api/add-scraped-episode", async (req, res) => {
           video_servers: newServers,
           duration: episodeData.duration || 1440, // Default to 24 minutes (1440 seconds) if not provided
           thumbnail_url: null,
-          description: `Scraped from 9anime.org.lv - ${
-            episodeData.embeddingProtected
+          description: `Scraped from 9anime.org.lv - ${episodeData.embeddingProtected
               ? "May have embedding protection"
               : "Embedding friendly"
-          }`,
+            }`,
           is_premium: false,
         })
         .select()
@@ -3607,8 +3675,7 @@ app.post("/api/add-scraped-episode", async (req, res) => {
     }
 
     console.log(
-      `✅ Episode ${episodeData.number} ${
-        existingEpisode ? "updated" : "added"
+      `✅ Episode ${episodeData.number} ${existingEpisode ? "updated" : "added"
       } to database`
     );
 
@@ -3616,9 +3683,8 @@ app.post("/api/add-scraped-episode", async (req, res) => {
 
     res.json({
       success: true,
-      message: `Episode ${episodeData.number} ${
-        existingEpisode ? "updated" : "added"
-      } successfully!`,
+      message: `Episode ${episodeData.number} ${existingEpisode ? "updated" : "added"
+        } successfully!`,
       episode: data,
     });
   } catch (error) {
@@ -3885,8 +3951,8 @@ app.get(
       const progressPercentage =
         progress.total_episodes > 0
           ? Math.round(
-              (progress.completed_episodes / progress.total_episodes) * 100
-            )
+            (progress.completed_episodes / progress.total_episodes) * 100
+          )
           : 0;
 
       // Estimate time remaining
@@ -4497,6 +4563,12 @@ class EpisodeScheduler {
     while (true) {
       if (this.scrapedThisHour >= this.rateLimit) break;
 
+      // Stop if we exceed the total episodes count for completed/non-ongoing anime
+      if (anime.total_episodes && ep > anime.total_episodes && anime.status !== 'ongoing') {
+        console.log(`  ℹ️ Reached total episodes limit (${anime.total_episodes}) for completed anime "${animeTitle}". Stopping.`);
+        break;
+      }
+
       try {
         console.log(`  🔍 Checking "${animeTitle}" EP ${ep}…`);
         const result = await NineAnimeScraperService.scrapeAndSaveEpisode(
@@ -4506,7 +4578,7 @@ class EpisodeScheduler {
           { timeout: 45000, retries: 2 }
         );
 
-        if (result.success) {
+        if (result.success && !result.skipped && result.streamUrl) {
           this.scrapedThisHour++;
           results.found++;
           results.details.push({ anime: animeTitle, episode: ep, status: 'found' });

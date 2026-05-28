@@ -1,6 +1,20 @@
 import { getBrowser, supabase } from "../index.js";
 import { extractSeasonNumber } from "../utils/seasonExtractor.js";
 
+export function getCoreTitle(title) {
+  if (!title) return "";
+  return title
+    .toLowerCase()
+    .replace(/(?:season\s*\d+|s\d+|\d+(?:nd|rd|th|st)?\s*season|\d+(?:nd|rd|th|st)?\s*sseason)/gi, "")
+    .replace(/\b(?:i{1,3}|iv|v|vi{1,3}|ix|x)\b\s*$/i, "")
+    .replace(/\b\d+\b\s*$/gi, "")
+    .replace(/\b(?:dub|sub|uncensored|uncut|tv|dual[- ]audio|uncut)\b/g, " ")
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/\[[^\]]*\]/g, " ")
+    .replace(/[^a-z0-9]/g, "")
+    .trim();
+}
+
 export class AnimeSugeScraperService {
   static BASE_URL = "https://animesuge.cz";
   static USER_AGENT =
@@ -77,6 +91,7 @@ export class AnimeSugeScraperService {
     const targetSeason = extractSeasonNumber(title);
     const cleanStr = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
     const targetClean = cleanStr(title);
+    const targetCore = getCoreTitle(title);
 
     let exactMatch = null;
     const partialMatches = [];
@@ -89,12 +104,18 @@ export class AnimeSugeScraperService {
       }
 
       const textClean = cleanStr(link.text);
+      const textCore = getCoreTitle(link.text);
+
       if (textClean === targetClean) {
         exactMatch = link.href;
-        console.log(`🎯 EXACT match: "${link.text}" → ${link.href}`);
+        console.log(`🎯 EXACT match: "${link.text}" -> ${link.href}`);
         break;
       }
-      if (textClean && (textClean.includes(targetClean) || targetClean.includes(textClean))) {
+
+      const isCleanMatch = textClean && (textClean.includes(targetClean) || targetClean.includes(textClean));
+      const isCoreMatch = textCore && (textCore.includes(targetCore) || targetCore.includes(textCore));
+
+      if (isCleanMatch || isCoreMatch) {
         partialMatches.push({ href: link.href, text: link.text, textClean });
       }
     }

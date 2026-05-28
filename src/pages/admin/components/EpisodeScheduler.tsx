@@ -161,14 +161,12 @@ export default function EpisodeScheduler() {
           <button
             onClick={handleToggle}
             disabled={toggling}
-            className={`relative w-12 h-6 rounded-full transition-colors duration-200 ${
-              status.enabled ? 'bg-green-500' : 'bg-slate-300'
-            } ${toggling ? 'opacity-50' : 'cursor-pointer'}`}
+            className={`relative w-12 h-6 rounded-full transition-colors duration-200 ${status.enabled ? 'bg-green-500' : 'bg-slate-300'
+              } ${toggling ? 'opacity-50' : 'cursor-pointer'}`}
           >
             <span
-              className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${
-                status.enabled ? 'translate-x-6' : 'translate-x-0'
-              }`}
+              className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${status.enabled ? 'translate-x-6' : 'translate-x-0'
+                }`}
             />
           </button>
         </div>
@@ -178,10 +176,9 @@ export default function EpisodeScheduler() {
           <div className="bg-slate-50 rounded-lg p-2.5 text-center">
             <div className="text-xs text-slate-500 mb-0.5">Status</div>
             <div className="flex items-center justify-center gap-1.5">
-              <div className={`w-2 h-2 rounded-full ${
-                status.running ? 'bg-amber-500 animate-pulse' :
-                status.enabled ? 'bg-green-500' : 'bg-slate-400'
-              }`} />
+              <div className={`w-2 h-2 rounded-full ${status.running ? 'bg-amber-500 animate-pulse' :
+                  status.enabled ? 'bg-green-500' : 'bg-slate-400'
+                }`} />
               <span className="text-sm font-medium text-slate-700">
                 {status.running ? 'Running' : status.enabled ? 'Idle' : 'Off'}
               </span>
@@ -234,10 +231,9 @@ export default function EpisodeScheduler() {
           </div>
           <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
             <div
-              className={`h-full rounded-full transition-all ${
-                status.scrapedThisHour / status.rateLimit > 0.8 ? 'bg-red-400' :
-                status.scrapedThisHour / status.rateLimit > 0.5 ? 'bg-amber-400' : 'bg-green-400'
-              }`}
+              className={`h-full rounded-full transition-all ${status.scrapedThisHour / status.rateLimit > 0.8 ? 'bg-red-400' :
+                  status.scrapedThisHour / status.rateLimit > 0.5 ? 'bg-amber-400' : 'bg-green-400'
+                }`}
               style={{ width: `${Math.min(100, (status.scrapedThisHour / status.rateLimit) * 100)}%` }}
             />
           </div>
@@ -282,20 +278,18 @@ export default function EpisodeScheduler() {
               className="px-6 py-2.5 flex items-center justify-between text-sm border-b border-slate-100 last:border-0 hover:bg-slate-50"
             >
               <div className="flex items-center gap-2 min-w-0">
-                <i className={`text-lg flex-shrink-0 ${
-                  d.status === 'found' ? 'ri-check-line text-green-500' :
-                  d.status === 'error' ? 'ri-error-warning-line text-red-500' :
-                  'ri-time-line text-slate-400'
-                }`} />
+                <i className={`text-lg flex-shrink-0 ${d.status === 'found' ? 'ri-check-line text-green-500' :
+                    d.status === 'error' ? 'ri-error-warning-line text-red-500' :
+                      'ri-time-line text-slate-400'
+                  }`} />
                 <span className="truncate text-slate-700">{d.anime}</span>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0 ml-3">
                 <span className="text-slate-500">EP {d.episode}</span>
-                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                  d.status === 'found' ? 'bg-green-100 text-green-700' :
-                  d.status === 'error' ? 'bg-red-100 text-red-700' :
-                  'bg-slate-100 text-slate-600'
-                }`}>
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${d.status === 'found' ? 'bg-green-100 text-green-700' :
+                    d.status === 'error' ? 'bg-red-100 text-red-700' :
+                      'bg-slate-100 text-slate-600'
+                  }`}>
                   {d.status === 'not_available' ? 'no new ep' : d.status}
                 </span>
               </div>

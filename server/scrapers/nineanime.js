@@ -1,6 +1,6 @@
 import * as cheerio from "cheerio";
 import axios from "axios";
-import { getBrowser, enqueue, supabase } from "../index.js";
+import { getBrowser, enqueue, supabase, cacheGet, cacheSet } from "../index.js";
 import { extractSeasonNumber } from "../utils/seasonExtractor.js";
 
 export function normalizeDuration(val) {
@@ -644,12 +644,11 @@ export class NineAnimeScraperService {
       // =====================================================================
       // STEP 2: Try direct URL construction with each title variant
       // =====================================================================
-      for (const variant of titleVariants) {
-        const slug = this.buildSlug(variant);
-        if (!slug) continue;
+      const slugsToTest = [...new Set(titleVariants.map(v => this.buildSlug(v)).filter(Boolean))];
+      console.log(`🔗 Testing direct URL slugs: ${JSON.stringify(slugsToTest)}`);
 
+      for (const slug of slugsToTest) {
         const directUrl = `${this.BASE_URL}/${slug}-episode-${episodeNumber}/`;
-        console.log(`🔗 Testing direct URL: ${directUrl} (from: "${variant}")`);
 
         try {
           const testResponse = await axios.get(directUrl, {
@@ -675,17 +674,32 @@ export class NineAnimeScraperService {
             }
           }
         } catch (error) {
-          console.log(`❌ Direct URL test failed for "${variant}": ${error.message}`);
+          // Keep silent on 404/network errors for direct URLs to keep console clean
         }
       }
 
       // =====================================================================
-      // STEP 3: Search 9anime with each title variant
+      // STEP 3: Search 9anime with distinct title variants
       // =====================================================================
       console.log("🔍 Direct URLs failed, searching 9anime...");
 
+      // Deduplicate by normalizing query strings to avoid searching same thing
+      const searchQueries = [];
+      const seenQueries = new Set();
       for (const variant of titleVariants) {
-        const searchResult = await this.search9animeByKeyword(variant, animeTitle, episodeNumber);
+        const normalizedQuery = variant.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
+        if (normalizedQuery && !seenQueries.has(normalizedQuery)) {
+          seenQueries.add(normalizedQuery);
+          searchQueries.push(variant);
+        }
+      }
+
+      // Limit search to at most 3 distinct queries to save HTTP requests and reduce noise
+      const limitedSearchQueries = searchQueries.slice(0, 3);
+      console.log(`🔍 Distinct search queries to try (max 3): ${JSON.stringify(limitedSearchQueries)}`);
+
+      for (const query of limitedSearchQueries) {
+        const searchResult = await this.search9animeByKeyword(query, animeTitle, episodeNumber);
         if (searchResult.success) {
           // Save verified slug
           const foundSlug = searchResult.animeId;
@@ -715,7 +729,6 @@ export class NineAnimeScraperService {
         if (!slug) continue;
 
         const directUrl = `${this.BASE_URL}/${slug}-episode-${episodeNumber}/`;
-        console.log(`🔗 Testing Jikan-resolved URL: ${directUrl} (from: "${jikanTitle}")`);
 
         try {
           const testResponse = await axios.get(directUrl, {
@@ -848,7 +861,7 @@ export class NineAnimeScraperService {
       }
     }
 
-    return [...variants].filter(Boolean);
+    return [...variants].filter(Boolean).slice(0, 8);
   }
 
   // =========================================================================
@@ -883,7 +896,19 @@ export class NineAnimeScraperService {
         const text = $(el).text().trim();
         if (href && text) {
           const fullUrl = href.startsWith("http") ? href : this.BASE_URL + href;
-          candidates.push({ url: fullUrl, text, href });
+          // Filter out obvious social share links or external links immediately
+          const isSocial =
+            fullUrl.includes("facebook.com") ||
+            fullUrl.includes("twitter.com") ||
+            fullUrl.includes("whatsapp") ||
+            fullUrl.includes("pinterest.com") ||
+            fullUrl.includes("tumblr.com") ||
+            fullUrl.includes("reddit.com") ||
+            fullUrl.includes("telegram.me");
+
+          if (!isSocial) {
+            candidates.push({ url: fullUrl, text, href });
+          }
         }
       });
 
@@ -913,17 +938,21 @@ export class NineAnimeScraperService {
       // Sort by similarity descending
       scoredCandidates.sort((a, b) => b.similarity - a.similarity);
 
-      // Log top candidates for debugging
-      const topN = scoredCandidates.slice(0, 5);
-      for (const c of topN) {
-        console.log(`   📊 Score ${c.similarity.toFixed(2)}: "${c.text}" → ${c.url}`);
+      const bestSimilarity = scoredCandidates[0]?.similarity || 0;
+
+      // Log top candidates only if they are somewhat relevant (>= 0.3) to reduce noise
+      if (bestSimilarity >= 0.3) {
+        const topN = scoredCandidates.slice(0, 5);
+        for (const c of topN) {
+          console.log(`   📊 Score ${c.similarity.toFixed(2)}: "${c.text}" → ${c.url}`);
+        }
       }
 
       // Accept only candidates with decent similarity (>= 0.6)
       const bestMatch = scoredCandidates.find(c => c.similarity >= 0.6);
 
       if (!bestMatch) {
-        console.log(`❌ No good match found for "${searchTitle}" (best similarity: ${scoredCandidates[0]?.similarity?.toFixed(2) || 'N/A'})`);
+        console.log(`❌ No good match found for "${searchTitle}" (best similarity: ${bestSimilarity.toFixed(2)})`);
         return { success: false, error: "No matching anime found in search results" };
       }
 
@@ -974,6 +1003,24 @@ export class NineAnimeScraperService {
 
       const titles = [];
       for (const anime of results) {
+        // Collect all titles for this anime entry to verify if it matches our query
+        const allEntryTitles = [];
+        if (anime.title) allEntryTitles.push(anime.title);
+        if (anime.title_english) allEntryTitles.push(anime.title_english);
+        if (anime.title_synonyms && Array.isArray(anime.title_synonyms)) {
+          allEntryTitles.push(...anime.title_synonyms);
+        }
+
+        // Check if at least one title in this Jikan entry is similar to the search query
+        const hasMatchingTitle = allEntryTitles.some(t => 
+          t && this.titleSimilarity(animeTitle, t) >= 0.4
+        );
+
+        if (!hasMatchingTitle) {
+          console.log(`⚠️ Rejecting Jikan entry "${anime.title}" — no titles match query similarity threshold`);
+          continue;
+        }
+
         // Add English title (most likely to match 9anime)
         if (anime.title_english) titles.push(anime.title_english);
         // Add default title (usually romaji)
@@ -1035,6 +1082,19 @@ export class NineAnimeScraperService {
   // =========================================================================
   // HELPER: Calculate title similarity (Jaccard on words + contains check)
   // =========================================================================
+
+  /**
+   * Words that are too generic to contribute meaningfully to title matching.
+   * Prevents false positives like "Anime List" scoring 0.51 against
+   * "Tougen Anki Mini Anime" because "anime" is a substring.
+   */
+  static SIMILARITY_STOPWORDS = new Set([
+    'anime', 'the', 'a', 'an', 'of', 'to', 'and', 'in', 'on', 'at', 'is',
+    'it', 'by', 'be', 'as', 'or', 'list', 'watch', 'online', 'episode',
+    'sub', 'dub', 'english', 'dubbed', 'subbed', 'series', 'season', 'part',
+    'arc', 'ova', 'tv', 'movie', 'film', 'special', 'no', 'wo', 'ga', 'wa',
+  ]);
+
   static titleSimilarity(title1, title2) {
     if (!title1 || !title2) return 0;
 
@@ -1051,30 +1111,74 @@ export class NineAnimeScraperService {
     // Exact match
     if (a === b) return 1.0;
 
-    // Contains check — but penalise large length differences
-    // "one piece" ⊂ "one piece the movie" should NOT score 0.85
-    if (a.includes(b) || b.includes(a)) {
+    // Core title exact match (ignoring season notation variations like "Season 3" vs "III")
+    const getCore = (title) => {
+      if (!title) return "";
+      return title
+        .toLowerCase()
+        .replace(/(?:season\s*\d+|s\d+|\d+(?:nd|rd|th|st)?\s*season|\d+(?:nd|rd|th|st)?\s*sseason)/gi, "")
+        .replace(/\b(?:i{1,3}|iv|v|vi{1,3}|ix|x)\b\s*$/i, "")
+        .replace(/\b\d+\b\s*$/gi, "")
+        .replace(/\b(?:dub|sub|uncensored|uncut|tv|dual[- ]audio|uncut)\b/g, " ")
+        .replace(/\([^)]*\)/g, " ")
+        .replace(/\[[^\]]*\]/g, " ")
+        .replace(/[^a-z0-9]/g, "")
+        .trim();
+    };
+
+    if (getCore(title1) === getCore(title2) && getCore(title1) !== "") {
+      return 0.95; // High similarity for identical core titles
+    }
+
+    // -----------------------------------------------------------------------
+    // Build "meaningful words" sets by stripping stopwords.
+    // This prevents single generic words like "anime" or "list" from
+    // triggering the contains check and inflating the score.
+    // -----------------------------------------------------------------------
+    const getMeaningfulWords = (str) =>
+      str.split(" ").filter((w) => w.length > 1 && !this.SIMILARITY_STOPWORDS.has(w));
+
+    const mWordsA = getMeaningfulWords(a);
+    const mWordsB = getMeaningfulWords(b);
+
+    // If either title has no meaningful words after stopword removal, bail out.
+    if (mWordsA.length === 0 || mWordsB.length === 0) return 0;
+
+    // -----------------------------------------------------------------------
+    // Contains check — only fire when the shorter string has ≥ 2 meaningful
+    // words. This prevents "anime" (1 word) from matching inside any title
+    // that happens to contain the word "anime".
+    // -----------------------------------------------------------------------
+    const meaningfulA = mWordsA.join(" ");
+    const meaningfulB = mWordsB.join(" ");
+
+    if (mWordsB.length >= 2 && meaningfulA.includes(meaningfulB)) {
       const ratio = Math.min(a.length, b.length) / Math.max(a.length, b.length);
-      // Only give high score if the strings are similar in length (ratio > 0.8)
-      // Otherwise scale down: e.g. 9/19 = 0.47 → score ~0.55
+      return ratio >= 0.8 ? 0.9 : 0.4 + ratio * 0.5;
+    }
+    if (mWordsA.length >= 2 && meaningfulB.includes(meaningfulA)) {
+      const ratio = Math.min(a.length, b.length) / Math.max(a.length, b.length);
       return ratio >= 0.8 ? 0.9 : 0.4 + ratio * 0.5;
     }
 
-    // Jaccard similarity on words
-    const wordsA = new Set(a.split(" ").filter((w) => w.length > 1));
-    const wordsB = new Set(b.split(" ").filter((w) => w.length > 1));
+    // -----------------------------------------------------------------------
+    // Jaccard similarity on meaningful words
+    // -----------------------------------------------------------------------
+    const setA = new Set(mWordsA);
+    const setB = new Set(mWordsB);
 
-    if (wordsA.size === 0 || wordsB.size === 0) return 0;
-
-    const intersection = new Set([...wordsA].filter((w) => wordsB.has(w)));
-    const union = new Set([...wordsA, ...wordsB]);
+    const intersection = new Set([...setA].filter((w) => setB.has(w)));
+    const union = new Set([...setA, ...setB]);
     const jaccard = intersection.size / union.size;
 
-    // Also check order-aware similarity with significant words
-    const significantA = [...wordsA].filter((w) => w.length > 2);
-    const significantB = [...wordsB].filter((w) => w.length > 2);
+    // Also check order-aware ratio using significant words (> 2 chars)
+    const significantA = mWordsA.filter((w) => w.length > 2);
+    const significantB = mWordsB.filter((w) => w.length > 2);
     const significantMatches = significantA.filter((w) => significantB.includes(w)).length;
-    const significantRatio = significantA.length > 0 ? significantMatches / Math.max(significantA.length, significantB.length) : 0;
+    const significantRatio =
+      significantA.length > 0
+        ? significantMatches / Math.max(significantA.length, significantB.length)
+        : 0;
 
     return Math.max(jaccard, significantRatio);
   }

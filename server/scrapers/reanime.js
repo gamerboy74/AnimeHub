@@ -1,6 +1,20 @@
 import { getBrowser } from "../index.js";
 import { extractSeasonNumber } from "../utils/seasonExtractor.js";
 
+export function getCoreTitle(title) {
+  if (!title) return "";
+  return title
+    .toLowerCase()
+    .replace(/(?:season\s*\d+|s\d+|\d+(?:nd|rd|th|st)?\s*season|\d+(?:nd|rd|th|st)?\s*sseason)/gi, "")
+    .replace(/\b(?:i{1,3}|iv|v|vi{1,3}|ix|x)\b\s*$/i, "")
+    .replace(/\b\d+\b\s*$/gi, "")
+    .replace(/\b(?:dub|sub|uncensored|uncut|tv|dual[- ]audio|uncut)\b/g, " ")
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/\[[^\]]*\]/g, " ")
+    .replace(/[^a-z0-9]/g, "")
+    .trim();
+}
+
 export class ReAnimeScraperService {
   static BASE_URL = "https://reanime.to";
   static USER_AGENT =
@@ -84,6 +98,7 @@ export class ReAnimeScraperService {
       const targetSeason = extractSeasonNumber(inputUrl);
       const cleanStr = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
       const targetClean = cleanStr(inputUrl);
+      const targetCore = getCoreTitle(inputUrl);
 
       let matchedLink = null;
       for (const link of animeLinks) {
@@ -94,7 +109,12 @@ export class ReAnimeScraperService {
         }
 
         const textClean = cleanStr(link.text);
-        if (textClean && (textClean.includes(targetClean) || targetClean.includes(textClean))) {
+        const textCore = getCoreTitle(link.text);
+
+        const isCleanMatch = textClean && (textClean.includes(targetClean) || targetClean.includes(textClean));
+        const isCoreMatch = textCore && (textCore.includes(targetCore) || targetCore.includes(textCore));
+
+        if (isCleanMatch || isCoreMatch) {
           matchedLink = link.href;
           console.log(`🎯 Found matching anime page: "${link.text}" -> ${link.href}`);
           break;

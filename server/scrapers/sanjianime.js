@@ -1,6 +1,20 @@
 import { getBrowser, supabase } from "../index.js";
 import { extractSeasonNumber } from "../utils/seasonExtractor.js";
 
+export function getCoreTitle(title) {
+  if (!title) return "";
+  return title
+    .toLowerCase()
+    .replace(/(?:season\s*\d+|s\d+|\d+(?:nd|rd|th|st)?\s*season|\d+(?:nd|rd|th|st)?\s*sseason)/gi, "")
+    .replace(/\b(?:i{1,3}|iv|v|vi{1,3}|ix|x)\b\s*$/i, "")
+    .replace(/\b\d+\b\s*$/gi, "")
+    .replace(/\b(?:dub|sub|uncensored|uncut|tv|dual[- ]audio|uncut)\b/g, " ")
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/\[[^\]]*\]/g, " ")
+    .replace(/[^a-z0-9]/g, "")
+    .trim();
+}
+
 export class SanjiAnimeScraperService {
   static BASE_URL = "https://sanjianime.com";
   static USER_AGENT =
@@ -70,9 +84,15 @@ export class SanjiAnimeScraperService {
           });
 
           const normalizedTitle = inputUrl.toLowerCase().replace(/[^a-z0-9]/g, "");
+          const targetCore = getCoreTitle(inputUrl);
+
           const directMatch = filteredLinks.find((link) => {
             const normalizedText = link.text.toLowerCase().replace(/[^a-z0-9]/g, "");
-            return normalizedText && (normalizedText.includes(normalizedTitle) || normalizedTitle.includes(normalizedText));
+            const textCore = getCoreTitle(link.text);
+
+            const isCleanMatch = normalizedText && (normalizedText.includes(normalizedTitle) || normalizedTitle.includes(normalizedText));
+            const isCoreMatch = textCore && (textCore.includes(targetCore) || targetCore.includes(textCore));
+            return isCleanMatch || isCoreMatch;
           });
 
           matchedAnimeUrl = directMatch?.href || filteredLinks[0]?.href || "";
@@ -189,7 +209,7 @@ export class SanjiAnimeScraperService {
         for (const child of matchingFrame.childFrames()) {
           const childData = await evaluateFrame(child);
           if (childData) frameDataList.push(childData);
-          
+
           // 3. Evaluate grandchild frames
           for (const grandchild of child.childFrames()) {
             const grandchildData = await evaluateFrame(grandchild);
@@ -346,7 +366,7 @@ export class SanjiAnimeScraperService {
         console.error(`❌ Attempt ${attempt} failed:`, error.message);
 
         if (context) {
-          await context.close().catch(() => {});
+          await context.close().catch(() => { });
         }
 
         if (attempt < retries) {
@@ -392,14 +412,14 @@ export class SanjiAnimeScraperService {
 
         const otherServers = Array.isArray(currentEp?.video_servers)
           ? currentEp.video_servers.filter(
-              (server) =>
-                !mergedServers.some(
-                  (newServer) =>
-                    newServer.url === server.url &&
-                    (newServer.name || "").toLowerCase() === (server.name || "").toLowerCase() &&
-                    (newServer.lang || "").toLowerCase() === (server.lang || "").toLowerCase()
-                )
-            )
+            (server) =>
+              !mergedServers.some(
+                (newServer) =>
+                  newServer.url === server.url &&
+                  (newServer.name || "").toLowerCase() === (server.name || "").toLowerCase() &&
+                  (newServer.lang || "").toLowerCase() === (server.lang || "").toLowerCase()
+              )
+          )
           : [];
 
         await supabase

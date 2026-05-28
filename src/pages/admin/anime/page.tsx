@@ -59,6 +59,17 @@ export default function AnimeManagement() {
   const [selectedAnimeForScraping, setSelectedAnimeForScraping] = useState<any>(null);
   const [showLargeScraper, setShowLargeScraper] = useState(false);
   const [selectedAnimeForLargeScraping, setSelectedAnimeForLargeScraping] = useState<any>(null);
+  const [copiedId, setCopiedId] = useState(false);
+
+  const handleCopyId = async (id: string) => {
+    try {
+      await navigator.clipboard.writeText(id);
+      setCopiedId(true);
+      setTimeout(() => setCopiedId(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy ID:', err);
+    }
+  };
 
   const fetchAnime = async (page: number = 1) => {
     try {
@@ -260,6 +271,7 @@ This action cannot be undone.`,
     setSelectedAnimeForModal(null);
     setAnimeAnalytics(null);
     setAnimeEpisodes([]); // Clear episodes when modal closes
+    setCopiedId(false);
   };
 
   const handleAnimeCreated = async (_newAnime?: any) => {
@@ -1355,13 +1367,35 @@ This action cannot be undone.`,
                       
                       <motion.div 
                         whileHover={{ scale: 1.05 }}
-                        className="bg-slate-50 rounded-xl p-4 border border-slate-100 shadow-sm"
+                        className="bg-slate-50 rounded-xl p-4 border border-slate-100 shadow-sm transition-all duration-200"
                       >
-                        <div className="flex items-center gap-2 mb-1">
-                          <i className="ri-hashtag text-slate-500 text-xl"></i>
-                          <span className="text-xs font-medium text-slate-600">Anime ID</span>
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center gap-2">
+                            <i className="ri-hashtag text-slate-500 text-xl"></i>
+                            <span className="text-xs font-medium text-slate-600">Anime ID</span>
+                          </div>
+                          <button
+                            onClick={() => handleCopyId(selectedAnimeForModal.id)}
+                            className={`p-1 rounded-md transition-all duration-200 flex items-center justify-center ${
+                              copiedId 
+                                ? 'bg-emerald-100 text-emerald-700 shadow-sm' 
+                                : 'bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-700 shadow-sm'
+                            }`}
+                            title="Copy Anime ID"
+                          >
+                            <i className={copiedId ? 'ri-check-line text-xs font-bold' : 'ri-file-copy-line text-xs'}></i>
+                          </button>
                         </div>
-                        <p className="font-mono text-xs text-slate-900 truncate">{selectedAnimeForModal.id}</p>
+                        <div className="flex items-center justify-between gap-1.5 mt-2">
+                          <p className="font-mono text-xs text-slate-900 truncate select-all flex-1" title={selectedAnimeForModal.id}>
+                            {selectedAnimeForModal.id}
+                          </p>
+                          {copiedId && (
+                            <span className="text-[10px] font-semibold text-emerald-600 animate-pulse whitespace-nowrap">
+                              Copied!
+                            </span>
+                          )}
+                        </div>
                       </motion.div>
                     </div>
                     

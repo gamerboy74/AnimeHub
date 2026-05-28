@@ -249,7 +249,7 @@ export class AnimeImporterService {
                     id
                     idMal
                     title {
-                          media(search: $search, type: ANIME, page: 1) {
+                      romaji
                       english
                       native
                     }
