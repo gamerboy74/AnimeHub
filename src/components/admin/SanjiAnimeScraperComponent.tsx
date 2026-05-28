@@ -216,7 +216,7 @@ export const SanjiAnimeScraperComponent: React.FC<SanjiAnimeScraperComponentProp
                 errorCount: 0
               });
               break;
-            
+
             case 'progress':
               setProgressMessages(prev => [...prev, `⏳ Scraping Episode ${event.episode}...`]);
               setEpisodeStatuses(prev => ({
@@ -224,7 +224,7 @@ export const SanjiAnimeScraperComponent: React.FC<SanjiAnimeScraperComponentProp
                 [event.episode!]: { status: 'scraping' }
               }));
               break;
-            
+
             case 'success':
               setProgressMessages(prev => [...prev, `✅ Episode ${event.episode} scraped successfully!`]);
               setEpisodeStatuses(prev => ({
@@ -236,7 +236,7 @@ export const SanjiAnimeScraperComponent: React.FC<SanjiAnimeScraperComponentProp
                 current: event.current || prev.current,
                 successCount: prev.successCount + 1
               } : null);
-              
+
               if (event.episode && event.url) {
                 scrapedEpisodes.push({
                   number: event.episode,
@@ -250,7 +250,7 @@ export const SanjiAnimeScraperComponent: React.FC<SanjiAnimeScraperComponentProp
                 });
               }
               break;
-            
+
             case 'error':
               setProgressMessages(prev => [...prev, `❌ Episode ${event.episode} failed: ${event.error || 'Unknown error'}`]);
               setEpisodeStatuses(prev => ({
@@ -262,7 +262,7 @@ export const SanjiAnimeScraperComponent: React.FC<SanjiAnimeScraperComponentProp
                 current: event.current || prev.current,
                 errorCount: prev.errorCount + 1
               } : null);
-              
+
               if (event.episode) {
                 failedEpisodes.push({
                   number: event.episode,
@@ -271,11 +271,11 @@ export const SanjiAnimeScraperComponent: React.FC<SanjiAnimeScraperComponentProp
                 });
               }
               break;
-            
+
             case 'complete':
               setProgressMessages(prev => [...prev, `🎉 Scraping complete! ${scrapedEpisodes.length} successful, ${failedEpisodes.length} failed.`]);
               setCurrentScrapedEpisodes(scrapedEpisodes);
-              
+
               queryClient.invalidateQueries({ queryKey: ['admin-anime'] });
               setSuccess(`Scraped & saved ${scrapedEpisodes.length} out of ${event.total || episodeNumbers.length} episodes successfully!`);
               setTimeout(() => setSuccess(null), 5000);
@@ -340,7 +340,7 @@ export const SanjiAnimeScraperComponent: React.FC<SanjiAnimeScraperComponentProp
                 errorCount: 0
               });
               break;
-            
+
             case 'progress':
               setProgressMessages(prev => [...prev, `⏳ Scraping Episode ${event.episode}...`]);
               setEpisodeStatuses(prev => ({
@@ -348,7 +348,7 @@ export const SanjiAnimeScraperComponent: React.FC<SanjiAnimeScraperComponentProp
                 [event.episode!]: { status: 'scraping' }
               }));
               break;
-            
+
             case 'success':
               setProgressMessages(prev => [...prev, `✅ Episode ${event.episode} scraped successfully!`]);
               setEpisodeStatuses(prev => ({
@@ -360,7 +360,7 @@ export const SanjiAnimeScraperComponent: React.FC<SanjiAnimeScraperComponentProp
                 current: event.current || prev.current,
                 successCount: prev.successCount + 1
               } : null);
-              
+
               if (event.episode && event.url) {
                 scrapedEpisodes.push({
                   number: event.episode,
@@ -374,7 +374,7 @@ export const SanjiAnimeScraperComponent: React.FC<SanjiAnimeScraperComponentProp
                 });
               }
               break;
-            
+
             case 'error':
               setProgressMessages(prev => [...prev, `❌ Episode ${event.episode} failed: ${event.error || 'Unknown error'}`]);
               setEpisodeStatuses(prev => ({
@@ -386,7 +386,7 @@ export const SanjiAnimeScraperComponent: React.FC<SanjiAnimeScraperComponentProp
                 current: event.current || prev.current,
                 errorCount: prev.errorCount + 1
               } : null);
-              
+
               if (event.episode) {
                 failedEpisodes.push({
                   number: event.episode,
@@ -395,11 +395,11 @@ export const SanjiAnimeScraperComponent: React.FC<SanjiAnimeScraperComponentProp
                 });
               }
               break;
-            
+
             case 'complete':
               setProgressMessages(prev => [...prev, `🎉 Scraping complete! ${scrapedEpisodes.length} successful, ${failedEpisodes.length} failed.`]);
               setCurrentScrapedEpisodes(scrapedEpisodes);
-              
+
               queryClient.invalidateQueries({ queryKey: ['admin-anime'] });
               setSuccess(`Scraped & saved ${scrapedEpisodes.length} out of ${event.total || episodeNumbers.length} episodes successfully!`);
               setTimeout(() => setSuccess(null), 5000);
@@ -646,7 +646,7 @@ export const SanjiAnimeScraperComponent: React.FC<SanjiAnimeScraperComponentProp
               </div>
             )}
           </div>
-          
+
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
             {Object.entries(episodeStatuses).map(([episodeNum, status]) => {
               const bgColor = {
@@ -655,7 +655,7 @@ export const SanjiAnimeScraperComponent: React.FC<SanjiAnimeScraperComponentProp
                 success: 'bg-green-50 text-green-700 border-green-300',
                 error: 'bg-red-50 text-red-700 border-red-300'
               }[status.status];
-              
+
               const icon = {
                 pending: 'ri-time-line',
                 scraping: 'ri-loader-4-line',
@@ -747,11 +747,10 @@ export const SanjiAnimeScraperComponent: React.FC<SanjiAnimeScraperComponentProp
                       <div key={idx} className="bg-white p-2.5 rounded-xl border border-slate-200/60 shadow-sm flex flex-col justify-between gap-1">
                         <div className="flex items-center justify-between text-xs font-semibold text-slate-700">
                           <span>Slot: {srv.label}</span>
-                          <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold ${
-                            srv.lang === 'sub' ? 'bg-cyan-50 text-cyan-600 border border-cyan-100' :
-                            srv.lang === 'dub' ? 'bg-indigo-50 text-indigo-600 border border-indigo-100' :
-                            'bg-slate-50 text-slate-500 border border-slate-100'
-                          }`}>{srv.lang}</span>
+                          <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold ${srv.lang === 'sub' ? 'bg-cyan-50 text-cyan-600 border border-cyan-100' :
+                              srv.lang === 'dub' ? 'bg-indigo-50 text-indigo-600 border border-indigo-100' :
+                                'bg-slate-50 text-slate-500 border border-slate-100'
+                            }`}>{srv.lang}</span>
                         </div>
                         <div className="text-[10px] text-slate-400 truncate" title={srv.playableUrl || srv.iframeUrl || ''}>
                           {srv.playableUrl ? (

@@ -5,10 +5,11 @@ import { HiAnimeScraperService } from '../../services/scrapers/hianime';
 import { AdminAnimeService } from '../../services/admin/anime';
 import { AnimeService } from '../../services/anime';
 import { AnimeImporterService } from '../../services/anime/importer';
-import Button from '../../components/base/Button';
-import Input from '../../components/base/Input';
 import { SparkleLoadingSpinner } from '../../components/base/LoadingSpinner';
 import { ScrapedEpisodesModal } from './ScrapedEpisodesModal';
+import Button from '../../components/base/Button';
+import Input from '../../components/base/Input';
+
 
 
 interface Anime {
@@ -55,7 +56,7 @@ export const NineAnimeScraperComponent: React.FC<NineAnimeScraperComponentProps>
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [overwriteExisting, setOverwriteExisting] = useState(false);
-  
+
   // Scraped episodes modal state
   const [showScrapedEpisodes, setShowScrapedEpisodes] = useState(false);
   const [scrapedEpisodesData, setScrapedEpisodesData] = useState<any>(null);
@@ -138,7 +139,7 @@ export const NineAnimeScraperComponent: React.FC<NineAnimeScraperComponentProps>
     setBatchResult(null);
     setCurrentScrapedEpisodes([]);
     setEpisodesAddedCount(0);
-    
+
     // Check existing episodes for this anime
     await checkExistingEpisodes(anime.id);
   };
@@ -189,7 +190,7 @@ export const NineAnimeScraperComponent: React.FC<NineAnimeScraperComponentProps>
       );
 
       setScrapeResult(result);
-      
+
       if (result.success) {
         setSuccess(`Episode ${episodeNumber} scraped successfully!`);
         setTimeout(() => setSuccess(null), 3000);
@@ -264,7 +265,7 @@ export const NineAnimeScraperComponent: React.FC<NineAnimeScraperComponentProps>
 
         // Show episodes directly in results (no modal)
         setCurrentScrapedEpisodes(scrapedEpisodes);
-        
+
         setSuccess(`Batch scraping completed: ${scrapedEpisodes.length}/${episodeNumbers.length} episodes scraped successfully!`);
         setTimeout(() => setSuccess(null), 5000);
       } else {
@@ -281,7 +282,7 @@ export const NineAnimeScraperComponent: React.FC<NineAnimeScraperComponentProps>
 
   const handleScrapeAllEpisodes = async () => {
     console.log('🔥 handleScrapeAllEpisodes called!', { selectedAnime });
-    
+
     if (!selectedAnime) {
       setError('Please select an anime first');
       return;
@@ -307,7 +308,7 @@ export const NineAnimeScraperComponent: React.FC<NineAnimeScraperComponentProps>
       console.warn('⚠️ Episode stub creation skipped (no MAL ID or API error):', stubErr);
       setProgressMessages(prev => [...prev, '⚠️ Stub creation skipped — will scrape anyway']);
     }
-    
+
     // Initialize all episodes as pending
     const initialStatuses: Record<number, { status: 'pending' }> = {};
     episodeNumbers.forEach(ep => {
@@ -324,7 +325,7 @@ export const NineAnimeScraperComponent: React.FC<NineAnimeScraperComponentProps>
       embeddingReason?: string;
       scrapedAt: string;
     }> = [];
-    
+
     const failedEpisodes: Array<{
       number: number;
       title: string;
@@ -337,14 +338,14 @@ export const NineAnimeScraperComponent: React.FC<NineAnimeScraperComponentProps>
     try {
       console.log('🚀 Starting batch scrape for:', selectedAnime.title, 'Episodes:', episodeNumbers);
       console.log('📞 Calling batchScrapeEpisodesWithProgress...');
-      
+
       await HiAnimeScraperService.batchScrapeEpisodesWithProgress(
         selectedAnime.title,
         selectedAnime.id,
         episodeNumbers,
         (event) => {
           console.log('📊 Progress event received:', event);
-          
+
           // Handle progress updates
           switch (event.type) {
             case 'start':
@@ -357,7 +358,7 @@ export const NineAnimeScraperComponent: React.FC<NineAnimeScraperComponentProps>
                 errorCount: 0
               });
               break;
-            
+
             case 'progress':
               console.log('📺 PROGRESS event - episode', event.episode, 'scraping');
               setProgressMessages(prev => [...prev, `⏳ Scraping Episode ${event.episode}...`]);
@@ -366,7 +367,7 @@ export const NineAnimeScraperComponent: React.FC<NineAnimeScraperComponentProps>
                 [event.episode!]: { status: 'scraping' }
               }));
               break;
-            
+
             case 'success':
               console.log('✅ SUCCESS event - episode', event.episode);
               setProgressMessages(prev => [...prev, `✅ Episode ${event.episode} scraped successfully!`]);
@@ -379,7 +380,7 @@ export const NineAnimeScraperComponent: React.FC<NineAnimeScraperComponentProps>
                 current: event.current || prev.current,
                 successCount: prev.successCount + 1
               } : null);
-              
+
               // Collect successful episode
               if (event.episode && event.url) {
                 scrapedEpisodes.push({
@@ -392,7 +393,7 @@ export const NineAnimeScraperComponent: React.FC<NineAnimeScraperComponentProps>
                 });
               }
               break;
-            
+
             case 'error':
               console.log('❌ ERROR event - episode', event.episode);
               setProgressMessages(prev => [...prev, `❌ Episode ${event.episode} failed: ${event.error || 'Unknown error'}`]);
@@ -405,7 +406,7 @@ export const NineAnimeScraperComponent: React.FC<NineAnimeScraperComponentProps>
                 current: event.current || prev.current,
                 errorCount: prev.errorCount + 1
               } : null);
-              
+
               // Collect failed episode
               if (event.episode) {
                 failedEpisodes.push({
@@ -415,11 +416,11 @@ export const NineAnimeScraperComponent: React.FC<NineAnimeScraperComponentProps>
                 });
               }
               break;
-            
+
             case 'complete':
               console.log('🎉 COMPLETE event');
               setProgressMessages(prev => [...prev, `🎉 Scraping complete! ${scrapedEpisodes.length} successful, ${failedEpisodes.length} failed.`]);
-              
+
               // Prepare data for modal
               const summary = {
                 total: event.total || episodeNumbers.length,
@@ -427,7 +428,7 @@ export const NineAnimeScraperComponent: React.FC<NineAnimeScraperComponentProps>
                 failed: failedEpisodes.length,
                 embeddingProtected: scrapedEpisodes.filter(ep => ep.embeddingProtected).length
               };
-              
+
               // Show modal with scraped episodes
               setScrapedEpisodesData({
                 scrapedEpisodes,
@@ -435,7 +436,7 @@ export const NineAnimeScraperComponent: React.FC<NineAnimeScraperComponentProps>
                 summary
               });
               setShowScrapedEpisodes(true);
-              
+
               setSuccess(`Scraped ${scrapedEpisodes.length} out of ${event.total || episodeNumbers.length} episodes!`);
               setTimeout(() => setSuccess(null), 5000);
               break;
@@ -449,7 +450,7 @@ export const NineAnimeScraperComponent: React.FC<NineAnimeScraperComponentProps>
           overwrite: overwriteExisting
         }
       );
-      
+
       console.log('✅ Batch scrape completed successfully!');
     } catch (error) {
       console.error('❌ Error during batch scrape:', error);
@@ -468,7 +469,7 @@ export const NineAnimeScraperComponent: React.FC<NineAnimeScraperComponentProps>
 
   const handleAddEpisode = async (episode: any) => {
     if (!selectedAnime) return;
-    
+
     try {
       const API_BASE = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
       const response = await fetch(`${API_BASE}/api/add-scraped-episode`, {
@@ -487,23 +488,23 @@ export const NineAnimeScraperComponent: React.FC<NineAnimeScraperComponentProps>
       });
 
       const result = await response.json();
-      
+
       if (result.success) {
         // Update episode status
-        setCurrentScrapedEpisodes(prev => 
-          prev.map(ep => 
-            ep.number === episode.number 
+        setCurrentScrapedEpisodes(prev =>
+          prev.map(ep =>
+            ep.number === episode.number
               ? { ...ep, isExisting: true, addedAt: new Date().toISOString() }
               : ep
           )
         );
-        
+
         // Update existing episodes set
         setExistingEpisodes(prev => new Set([...prev, episode.number]));
-        
+
         // Update counter
         setEpisodesAddedCount(prev => prev + 1);
-        
+
         setSuccess(`Episode ${episode.number} added successfully!`);
         setTimeout(() => setSuccess(null), 3000);
       } else {
@@ -546,7 +547,7 @@ export const NineAnimeScraperComponent: React.FC<NineAnimeScraperComponentProps>
           </div>
           Select Anime
         </h3>
-        
+
         <div className="space-y-4">
           {/* Search Input */}
           <div>
@@ -617,9 +618,8 @@ export const NineAnimeScraperComponent: React.FC<NineAnimeScraperComponentProps>
                   <motion.div
                     key={anime.id}
                     whileHover={{ backgroundColor: 'rgba(59, 130, 246, 0.04)' }}
-                    className={`p-3 cursor-pointer transition-all duration-150 ${
-                      selectedAnime?.id === anime.id ? 'bg-blue-50/80 border-l-4 border-l-blue-500' : 'border-l-4 border-l-transparent'
-                    }`}
+                    className={`p-3 cursor-pointer transition-all duration-150 ${selectedAnime?.id === anime.id ? 'bg-blue-50/80 border-l-4 border-l-blue-500' : 'border-l-4 border-l-transparent'
+                      }`}
                     onClick={() => handleAnimeSelect(anime)}
                   >
                     <div className="flex items-center space-x-3">
@@ -695,7 +695,7 @@ export const NineAnimeScraperComponent: React.FC<NineAnimeScraperComponentProps>
             </div>
             Scraping Options
           </h3>
-          
+
           <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
             {/* Single Episode */}
             <div className="bg-gradient-to-br from-slate-50 to-blue-50/50 rounded-xl p-5 border border-slate-200/60 space-y-3">
@@ -791,7 +791,7 @@ export const NineAnimeScraperComponent: React.FC<NineAnimeScraperComponentProps>
               </div>
             )}
           </div>
-          
+
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
             {Object.entries(episodeStatuses).map(([episodeNum, status]) => {
               const bgColor = {
@@ -800,7 +800,7 @@ export const NineAnimeScraperComponent: React.FC<NineAnimeScraperComponentProps>
                 success: 'bg-green-50 text-green-700 border-green-300',
                 error: 'bg-red-50 text-red-700 border-red-300'
               }[status.status];
-              
+
               const icon = {
                 pending: 'ri-time-line',
                 scraping: 'ri-loader-4-line',
@@ -811,9 +811,8 @@ export const NineAnimeScraperComponent: React.FC<NineAnimeScraperComponentProps>
               return (
                 <div
                   key={episodeNum}
-                  className={`p-3 rounded-xl border transition-all ${bgColor} ${
-                    status.status === 'scraping' ? 'animate-pulse shadow-md' : ''
-                  }`}
+                  className={`p-3 rounded-xl border transition-all ${bgColor} ${status.status === 'scraping' ? 'animate-pulse shadow-md' : ''
+                    }`}
                 >
                   <div className="flex items-center justify-between">
                     <span className="font-bold text-xs">EP {episodeNum}</span>
@@ -877,7 +876,7 @@ export const NineAnimeScraperComponent: React.FC<NineAnimeScraperComponentProps>
               Clear
             </Button>
           </div>
-          
+
           {success && (
             <div className="border-l-4 border-green-500 bg-green-50/80 rounded-r-xl p-4 mb-4">
               <div className="flex items-center">
@@ -902,9 +901,8 @@ export const NineAnimeScraperComponent: React.FC<NineAnimeScraperComponentProps>
               <h4 className="font-semibold text-slate-700 text-sm flex items-center gap-1.5">
                 <i className="ri-movie-2-line text-blue-500"></i> Single Episode Result
               </h4>
-              <div className={`p-4 rounded-xl ${
-                scrapeResult.success ? 'bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200/60' : 'bg-gradient-to-r from-red-50 to-rose-50 border border-red-200/60'
-              }`}>
+              <div className={`p-4 rounded-xl ${scrapeResult.success ? 'bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200/60' : 'bg-gradient-to-r from-red-50 to-rose-50 border border-red-200/60'
+                }`}>
                 {scrapeResult.success ? (
                   <div>
                     <p className="text-green-800 font-semibold text-sm"><i className="ri-check-double-line mr-1"></i>Episode scraped successfully!</p>
@@ -956,7 +954,7 @@ export const NineAnimeScraperComponent: React.FC<NineAnimeScraperComponentProps>
                     <div className="text-xs text-slate-500 font-medium mt-0.5">Rate</div>
                   </div>
                 </div>
-                
+
                 <div className="text-xs text-slate-500 flex items-center gap-2 flex-wrap">
                   <span><strong>Range:</strong> {episodeRange}</span>
                   <span>•</span>
@@ -976,11 +974,10 @@ export const NineAnimeScraperComponent: React.FC<NineAnimeScraperComponentProps>
               </h4>
               <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
                 {currentScrapedEpisodes.map((episode) => (
-                  <div key={episode.number} className={`p-3.5 rounded-xl border transition-all ${
-                    episode.isExisting 
-                      ? 'bg-slate-50/80 border-slate-200/60' 
+                  <div key={episode.number} className={`p-3.5 rounded-xl border transition-all ${episode.isExisting
+                      ? 'bg-slate-50/80 border-slate-200/60'
                       : 'bg-blue-50/60 border-blue-200/50 hover:border-blue-300/60'
-                  }`}>
+                    }`}>
                     <div className="flex items-center justify-between">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center space-x-2">
@@ -1081,11 +1078,11 @@ export const NineAnimeScraperComponent: React.FC<NineAnimeScraperComponentProps>
           animeTitle={selectedAnime.title}
           scrapedEpisodes={scrapedEpisodesData.scrapedEpisodes || []}
           failedEpisodes={scrapedEpisodesData.failedEpisodes || []}
-          summary={scrapedEpisodesData.summary || { 
-            total: 0, 
-            successful: scrapedEpisodesData.scrapedEpisodes?.length || 0, 
-            failed: scrapedEpisodesData.failedEpisodes?.length || 0, 
-            embeddingProtected: scrapedEpisodesData.scrapedEpisodes?.filter((ep: any) => ep.embeddingProtected).length || 0 
+          summary={scrapedEpisodesData.summary || {
+            total: 0,
+            successful: scrapedEpisodesData.scrapedEpisodes?.length || 0,
+            failed: scrapedEpisodesData.failedEpisodes?.length || 0,
+            embeddingProtected: scrapedEpisodesData.scrapedEpisodes?.filter((ep: any) => ep.embeddingProtected).length || 0
           }}
           onEpisodesAdded={() => {
             handleCloseScrapedEpisodes();

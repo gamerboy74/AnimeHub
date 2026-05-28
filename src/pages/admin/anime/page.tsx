@@ -134,7 +134,7 @@ export default function AnimeManagement() {
       setLoading(true);
       setError(null);
       setSuccessMessage(null);
-      
+
       const [result, publishedRes, ongoingRes] = await Promise.all([
         AdminService.getAllAnime(page, 20, {
           search: currentSearch,
@@ -152,7 +152,7 @@ export default function AnimeManagement() {
       setGlobalPublishedCount(publishedRes.count || 0);
       setGlobalOngoingCount(ongoingRes.count || 0);
       setCurrentPage(page);
-      
+
       // Start preloading episodes for visible anime using queue system
       setTimeout(() => {
         if (result.anime.length > 0) {
@@ -160,12 +160,12 @@ export default function AnimeManagement() {
           const animeToPreload = visibleAnime
             .map(animeItem => animeItem.id)
             .filter(id => !episodesCache[id] && !preloadedAnime.has(id));
-          
+
           // Add to preload queue
           setPreloadQueue(prev => [...prev, ...animeToPreload]);
         }
       }, 300); // Reduced initial delay
-      
+
     } catch (err) {
       console.error('Failed to fetch anime:', err);
       setError(err instanceof Error ? err.message : 'Failed to fetch anime');
@@ -182,11 +182,11 @@ export default function AnimeManagement() {
         if (animeId && !episodesCache[animeId] && !preloadedAnime.has(animeId)) {
           await preloadEpisodes(animeId);
         }
-        
+
         // Remove processed item and continue
         setPreloadQueue(prev => prev.slice(1));
       };
-      
+
       // Process one item every 300ms
       const timer = setTimeout(processQueue, 300);
       return () => clearTimeout(timer);
@@ -215,12 +215,12 @@ export default function AnimeManagement() {
 
   const handleStatusChange = async (animeId: string, newStatus: 'published' | 'pending' | 'draft') => {
     const previousAnimeList = [...anime];
-    
+
     try {
       setUpdatingAnime(animeId);
       setError(null);
       setSuccessMessage(null);
-      
+
       // Optimistic UI Update: Toggle status instantly in local state
       setAnime(prev => prev.map(item => {
         if (item.id === animeId) {
@@ -230,10 +230,10 @@ export default function AnimeManagement() {
       }));
 
       await AdminService.updateAnimeStatus(animeId, newStatus);
-      
+
       // Silent cache invalidation in the background
       invalidateAnimeCaches(queryClient, animeId);
-      
+
       setSuccessMessage(`Anime status updated to ${newStatus} successfully!`);
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err) {
@@ -265,14 +265,14 @@ This action cannot be undone.`,
           setUpdatingAnime(animeId);
           setError(null);
           setSuccessMessage(null);
-          
+
           await AdminService.deleteAnime(animeId);
-          
+
           // Invalidate React Query cache for all anime-related queries
           await invalidateAnimeCaches(queryClient, animeId);
-          
+
           await fetchAnime(currentPage);
-          
+
           setSuccessMessage(`Anime "${animeTitle}" deleted successfully!`);
           setTimeout(() => setSuccessMessage(null), 3000);
         } catch (err) {
@@ -289,7 +289,7 @@ This action cannot be undone.`,
 
   const handleBulkAction = async (action: 'published' | 'pending' | 'draft' | 'delete') => {
     const selectedIds = Array.from(selectedAnime);
-    
+
     if (selectedIds.length === 0) return;
 
     const previousAnimeList = [...anime];
@@ -315,10 +315,10 @@ This action cannot be undone.`,
           type: 'danger',
           onConfirm: async () => {
             await AdminService.bulkDeleteAnime(selectedIds);
-            
+
             // Invalidate React Query cache for all anime-related queries
             await invalidateAnimeCaches(queryClient);
-            
+
             setSuccessMessage(`${selectedIds.length} anime deleted successfully!`);
             await fetchAnime(currentPage);
             setSelectedAnime(new Set());
@@ -338,7 +338,7 @@ This action cannot be undone.`,
         setSelectedAnime(new Set()); // Clear selection list immediately
 
         await AdminService.bulkUpdateAnimeStatus(selectedIds, action);
-        
+
         // Invalidate caches silently in the background
         invalidateAnimeCaches(queryClient);
         setSuccessMessage(`${selectedIds.length} anime status updated to ${action}!`);
@@ -386,13 +386,13 @@ This action cannot be undone.`,
   const handleEpisodeCreated = async (_newEpisode?: any) => {
     setShowAddEpisodeModal(false);
     setSelectedAnimeForEpisode(null);
-    
+
     // Invalidate TQ caches for episode-related data
     await invalidateAnimeCaches(queryClient, selectedAnimeForModal?.id);
-    
+
     // Refresh anime list to update episode counts
     await fetchAnime(currentPage);
-    
+
     // If anime modal is open, refresh its episodes
     if (selectedAnimeForModal) {
       // Clear cache first
@@ -404,7 +404,7 @@ This action cannot be undone.`,
       // Force reload episodes (bypass cache)
       await fetchAnimeEpisodes(selectedAnimeForModal.id, true);
     }
-    
+
     setSuccessMessage('Episode created successfully!');
     setTimeout(() => setSuccessMessage(null), 3000);
   };
@@ -421,14 +421,14 @@ This action cannot be undone.`,
         setAnimeEpisodes(episodesCache[animeId]);
         return;
       }
-      
+
       // Show loading only when fetching from database
       setEpisodesLoading(true);
-      
+
       // Load episodes from database
       const episodes = await AdminService.getAnimeEpisodes(animeId);
       setAnimeEpisodes(episodes);
-      
+
       // Cache the episodes for future use
       setEpisodesCache(prev => ({ ...prev, [animeId]: episodes }));
     } catch (err) {
@@ -448,18 +448,18 @@ This action cannot be undone.`,
       }
 
       setPreloadedAnime(prev => new Set(prev).add(animeId));
-      
+
       // Load episodes silently in background with timeout
       const episodesPromise = AdminService.getAnimeEpisodes(animeId);
-      const timeoutPromise = new Promise((_, reject) => 
+      const timeoutPromise = new Promise((_, reject) =>
         setTimeout(() => reject(new Error('Timeout')), 5000)
       );
-      
+
       const episodes = await Promise.race([episodesPromise, timeoutPromise]) as any[];
-      
+
       // Cache the episodes for instant future access
       setEpisodesCache(prev => ({ ...prev, [animeId]: episodes }));
-      
+
       console.log(`✅ Preloaded ${episodes.length} episodes for anime ${animeId}`);
     } catch (err) {
       console.error(`Failed to preload episodes for ${animeId}:`, err);
@@ -585,21 +585,21 @@ This action cannot be undone.`,
   const handleViewAnimeDetails = async (anime: any) => {
     setSelectedAnimeForModal(anime);
     setShowAnimeModal(true);
-    
+
     // Use preloaded episodes if available, otherwise clear episodes
     if (episodesCache[anime.id]) {
       setAnimeEpisodes(episodesCache[anime.id]);
     } else {
       setAnimeEpisodes([]);
     }
-    
+
     setAnalyticsLoading(true);
-    
+
     try {
       // Fetch detailed analytics
       const analytics = await AdminService.getAnimeAnalytics(anime.id);
       setAnimeAnalytics(analytics);
-      
+
       // Only fetch episodes if not already cached
       if (!episodesCache[anime.id]) {
         fetchAnimeEpisodes(anime.id);
@@ -652,7 +652,7 @@ This action cannot be undone.`,
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header Section - Anime Themed */}
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           className="mb-8"
@@ -670,7 +670,7 @@ This action cannot be undone.`,
                 </div>
                 <p className="text-slate-500 ml-13">Manage your anime content library with power and precision</p>
               </div>
-              
+
               <div className="flex flex-wrap gap-3">
                 <button
                   onClick={() => setShowAddAnimeModal(true)}
@@ -789,7 +789,7 @@ This action cannot be undone.`,
             </div>
           </motion.div>
         )}
-        
+
         {successMessage && (
           <motion.div
             initial={{ opacity: 0, x: -20 }}
@@ -832,7 +832,7 @@ This action cannot be undone.`,
                 <p className="text-[11px] text-slate-400 font-medium">Refine, sort and select from the anime library</p>
               </div>
             </div>
-            
+
             <div className="flex items-center gap-2">
               <div className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-slate-200/80 rounded-full text-xs font-semibold text-slate-600 shadow-sm">
                 <span className={`w-2 h-2 rounded-full ${loading || isTyping ? 'bg-amber-400 animate-pulse' : 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]'}`}></span>
@@ -844,7 +844,7 @@ This action cannot be undone.`,
               </div>
             </div>
           </div>
-          
+
           <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
             {/* Search Input with Keyboard Shortcut & Micro-Spinner */}
             <div className="md:col-span-2">
@@ -861,7 +861,7 @@ This action cannot be undone.`,
                   value={searchInputValue}
                   onChange={(e) => setSearchInputValue(e.target.value)}
                 />
-                
+
                 <div className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 transition-colors">
                   {loading && isTyping ? (
                     <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
@@ -869,7 +869,7 @@ This action cannot be undone.`,
                     <i className="ri-search-line text-lg text-slate-400 group-focus-within:text-blue-500 transition-colors"></i>
                   )}
                 </div>
-                
+
                 <div className="absolute right-3.5 top-1/2 -translate-y-1/2 flex items-center gap-2">
                   {searchInputValue && (
                     <button
@@ -883,7 +883,7 @@ This action cannot be undone.`,
                       <i className="ri-close-circle-fill text-base"></i>
                     </button>
                   )}
-                  
+
                   <span className="hidden sm:inline-flex items-center px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 text-[9px] font-extrabold text-slate-400 select-none shadow-sm font-mono">
                     ⌘K
                   </span>
@@ -908,9 +908,8 @@ This action cannot be undone.`,
                     <button
                       key={tab.value}
                       onClick={() => setFilterStatus(tab.value)}
-                      className={`relative flex-1 py-1.5 rounded-lg text-xs font-bold transition-all duration-300 flex items-center justify-center gap-1.5 z-10 ${
-                        isActive ? 'text-white' : 'text-slate-600 hover:text-slate-800 hover:bg-slate-200/40'
-                      }`}
+                      className={`relative flex-1 py-1.5 rounded-lg text-xs font-bold transition-all duration-300 flex items-center justify-center gap-1.5 z-10 ${isActive ? 'text-white' : 'text-slate-600 hover:text-slate-800 hover:bg-slate-200/40'
+                        }`}
                     >
                       {isActive && (
                         <motion.div
@@ -1011,7 +1010,7 @@ This action cannot be undone.`,
                     <i className="ri-arrow-down-s-line text-lg"></i>
                   </div>
                 </div>
-                
+
                 <button
                   onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
                   className="px-3.5 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl shadow-sm transition-all duration-200 flex items-center justify-center text-slate-600 hover:text-blue-600 focus:ring-2 focus:ring-blue-500 h-[46px]"
@@ -1068,7 +1067,7 @@ This action cannot be undone.`,
                     </button>
                   </span>
                 )}
-                
+
                 <button
                   onClick={() => {
                     setSearchInputValue('');
@@ -1243,7 +1242,7 @@ This action cannot be undone.`,
                       <p className="text-slate-500 text-sm mb-4 line-clamp-2 leading-relaxed">
                         {item.description || 'No description available'}
                       </p>
-                      
+
                       {/* Stats Grid */}
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
                         <div className="flex items-center gap-2 bg-blue-50 px-3 py-2 rounded-lg">
@@ -1253,7 +1252,7 @@ This action cannot be undone.`,
                             <p className="font-bold text-blue-600">{item.episode_count || 0}</p>
                           </div>
                         </div>
-                        
+
                         <div className="flex items-center gap-2 bg-amber-50 px-3 py-2 rounded-lg">
                           <i className="ri-star-line text-amber-500 text-lg"></i>
                           <div>
@@ -1261,7 +1260,7 @@ This action cannot be undone.`,
                             <p className="font-bold text-amber-600">{item.average_rating || 'N/A'}</p>
                           </div>
                         </div>
-                        
+
                         <div className="flex items-center gap-2 bg-purple-50 px-3 py-2 rounded-lg">
                           <i className="ri-eye-line text-purple-500 text-lg"></i>
                           <div>
@@ -1269,7 +1268,7 @@ This action cannot be undone.`,
                             <p className="font-bold text-purple-600">{item.views?.toLocaleString() || '0'}</p>
                           </div>
                         </div>
-                        
+
                         <div className="flex items-center gap-2 bg-slate-50 px-3 py-2 rounded-lg">
                           <i className="ri-calendar-line text-slate-500 text-lg"></i>
                           <div>
@@ -1318,7 +1317,7 @@ This action cannot be undone.`,
 
                       {/* Action Buttons Grid */}
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                        <button 
+                        <button
                           onClick={() => handleViewAnimeDetails(item)}
                           className="px-3 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all text-xs font-semibold shadow-sm hover:shadow-md flex items-center justify-center gap-1"
                         >
@@ -1349,20 +1348,20 @@ This action cannot be undone.`,
                 </div>
               </motion.div>
             ))}
-            
+
             {anime.length === 0 && (
-              <motion.div 
+              <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 className="col-span-full"
               >
                 <div className="bg-white/60 backdrop-blur-sm border border-dashed border-slate-300 rounded-2xl p-16 text-center">
                   <motion.div
-                    animate={{ 
+                    animate={{
                       scale: [1, 1.1, 1],
                       rotate: [0, 5, -5, 0]
                     }}
-                    transition={{ 
+                    transition={{
                       duration: 4,
                       repeat: Infinity,
                       ease: "easeInOut"
@@ -1371,20 +1370,20 @@ This action cannot be undone.`,
                   >
                     <i className="ri-movie-2-line text-8xl text-blue-300"></i>
                   </motion.div>
-                  
+
                   <h3 className="text-3xl font-bold mb-3">
                     <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
                       No Anime Found
                     </span>
                   </h3>
-                  
+
                   <p className="text-slate-500 text-lg mb-8 max-w-md mx-auto">
                     {searchTerm || filterStatus !== 'all' || filterGenre !== 'all'
                       ? 'No anime match your current filters. Try adjusting your search criteria.'
                       : 'Your anime library is empty. Start by adding or importing anime.'
-                  }
+                    }
                   </p>
-                  
+
                   {!searchTerm && filterStatus === 'all' && filterGenre === 'all' && (
                     <div className="flex gap-4 justify-center">
                       <button
@@ -1409,7 +1408,7 @@ This action cannot be undone.`,
 
         {/* Pagination */}
         {totalPages > 1 && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             className="flex justify-center mt-8"
@@ -1423,16 +1422,16 @@ This action cannot be undone.`,
                 <span>←</span>
                 <span className="hidden sm:inline">Previous</span>
               </button>
-              
+
               <div className="flex items-center gap-1.5 px-2">
                 {Array.from({ length: totalPages }, (_, i) => i + 1).map(pageNumber => {
                   // Show first, last, current, and adjacent pages
-                  const showPage = 
-                    pageNumber === 1 || 
-                    pageNumber === totalPages || 
+                  const showPage =
+                    pageNumber === 1 ||
+                    pageNumber === totalPages ||
                     Math.abs(pageNumber - currentPage) <= 1;
-                  
-                  const showEllipsis = 
+
+                  const showEllipsis =
                     (pageNumber === currentPage - 2 && currentPage > 3) ||
                     (pageNumber === currentPage + 2 && currentPage < totalPages - 2);
 
@@ -1451,11 +1450,10 @@ This action cannot be undone.`,
                       key={pageNumber}
                       onClick={() => fetchAnime(pageNumber)}
                       disabled={currentPage === pageNumber || loading}
-                      className={`min-w-[44px] h-11 rounded-xl font-medium transition-all duration-200 ${
-                        currentPage === pageNumber
+                      className={`min-w-[44px] h-11 rounded-xl font-medium transition-all duration-200 ${currentPage === pageNumber
                           ? 'bg-gradient-to-br from-blue-600 to-blue-700 text-white shadow-lg scale-110'
                           : 'bg-slate-100 text-slate-700 hover:bg-blue-50 hover:text-blue-600'
-                      }`}
+                        }`}
                     >
                       {pageNumber}
                     </button>
@@ -1512,7 +1510,7 @@ This action cannot be undone.`,
               <div className="p-6">
                 <div className="flex flex-col lg:flex-row gap-6 mb-6">
                   {/* Poster */}
-                  <motion.div 
+                  <motion.div
                     initial={{ opacity: 0, x: -20 }}
                     animate={{ opacity: 1, x: 0 }}
                     className="flex-shrink-0"
@@ -1536,7 +1534,7 @@ This action cannot be undone.`,
                   </motion.div>
 
                   {/* Details */}
-                  <motion.div 
+                  <motion.div
                     initial={{ opacity: 0, x: 20 }}
                     animate={{ opacity: 1, x: 0 }}
                     className="flex-1"
@@ -1549,14 +1547,14 @@ This action cannot be undone.`,
                         {getStatusIcon(selectedAnimeForModal.status)} {selectedAnimeForModal.status}
                       </span>
                     </div>
-                    
+
                     <p className="text-slate-600 text-base leading-relaxed mb-6 bg-slate-50 rounded-xl p-4 border border-slate-200">
                       {selectedAnimeForModal.description || 'No description available'}
                     </p>
-                    
+
                     {/* Stats Grid */}
                     <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-                      <motion.div 
+                      <motion.div
                         whileHover={{ scale: 1.05 }}
                         className="bg-blue-50 rounded-xl p-4 border border-blue-100 shadow-sm"
                       >
@@ -1566,8 +1564,8 @@ This action cannot be undone.`,
                         </div>
                         <p className="text-2xl font-bold text-blue-900">{selectedAnimeForModal.episode_count || 0}</p>
                       </motion.div>
-                      
-                      <motion.div 
+
+                      <motion.div
                         whileHover={{ scale: 1.05 }}
                         className="bg-amber-50 rounded-xl p-4 border border-amber-100 shadow-sm"
                       >
@@ -1584,8 +1582,8 @@ This action cannot be undone.`,
                           )}
                         </div>
                       </motion.div>
-                      
-                      <motion.div 
+
+                      <motion.div
                         whileHover={{ scale: 1.05 }}
                         className="bg-purple-50 rounded-xl p-4 border border-purple-100 shadow-sm"
                       >
@@ -1602,8 +1600,8 @@ This action cannot be undone.`,
                           )}
                         </div>
                       </motion.div>
-                      
-                      <motion.div 
+
+                      <motion.div
                         whileHover={{ scale: 1.05 }}
                         className="bg-slate-50 rounded-xl p-4 border border-slate-100 shadow-sm"
                       >
@@ -1613,8 +1611,8 @@ This action cannot be undone.`,
                         </div>
                         <p className="text-sm font-bold text-slate-900">{new Date(selectedAnimeForModal.created_at).toLocaleDateString()}</p>
                       </motion.div>
-                      
-                      <motion.div 
+
+                      <motion.div
                         whileHover={{ scale: 1.05 }}
                         className="bg-red-50 rounded-xl p-4 border border-red-100 shadow-sm"
                       >
@@ -1626,8 +1624,8 @@ This action cannot be undone.`,
                           {analyticsLoading ? '...' : (animeAnalytics?.analytics?.reports || 0)}
                         </p>
                       </motion.div>
-                      
-                      <motion.div 
+
+                      <motion.div
                         whileHover={{ scale: 1.05 }}
                         className="bg-slate-50 rounded-xl p-4 border border-slate-100 shadow-sm transition-all duration-200"
                       >
@@ -1638,11 +1636,10 @@ This action cannot be undone.`,
                           </div>
                           <button
                             onClick={() => handleCopyId(selectedAnimeForModal.id)}
-                            className={`p-1 rounded-md transition-all duration-200 flex items-center justify-center ${
-                              copiedId 
-                                ? 'bg-emerald-100 text-emerald-700 shadow-sm' 
+                            className={`p-1 rounded-md transition-all duration-200 flex items-center justify-center ${copiedId
+                                ? 'bg-emerald-100 text-emerald-700 shadow-sm'
                                 : 'bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-700 shadow-sm'
-                            }`}
+                              }`}
                             title="Copy Anime ID"
                           >
                             <i className={copiedId ? 'ri-check-line text-xs font-bold' : 'ri-file-copy-line text-xs'}></i>
@@ -1660,10 +1657,10 @@ This action cannot be undone.`,
                         </div>
                       </motion.div>
                     </div>
-                    
+
                     {/* Genres */}
                     {selectedAnimeForModal.genres && selectedAnimeForModal.genres.length > 0 && (
-                      <motion.div 
+                      <motion.div
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
                         className="mt-6 bg-slate-50 rounded-xl p-4 border border-slate-200"
@@ -1699,18 +1696,18 @@ This action cannot be undone.`,
                   </div>
 
                   <div className="space-y-3">
-                  {episodesLoading ? (
-                    <div className="text-center py-8">
-                      <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
-                      <p className="text-slate-500 text-sm">Loading episodes...</p>
-                    </div>
-                  ) : animeEpisodes.length === 0 ? (
-                    <div className="text-center py-8">
-                      <i className="ri-play-circle-line text-slate-300 text-4xl mb-2"></i>
-                      <p className="text-slate-600 font-medium">No episodes yet</p>
-                      <p className="text-slate-400 text-sm">Add the first episode to get started</p>
-                    </div>
-                  ) : (
+                    {episodesLoading ? (
+                      <div className="text-center py-8">
+                        <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
+                        <p className="text-slate-500 text-sm">Loading episodes...</p>
+                      </div>
+                    ) : animeEpisodes.length === 0 ? (
+                      <div className="text-center py-8">
+                        <i className="ri-play-circle-line text-slate-300 text-4xl mb-2"></i>
+                        <p className="text-slate-600 font-medium">No episodes yet</p>
+                        <p className="text-slate-400 text-sm">Add the first episode to get started</p>
+                      </div>
+                    ) : (
                       animeEpisodes.map((episode) => (
                         <div key={episode.id} className="bg-slate-50 rounded-lg p-4 border border-slate-200 hover:bg-slate-100 transition-colors">
                           <div className="flex items-center justify-between">
@@ -1781,7 +1778,7 @@ This action cannot be undone.`,
       <ConfirmationDialog
         isOpen={showConfirmationDialog}
         onClose={() => setShowConfirmationDialog(false)}
-        onConfirm={confirmationConfig?.onConfirm || (() => {})}
+        onConfirm={confirmationConfig?.onConfirm || (() => { })}
         title={confirmationConfig?.title || ''}
         message={confirmationConfig?.message || ''}
         confirmText={confirmationConfig?.confirmText || 'Confirm'}
@@ -1867,30 +1864,26 @@ This action cannot be undone.`,
             initial={{ opacity: 0, scale: 0.9, y: 30 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.9, y: 30 }}
-            className={`relative w-full max-w-6xl max-h-[90vh] overflow-hidden rounded-3xl border shadow-2xl transition-all duration-300 ${
-              activeScraperTab === '9anime' ? 'border-indigo-200/60' : activeScraperTab === 'animesuge' ? 'border-violet-200/60' : 'border-rose-200/60'
-            }`}
+            className={`relative w-full max-w-6xl max-h-[90vh] overflow-hidden rounded-3xl border shadow-2xl transition-all duration-300 ${activeScraperTab === '9anime' ? 'border-indigo-200/60' : activeScraperTab === 'animesuge' ? 'border-violet-200/60' : 'border-rose-200/60'
+              }`}
             onClick={(e) => e.stopPropagation()}
           >
             <div
-              className={`absolute inset-0 transition-all duration-500 bg-gradient-to-br ${
-                activeScraperTab === '9anime'
+              className={`absolute inset-0 transition-all duration-500 bg-gradient-to-br ${activeScraperTab === '9anime'
                   ? 'from-indigo-600/85 via-purple-600/85 to-pink-500/80'
                   : activeScraperTab === 'animesuge'
-                  ? 'from-violet-600/85 via-indigo-600/85 to-purple-500/80'
-                  : 'from-rose-600/85 via-red-600/85 to-amber-500/80'
-              }`}
+                    ? 'from-violet-600/85 via-indigo-600/85 to-purple-500/80'
+                    : 'from-rose-600/85 via-red-600/85 to-amber-500/80'
+                }`}
             />
             <div className="absolute inset-0 opacity-25 bg-[radial-gradient(circle_at_bottom_right,_#fff7,_#ffffff00_45%)]" />
 
             <div className="relative flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-6 py-5 border-b border-white/20 backdrop-blur-xl">
               <div className="flex items-center gap-3">
-                <div className={`w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center shadow-lg transition-all duration-300 ${
-                  activeScraperTab === 'reanime' ? 'animate-pulse' : ''
-                }`}>
-                  <i className={`text-white text-2xl transition-all duration-300 ${
-                    activeScraperTab === '9anime' ? 'ri-search-line' : activeScraperTab === 'reanime' ? 'ri-fire-line' : activeScraperTab === 'sanjianime' ? 'ri-play-circle-line' : 'ri-vidicon-line'
-                  }`}></i>
+                <div className={`w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center shadow-lg transition-all duration-300 ${activeScraperTab === 'reanime' ? 'animate-pulse' : ''
+                  }`}>
+                  <i className={`text-white text-2xl transition-all duration-300 ${activeScraperTab === '9anime' ? 'ri-search-line' : activeScraperTab === 'reanime' ? 'ri-fire-line' : activeScraperTab === 'sanjianime' ? 'ri-play-circle-line' : 'ri-vidicon-line'
+                    }`}></i>
                 </div>
                 <div>
                   <h2 className="text-2xl font-bold text-white drop-shadow">
@@ -1904,44 +1897,40 @@ This action cannot be undone.`,
               <div className="flex items-center gap-2 bg-black/20 p-1 rounded-2xl border border-white/10 backdrop-blur-md">
                 <button
                   onClick={() => setActiveScraperTab('9anime')}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-300 flex items-center gap-1.5 ${
-                    activeScraperTab === '9anime'
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-300 flex items-center gap-1.5 ${activeScraperTab === '9anime'
                       ? 'bg-white text-indigo-700 shadow-md scale-105'
                       : 'text-white/80 hover:text-white hover:bg-white/10'
-                  }`}
+                    }`}
                 >
                   <i className="ri-tv-line"></i>
                   9Anime.org.lv
                 </button>
                 <button
                   onClick={() => setActiveScraperTab('reanime')}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-300 flex items-center gap-1.5 ${
-                    activeScraperTab === 'reanime'
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-300 flex items-center gap-1.5 ${activeScraperTab === 'reanime'
                       ? 'bg-white text-rose-700 shadow-md scale-105'
                       : 'text-white/80 hover:text-white hover:bg-white/10'
-                  }`}
+                    }`}
                 >
                   <i className="ri-fire-line"></i>
                   Re:ANIME
                 </button>
                 <button
                   onClick={() => setActiveScraperTab('sanjianime')}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-300 flex items-center gap-1.5 ${
-                    activeScraperTab === 'sanjianime'
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-300 flex items-center gap-1.5 ${activeScraperTab === 'sanjianime'
                       ? 'bg-white text-cyan-700 shadow-md scale-105'
                       : 'text-white/80 hover:text-white hover:bg-white/10'
-                  }`}
+                    }`}
                 >
                   <i className="ri-play-circle-line"></i>
                   Sanji Anime
                 </button>
                 <button
                   onClick={() => setActiveScraperTab('animesuge')}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-300 flex items-center gap-1.5 ${
-                    activeScraperTab === 'animesuge'
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-300 flex items-center gap-1.5 ${activeScraperTab === 'animesuge'
                       ? 'bg-white text-violet-700 shadow-md scale-105'
                       : 'text-white/80 hover:text-white hover:bg-white/10'
-                  }`}
+                    }`}
                 >
                   <i className="ri-vidicon-line"></i>
                   AnimeSuge.cz
@@ -2032,7 +2021,7 @@ This action cannot be undone.`,
                 </svg>
               </button>
             </div>
-            
+
             <div className="relative p-6 overflow-y-auto max-h-[calc(90vh-110px)]">
               <div className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-xl p-4 shadow-xl">
                 <LargeAnimeScraper

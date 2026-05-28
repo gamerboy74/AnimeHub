@@ -55,7 +55,7 @@ export const AnimeSugeScraperComponent: React.FC<AnimeSugeScraperComponentProps>
   const [success, setSuccess] = useState<string | null>(null);
   const [lang, setLang] = useState<'sub' | 'dub'>('sub');
   const [overwriteExisting, setOverwriteExisting] = useState(false);
-  
+
   // Scraped episodes modal state
   const [showScrapedEpisodes, setShowScrapedEpisodes] = useState(false);
   const [scrapedEpisodesData, setScrapedEpisodesData] = useState<any>(null);
@@ -133,7 +133,7 @@ export const AnimeSugeScraperComponent: React.FC<AnimeSugeScraperComponentProps>
     setBatchResult(null);
     setCurrentScrapedEpisodes([]);
     setEpisodesAddedCount(0);
-    
+
     // Check existing episodes for this anime
     await checkExistingEpisodes(anime.id);
   };
@@ -185,12 +185,12 @@ export const AnimeSugeScraperComponent: React.FC<AnimeSugeScraperComponentProps>
       );
 
       setScrapeResult(result);
-      
+
       if (result.success) {
         // Refresh local database knowledge of existing episodes
         queryClient.invalidateQueries({ queryKey: ['admin-anime'] });
         checkExistingEpisodes(selectedAnime.id);
-        
+
         // Expose sources directly in result list
         const sources = result.episodeData?.sources;
         if (sources) {
@@ -273,7 +273,7 @@ export const AnimeSugeScraperComponent: React.FC<AnimeSugeScraperComponentProps>
     } catch (stubErr) {
       console.warn('⚠️ Episode stub creation skipped:', stubErr);
     }
-    
+
     const initialStatuses: Record<number, { status: 'pending' }> = {};
     episodeNumbers.forEach(ep => {
       initialStatuses[ep] = { status: 'pending' };
@@ -300,7 +300,7 @@ export const AnimeSugeScraperComponent: React.FC<AnimeSugeScraperComponentProps>
                 errorCount: 0
               });
               break;
-            
+
             case 'progress':
               setProgressMessages(prev => [...prev, `⏳ Scraping Episode ${event.episode}...`]);
               setEpisodeStatuses(prev => ({
@@ -308,7 +308,7 @@ export const AnimeSugeScraperComponent: React.FC<AnimeSugeScraperComponentProps>
                 [event.episode!]: { status: 'scraping' }
               }));
               break;
-            
+
             case 'success':
               setProgressMessages(prev => [...prev, `✅ Episode ${event.episode} scraped successfully!`]);
               setEpisodeStatuses(prev => ({
@@ -320,7 +320,7 @@ export const AnimeSugeScraperComponent: React.FC<AnimeSugeScraperComponentProps>
                 current: event.current || prev.current,
                 successCount: prev.successCount + 1
               } : null);
-              
+
               if (event.episode && event.url) {
                 scrapedEpisodes.push({
                   number: event.episode,
@@ -334,7 +334,7 @@ export const AnimeSugeScraperComponent: React.FC<AnimeSugeScraperComponentProps>
                 });
               }
               break;
-            
+
             case 'error':
               setProgressMessages(prev => [...prev, `❌ Episode ${event.episode} failed: ${event.error || 'Unknown error'}`]);
               setEpisodeStatuses(prev => ({
@@ -346,7 +346,7 @@ export const AnimeSugeScraperComponent: React.FC<AnimeSugeScraperComponentProps>
                 current: event.current || prev.current,
                 errorCount: prev.errorCount + 1
               } : null);
-              
+
               if (event.episode) {
                 failedEpisodes.push({
                   number: event.episode,
@@ -355,17 +355,17 @@ export const AnimeSugeScraperComponent: React.FC<AnimeSugeScraperComponentProps>
                 });
               }
               break;
-            
+
             case 'complete':
               setProgressMessages(prev => [...prev, `🎉 Scraping complete! ${scrapedEpisodes.length} successful, ${failedEpisodes.length} failed.`]);
-              
+
               // Set the results directly on the page
               setCurrentScrapedEpisodes(scrapedEpisodes);
-              
+
               // Invalidate queries so that DB lists refresh
               queryClient.invalidateQueries({ queryKey: ['admin-anime'] });
               checkExistingEpisodes(selectedAnime.id);
-              
+
               setSuccess(`Scraped & saved ${scrapedEpisodes.length} out of ${event.total || episodeNumbers.length} episodes successfully!`);
               setTimeout(() => setSuccess(null), 5000);
               break;
@@ -403,7 +403,7 @@ export const AnimeSugeScraperComponent: React.FC<AnimeSugeScraperComponentProps>
     } catch (stubErr) {
       console.warn('⚠️ Episode stub creation skipped:', stubErr);
     }
-    
+
     const initialStatuses: Record<number, { status: 'pending' }> = {};
     episodeNumbers.forEach(ep => {
       initialStatuses[ep] = { status: 'pending' };
@@ -430,7 +430,7 @@ export const AnimeSugeScraperComponent: React.FC<AnimeSugeScraperComponentProps>
                 errorCount: 0
               });
               break;
-            
+
             case 'progress':
               setProgressMessages(prev => [...prev, `⏳ Scraping Episode ${event.episode}...`]);
               setEpisodeStatuses(prev => ({
@@ -438,7 +438,7 @@ export const AnimeSugeScraperComponent: React.FC<AnimeSugeScraperComponentProps>
                 [event.episode!]: { status: 'scraping' }
               }));
               break;
-            
+
             case 'success':
               setProgressMessages(prev => [...prev, `✅ Episode ${event.episode} scraped successfully!`]);
               setEpisodeStatuses(prev => ({
@@ -450,7 +450,7 @@ export const AnimeSugeScraperComponent: React.FC<AnimeSugeScraperComponentProps>
                 current: event.current || prev.current,
                 successCount: prev.successCount + 1
               } : null);
-              
+
               if (event.episode && event.url) {
                 scrapedEpisodes.push({
                   number: event.episode,
@@ -464,7 +464,7 @@ export const AnimeSugeScraperComponent: React.FC<AnimeSugeScraperComponentProps>
                 });
               }
               break;
-            
+
             case 'error':
               setProgressMessages(prev => [...prev, `❌ Episode ${event.episode} failed: ${event.error || 'Unknown error'}`]);
               setEpisodeStatuses(prev => ({
@@ -476,7 +476,7 @@ export const AnimeSugeScraperComponent: React.FC<AnimeSugeScraperComponentProps>
                 current: event.current || prev.current,
                 errorCount: prev.errorCount + 1
               } : null);
-              
+
               if (event.episode) {
                 failedEpisodes.push({
                   number: event.episode,
@@ -485,17 +485,17 @@ export const AnimeSugeScraperComponent: React.FC<AnimeSugeScraperComponentProps>
                 });
               }
               break;
-            
+
             case 'complete':
               setProgressMessages(prev => [...prev, `🎉 Scraping complete! ${scrapedEpisodes.length} successful, ${failedEpisodes.length} failed.`]);
-              
+
               // Set the results directly on the page
               setCurrentScrapedEpisodes(scrapedEpisodes);
-              
+
               // Invalidate queries so that DB lists refresh
               queryClient.invalidateQueries({ queryKey: ['admin-anime'] });
               checkExistingEpisodes(selectedAnime.id);
-              
+
               setSuccess(`Scraped & saved ${scrapedEpisodes.length} out of ${event.total || episodeNumbers.length} episodes successfully!`);
               setTimeout(() => setSuccess(null), 5000);
               break;
@@ -518,7 +518,7 @@ export const AnimeSugeScraperComponent: React.FC<AnimeSugeScraperComponentProps>
 
   const handleAddEpisode = async (episode: any) => {
     if (!selectedAnime) return;
-    
+
     try {
       const API_BASE = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
       const response = await fetch(`${API_BASE}/api/add-scraped-episode`, {
@@ -540,19 +540,19 @@ export const AnimeSugeScraperComponent: React.FC<AnimeSugeScraperComponentProps>
       });
 
       const result = await response.json();
-      
+
       if (result.success) {
-        setCurrentScrapedEpisodes(prev => 
-          prev.map(ep => 
-            ep.number === episode.number 
+        setCurrentScrapedEpisodes(prev =>
+          prev.map(ep =>
+            ep.number === episode.number
               ? { ...ep, isExisting: true, addedAt: new Date().toISOString() }
               : ep
           )
         );
-        
+
         // Update existing episodes set
         setExistingEpisodes(prev => new Set([...prev, episode.number]));
-        
+
         setEpisodesAddedCount(prev => prev + 1);
         setSuccess(`Episode ${episode.number} added successfully!`);
         setTimeout(() => setSuccess(null), 3000);
@@ -596,7 +596,7 @@ export const AnimeSugeScraperComponent: React.FC<AnimeSugeScraperComponentProps>
           </div>
           Select Anime
         </h3>
-        
+
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-2">
@@ -667,9 +667,8 @@ export const AnimeSugeScraperComponent: React.FC<AnimeSugeScraperComponentProps>
                   <motion.div
                     key={anime.id}
                     whileHover={{ backgroundColor: 'rgba(124, 58, 237, 0.04)' }}
-                    className={`p-3 cursor-pointer transition-all duration-150 ${
-                      selectedAnime?.id === anime.id ? 'bg-violet-50/80 border-l-4 border-l-violet-500' : 'border-l-4 border-l-transparent'
-                    }`}
+                    className={`p-3 cursor-pointer transition-all duration-150 ${selectedAnime?.id === anime.id ? 'bg-violet-50/80 border-l-4 border-l-violet-500' : 'border-l-4 border-l-transparent'
+                      }`}
                     onClick={() => handleAnimeSelect(anime)}
                   >
                     <div className="flex items-center space-x-3">
@@ -724,17 +723,15 @@ export const AnimeSugeScraperComponent: React.FC<AnimeSugeScraperComponentProps>
             <div className="flex gap-2 bg-slate-100 p-1 rounded-xl">
               <button
                 onClick={() => setLang('sub')}
-                className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                  lang === 'sub' ? 'bg-violet-500 text-white shadow-sm' : 'text-slate-600 hover:text-slate-800'
-                }`}
+                className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${lang === 'sub' ? 'bg-violet-500 text-white shadow-sm' : 'text-slate-600 hover:text-slate-800'
+                  }`}
               >
                 Subbed
               </button>
               <button
                 onClick={() => setLang('dub')}
-                className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                  lang === 'dub' ? 'bg-violet-500 text-white shadow-sm' : 'text-slate-600 hover:text-slate-800'
-                }`}
+                className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${lang === 'dub' ? 'bg-violet-500 text-white shadow-sm' : 'text-slate-600 hover:text-slate-800'
+                  }`}
               >
                 Dubbed
               </button>
@@ -779,7 +776,7 @@ export const AnimeSugeScraperComponent: React.FC<AnimeSugeScraperComponentProps>
             </div>
             Scraping Options
           </h3>
-          
+
           <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
             {/* Single Episode */}
             <div className="bg-gradient-to-br from-slate-50 to-violet-50/30 rounded-xl p-5 border border-slate-200/60 space-y-3">
@@ -875,7 +872,7 @@ export const AnimeSugeScraperComponent: React.FC<AnimeSugeScraperComponentProps>
               </div>
             )}
           </div>
-          
+
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
             {Object.entries(episodeStatuses).map(([episodeNum, status]) => {
               const bgColor = {
@@ -884,7 +881,7 @@ export const AnimeSugeScraperComponent: React.FC<AnimeSugeScraperComponentProps>
                 success: 'bg-green-50 text-green-700 border-green-300',
                 error: 'bg-red-50 text-red-700 border-red-300'
               }[status.status];
-              
+
               const icon = {
                 pending: 'ri-time-line',
                 scraping: 'ri-loader-4-line',
@@ -895,9 +892,8 @@ export const AnimeSugeScraperComponent: React.FC<AnimeSugeScraperComponentProps>
               return (
                 <div
                   key={episodeNum}
-                  className={`p-3 rounded-xl border transition-all ${bgColor} ${
-                    status.status === 'scraping' ? 'animate-pulse shadow-md' : ''
-                  }`}
+                  className={`p-3 rounded-xl border transition-all ${bgColor} ${status.status === 'scraping' ? 'animate-pulse shadow-md' : ''
+                    }`}
                 >
                   <div className="flex items-center justify-between">
                     <span className="font-bold text-xs">EP {episodeNum}</span>
@@ -998,9 +994,8 @@ export const AnimeSugeScraperComponent: React.FC<AnimeSugeScraperComponentProps>
                 <h4 className="font-semibold text-slate-700 text-sm flex items-center gap-1.5">
                   <i className="ri-movie-2-line text-violet-500"></i> Single Episode Result
                 </h4>
-                <div className={`p-4 rounded-xl ${
-                  scrapeResult.success ? 'bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200/60' : 'bg-gradient-to-r from-red-50 to-rose-50 border border-red-200/60'
-                }`}>
+                <div className={`p-4 rounded-xl ${scrapeResult.success ? 'bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200/60' : 'bg-gradient-to-r from-red-50 to-rose-50 border border-red-200/60'
+                  }`}>
                   {scrapeResult.success ? (
                     <div>
                       <p className="text-green-800 font-semibold text-sm flex items-center gap-1"><i className="ri-check-double-line mr-1 text-lg"></i>Episode scraped and saved successfully!</p>
@@ -1056,7 +1051,7 @@ export const AnimeSugeScraperComponent: React.FC<AnimeSugeScraperComponentProps>
                         </div>
                         <div className="text-[10px] text-slate-400 font-mono truncate mt-0.5 max-w-lg">{episode.streamUrl}</div>
                       </div>
-                      
+
                       <div className="flex items-center gap-2">
                         {episode.isExisting ? (
                           <span className="text-xs font-semibold text-green-600 bg-green-50 border border-green-200 px-2.5 py-1 rounded-lg flex items-center gap-1">
