@@ -75,6 +75,7 @@ export default function AnimeManagement() {
   const [animeEpisodes, setAnimeEpisodes] = useState<any[]>([]);
   const [episodesCache, setEpisodesCache] = useState<Record<string, any[]>>({});
   const [episodesLoading, setEpisodesLoading] = useState(false);
+  const [episodePage, setEpisodePage] = useState(1);
   const [preloadedAnime, setPreloadedAnime] = useState<Set<string>>(new Set());
   const [preloadQueue, setPreloadQueue] = useState<string[]>([]);
   const [editingEpisode, setEditingEpisode] = useState<string | null>(null);
@@ -360,6 +361,7 @@ This action cannot be undone.`,
     setSelectedAnimeForModal(null);
     setAnimeAnalytics(null);
     setAnimeEpisodes([]); // Clear episodes when modal closes
+    setEpisodePage(1); // Reset episode page
     setCopiedId(false);
   };
 
@@ -585,6 +587,7 @@ This action cannot be undone.`,
   const handleViewAnimeDetails = async (anime: any) => {
     setSelectedAnimeForModal(anime);
     setShowAnimeModal(true);
+    setEpisodePage(1); // Reset episode page
 
     // Use preloaded episodes if available, otherwise clear episodes
     if (episodesCache[anime.id]) {
@@ -613,6 +616,12 @@ This action cannot be undone.`,
   };
 
 
+
+  const EPISODES_PER_PAGE = 24;
+  const totalEpisodePages = Math.ceil(animeEpisodes.length / EPISODES_PER_PAGE);
+  const safeEpisodePage = Math.min(episodePage, totalEpisodePages || 1);
+  const episodeStartIndex = (safeEpisodePage - 1) * EPISODES_PER_PAGE;
+  const paginatedEpisodes = animeEpisodes.slice(episodeStartIndex, episodeStartIndex + EPISODES_PER_PAGE);
 
   const totalPages = Math.ceil(totalAnime / 20);
 
@@ -1708,41 +1717,103 @@ This action cannot be undone.`,
                         <p className="text-slate-400 text-sm">Add the first episode to get started</p>
                       </div>
                     ) : (
-                      animeEpisodes.map((episode) => (
-                        <div key={episode.id} className="bg-slate-50 rounded-lg p-4 border border-slate-200 hover:bg-slate-100 transition-colors">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center space-x-4">
-                              <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-md">
-                                {episode.episode_number}
+                      <>
+                        {paginatedEpisodes.map((episode) => (
+                          <div key={episode.id} className="bg-slate-50 rounded-lg p-4 border border-slate-200 hover:bg-slate-100 transition-colors">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center space-x-4">
+                                <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-md">
+                                  {episode.episode_number}
+                                </div>
+                                <div>
+                                  <h5 className="text-slate-900 font-semibold text-lg">{episode.title}</h5>
+                                  <p className="text-slate-500 text-sm mt-1">
+                                    Duration: {episode.duration ? `${Math.floor(episode.duration / 60)}:${(episode.duration % 60).toString().padStart(2, '0')}` : 'N/A'}
+                                  </p>
+                                  <p className="text-slate-400 text-xs mt-1">
+                                    Added: {new Date(episode.created_at).toLocaleDateString()}
+                                  </p>
+                                </div>
                               </div>
-                              <div>
-                                <h5 className="text-slate-900 font-semibold text-lg">{episode.title}</h5>
-                                <p className="text-slate-500 text-sm mt-1">
-                                  Duration: {episode.duration ? `${Math.floor(episode.duration / 60)}:${(episode.duration % 60).toString().padStart(2, '0')}` : 'N/A'}
-                                </p>
-                                <p className="text-slate-400 text-xs mt-1">
-                                  Added: {new Date(episode.created_at).toLocaleDateString()}
-                                </p>
+                              <div className="flex items-center space-x-2">
+                                <button
+                                  onClick={() => handleEditEpisode(episode)}
+                                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all duration-200 text-sm font-medium shadow-sm hover:shadow-md"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteEpisode(episode.id, episode.title)}
+                                  disabled={editingEpisode === episode.id}
+                                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 transition-all duration-200 text-sm font-medium shadow-sm hover:shadow-md"
+                                >
+                                  {editingEpisode === episode.id ? 'Deleting...' : 'Delete'}
+                                </button>
                               </div>
                             </div>
-                            <div className="flex items-center space-x-2">
+                          </div>
+                        ))}
+
+                        {totalEpisodePages > 1 && (
+                          <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mt-6 bg-slate-50 border border-slate-200 p-4 rounded-2xl shadow-sm">
+                            <span className="text-xs font-semibold text-slate-500">
+                              Showing {episodeStartIndex + 1} to {Math.min(episodeStartIndex + EPISODES_PER_PAGE, animeEpisodes.length)} of {animeEpisodes.length} episodes
+                            </span>
+                            <div className="flex items-center gap-1.5">
                               <button
-                                onClick={() => handleEditEpisode(episode)}
-                                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all duration-200 text-sm font-medium shadow-sm hover:shadow-md"
+                                onClick={() => setEpisodePage(prev => Math.max(prev - 1, 1))}
+                                disabled={safeEpisodePage === 1}
+                                className="px-3 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl shadow-sm text-xs font-semibold flex items-center justify-center gap-1 transition-all"
                               >
-                                Edit
+                                <span>←</span> Previous
                               </button>
+                              
+                              {Array.from({ length: totalEpisodePages }, (_, i) => i + 1).map(pageNumber => {
+                                const showPage =
+                                  pageNumber === 1 ||
+                                  pageNumber === totalEpisodePages ||
+                                  Math.abs(pageNumber - safeEpisodePage) <= 1;
+
+                                const showEllipsis =
+                                  (pageNumber === safeEpisodePage - 2 && safeEpisodePage > 3) ||
+                                  (pageNumber === safeEpisodePage + 2 && safeEpisodePage < totalEpisodePages - 2);
+
+                                if (showEllipsis) {
+                                  return (
+                                    <span key={pageNumber} className="px-1.5 text-slate-400 text-xs">
+                                      ···
+                                    </span>
+                                  );
+                                }
+
+                                if (!showPage) return null;
+
+                                return (
+                                  <button
+                                    key={pageNumber}
+                                    onClick={() => setEpisodePage(pageNumber)}
+                                    className={`w-8 h-8 rounded-lg text-xs font-semibold flex items-center justify-center transition-all ${
+                                      safeEpisodePage === pageNumber
+                                        ? 'bg-blue-600 text-white shadow-md'
+                                        : 'bg-white hover:bg-slate-50 border border-slate-200 text-slate-700'
+                                    }`}
+                                  >
+                                    {pageNumber}
+                                  </button>
+                                );
+                              })}
+
                               <button
-                                onClick={() => handleDeleteEpisode(episode.id, episode.title)}
-                                disabled={editingEpisode === episode.id}
-                                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 transition-all duration-200 text-sm font-medium shadow-sm hover:shadow-md"
+                                onClick={() => setEpisodePage(prev => Math.min(prev + 1, totalEpisodePages))}
+                                disabled={safeEpisodePage === totalEpisodePages}
+                                className="px-3 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl shadow-sm text-xs font-semibold flex items-center justify-center gap-1 transition-all"
                               >
-                                {editingEpisode === episode.id ? 'Deleting...' : 'Delete'}
+                                Next <span>→</span>
                               </button>
                             </div>
                           </div>
-                        </div>
-                      ))
+                        )}
+                      </>
                     )}
                   </div>
                 </div>

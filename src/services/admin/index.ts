@@ -1130,7 +1130,6 @@ export class AdminService {
         .select('id, episode_number, title, description, duration, thumbnail_url, video_url, created_at, is_premium, air_date, video_servers')
         .eq('anime_id', animeId)
         .order('episode_number', { ascending: true })
-        .limit(50) // Reduced limit for faster queries
 
       if (error) throw error
       return episodes || []
