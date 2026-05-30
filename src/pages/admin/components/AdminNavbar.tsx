@@ -38,6 +38,7 @@ export default function AdminNavbar({ collapsed, onToggleCollapse }: AdminNavbar
     {
       label: 'System',
       items: [
+        { name: 'Maintenance', path: '/admin/maintenance', icon: 'ri-shield-flash-line' },
         { name: 'Settings', path: '/admin/settings', icon: 'ri-settings-3-line' },
       ]
     }

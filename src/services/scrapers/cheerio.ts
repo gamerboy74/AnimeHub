@@ -93,7 +93,7 @@ export class CheerioHiAnimeScraperService {
         if (!searchSuccess) {
           // Debug: Log page content to understand structure
           console.log('Page title:', $('title').text());
-          console.log('Available links:', $('a[href*="/watch/"]').map((i, el) => $(el).attr('href')).get().slice(0, 5));
+          console.log('Available links:', $('a[href*="/watch/"]').map((_, el) => $(el).attr('href')).get().slice(0, 5));
           throw new Error('Could not find anime in search results. Site structure may have changed.');
         }
 
@@ -220,13 +220,11 @@ export class CheerioHiAnimeScraperService {
           const iframeResponse = await axios.get(iframeSrc, {
             headers: {
               'User-Agent': this.USER_AGENT,
-              'Referer': streamApiUrl,
+              'Referer': animeLink,
             },
             timeout
           });
-
-          const iframe$ = cheerio.load(iframeResponse.data);
-          const iframeHtml = iframeResponse.data;
+           const iframeHtml = iframeResponse.data;
           
           // Look for m3u8 URLs in the HTML
           const m3u8Match = iframeHtml.match(/"(https:\/\/.*\.m3u8[^"]*)"/);
@@ -279,23 +277,37 @@ export class CheerioHiAnimeScraperService {
       // Check if episode already exists
       const { data: existingEpisode } = await supabase
         .from('episodes')
-        .select('id')
+        .select('id, title')
         .eq('anime_id', episodeData.animeId)
         .eq('episode_number', episodeData.episodeNumber)
         .maybeSingle();
 
       if (existingEpisode) {
         console.log('⚠️ Episode already exists, updating...');
-        
+
+        const genericRegex = /^(episode|ep|ep\.|ep\.\s)\s*\d+$/i;
+        const currentTitle = existingEpisode.title?.trim() || '';
+        const isCurrentGeneric =
+          currentTitle === '' ||
+          !isNaN(Number(currentTitle)) ||
+          genericRegex.test(currentTitle) ||
+          currentTitle.toLowerCase().includes(' - episode') ||
+          currentTitle.toLowerCase().includes(' - ep');
+
+        const updatePayload: any = {
+          video_url: episodeData.videoUrl,
+          thumbnail_url: episodeData.thumbnailUrl,
+          duration: episodeData.duration,
+          description: episodeData.description
+        };
+
+        if (isCurrentGeneric) {
+          updatePayload.title = episodeData.title;
+        }
+
         const { error: updateError } = await supabase
           .from('episodes')
-          .update({
-            title: episodeData.title,
-            video_url: episodeData.videoUrl,
-            thumbnail_url: episodeData.thumbnailUrl,
-            duration: episodeData.duration,
-            description: episodeData.description
-          })
+          .update(updatePayload)
           .eq('id', existingEpisode.id);
 
         if (updateError) {

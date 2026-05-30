@@ -307,36 +307,26 @@ export class AnimeService {
 
   static async getAnimeById(animeId: string, userId?: string): Promise<AnimeWithEpisodes | null> {
     try {
-      // Use a single query with joins for better performance
-      const { data: animeWithEpisodes, error: animeError } = await supabase
-        .from('anime')
-        .select(`
-          *,
-          episodes (
-            id,
-            episode_number,
-            title,
-            duration,
-            video_url
-          )
-        `)
-        .eq('id', animeId)
-        .single()
+      // Use the optimized backend API with in-memory caching for public anime details
+      const apiUrl = import.meta.env.DEV ? '' : (import.meta.env.VITE_BACKEND_URL || '')
+      const response = await fetch(`${apiUrl}/api/anime/${animeId}`)
+      
+      if (!response.ok) {
+        throw new Error(`Backend API error: ${response.status}`)
+      }
 
-      if (animeError || !animeWithEpisodes) {
-        console.error('Anime fetch error:', animeError)
+      const resultPayload = await response.json()
+      if (!resultPayload.success || !resultPayload.data) {
         return null
       }
 
-      // Only expose episodes that actually have a playable video URL.
-      // Stub rows stay available in the database for admin scraping flows.
-      const playableEpisodes = (animeWithEpisodes.episodes || [])
-        .filter((episode: any) => episode?.video_url)
-        .sort((a: any, b: any) => a.episode_number - b.episode_number)
+      const animeWithEpisodes = resultPayload.data
 
       const result: AnimeWithEpisodes = {
         ...animeWithEpisodes,
-        episodes: playableEpisodes
+        user_progress: [],
+        is_favorited: false,
+        is_in_watchlist: false
       }
 
       // Fetch user-specific data in parallel if userId is provided
@@ -385,9 +375,6 @@ export class AnimeService {
         } catch (userError) {
           console.warn('User data fetch error (non-critical):', userError)
           // Don't fail the entire request if user data fails
-          result.user_progress = []
-          result.is_favorited = false
-          result.is_in_watchlist = false
         }
       }
 
@@ -590,86 +577,30 @@ export class AnimeService {
    * shortens the title to find the franchise root.
    */
   static async getRelatedSeasons(
-    _animeId: string,
+    animeId: string,
     title: string,
     titleEnglish?: string | null,
   ): Promise<Array<{ id: string; title: string; title_english: string | null; poster_url: string | null; total_episodes: number | null; type: string | null }>> {
     try {
-      const { extractSeasonInfo } = await import('../../utils/anime/seasons')
-      const infoEng = titleEnglish ? extractSeasonInfo(titleEnglish) : null
-      const infoRaw = extractSeasonInfo(title)
-      const baseTitle = infoEng?.baseTitle || infoRaw.baseTitle
-
-      if (!baseTitle || baseTitle.length < 3) return []
-
-      // Generate candidate search terms: full base title, then progressively shorter
-      const searchCandidates = this.generateFranchisePrefixes(baseTitle)
-
-      const validCandidates = searchCandidates.filter(c => c.length >= 3);
+      const apiUrl = import.meta.env.DEV ? '' : (import.meta.env.VITE_BACKEND_URL || '')
       
-      const queryPromises = validCandidates.map(async (candidate) => {
-        const escapedBase = candidate.replace(/[%_]/g, '\\$&')
-        const { data, error } = await supabase
-          .from('anime')
-          .select('id, title, title_english, poster_url, total_episodes, type')
-          .or(`title.ilike.%${escapedBase}%,title_english.ilike.%${escapedBase}%`)
-          .order('title', { ascending: true })
-        if (error) {
-          console.error('Get related seasons query error:', error)
-          return null
-        }
-        return data || []
-      })
-
-      const results = await Promise.all(queryPromises)
-
-      // Find the first result set with 2+ entries (ordered by longest search candidate first)
-      for (const data of results) {
-        if (data && data.length >= 2) {
-          return data
-        }
+      const queryParams = new URLSearchParams()
+      queryParams.append('title', title)
+      if (titleEnglish) {
+        queryParams.append('titleEnglish', titleEnglish)
       }
 
-      // Fallback: return just the single result from the full base title search
-      if (results.length > 0 && results[0]) {
-        return results[0]
+      const response = await fetch(`${apiUrl}/api/anime/${animeId}/seasons?${queryParams.toString()}`)
+      if (!response.ok) {
+        throw new Error(`Seasons API error: ${response.status}`)
       }
-      return []
+
+      const result = await response.json()
+      return result.success ? result.data : []
     } catch (error) {
       console.error('Get related seasons service error:', error)
       return []
     }
-  }
-
-  /**
-   * Generate progressively shorter prefixes of a title for franchise matching.
-   * "SPY x FAMILY CODE: White" → ["SPY x FAMILY CODE: White", "SPY x FAMILY CODE", "SPY x FAMILY"]
-   */
-  private static generateFranchisePrefixes(title: string): string[] {
-    const prefixes: string[] = [title]
-
-    // Split on common subtitle separators: ":", " - ", " – ", " — "
-    const separatorSplit = title.split(/\s*[:\–\—]\s*|\s+-\s+/)
-    if (separatorSplit.length > 1) {
-      // Add each progressively shorter prefix
-      for (let i = separatorSplit.length - 1; i >= 1; i--) {
-        const prefix = separatorSplit.slice(0, i).join(': ').trim()
-        if (prefix && !prefixes.includes(prefix)) {
-          prefixes.push(prefix)
-        }
-      }
-    }
-
-    // Also try stripping last word progressively (minimum 2 words)
-    const words = title.split(/\s+/)
-    for (let len = words.length - 1; len >= 2; len--) {
-      const prefix = words.slice(0, len).join(' ').trim()
-      if (prefix && !prefixes.includes(prefix)) {
-        prefixes.push(prefix)
-      }
-    }
-
-    return prefixes
   }
 
   /**

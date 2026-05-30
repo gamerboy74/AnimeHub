@@ -6,6 +6,7 @@ export function getCoreTitle(title) {
   return title
     .toLowerCase()
     .replace(/(?:season\s*\d+|s\d+|\d+(?:nd|rd|th|st)?\s*season|\d+(?:nd|rd|th|st)?\s*sseason)/gi, "")
+    .replace(/\b(?:movie|film|ova|ona|special|part)\b\s*\d*/gi, "")
     .replace(/\b(?:i{1,3}|iv|v|vi{1,3}|ix|x)\b\s*$/i, "")
     .replace(/\b\d+\b\s*$/gi, "")
     .replace(/\b(?:dub|sub|uncensored|uncut|tv|dual[- ]audio|uncut)\b/g, " ")
@@ -13,6 +14,53 @@ export function getCoreTitle(title) {
     .replace(/\[[^\]]*\]/g, " ")
     .replace(/[^a-z0-9]/g, "")
     .trim();
+}
+
+function verifyEpisodeNumberInUrl(loadedUrl, requestedEpisode) {
+  try {
+    const url = new URL(loadedUrl);
+    
+    // Check if redirected to home page or completely different section
+    if (url.pathname === "/" || url.pathname === "") {
+      return false; // Mismatch!
+    }
+
+    // Check query params
+    const epParam = url.searchParams.get("ep");
+    if (epParam) {
+      const parsedEp = parseInt(epParam);
+      if (!isNaN(parsedEp) && parsedEp !== requestedEpisode) {
+        return false; // Mismatch!
+      }
+    }
+    
+    // Check path suffix (e.g. /ep-10 or -episode-10 or /episode/10)
+    const pathname = url.pathname.toLowerCase();
+    const pathPatterns = [
+      /\/ep-(\d+)(?:\/|$)/i,
+      /\/-episode-(\d+)(?:\/|$)/i,
+      /\/episode\/(\d+)(?:\/|$)/i,
+      /\/episode-(\d+)(?:\/|$)/i
+    ];
+    let foundEpisodeInPath = false;
+    for (const pattern of pathPatterns) {
+      const match = pathname.match(pattern);
+      if (match) {
+        foundEpisodeInPath = true;
+        const parsedEp = parseInt(match[1]);
+        if (!isNaN(parsedEp) && parsedEp !== requestedEpisode) {
+          return false; // Mismatch!
+        }
+      }
+    }
+
+    if (!epParam && !foundEpisodeInPath && (pathname.includes("/watch") || pathname.includes("/anime"))) {
+      if (requestedEpisode > 1) {
+        return false;
+      }
+    }
+  } catch (e) {}
+  return true;
 }
 
 export class AnimeSugeScraperService {
@@ -31,115 +79,165 @@ export class AnimeSugeScraperService {
    * AnimeSuge search results have EMPTY text on <a> poster links —
    * the title lives in the parent .item div's innerText (last non-numeric line).
    */
-  static async searchAnimeUrl(page, title) {
-    const searchUrl = `${this.BASE_URL}/filter?keyword=${encodeURIComponent(title)}`;
-    console.log(`🔍 AnimeSuge search: ${searchUrl}`);
+  static async searchAnimeUrl(page, title, options = {}) {
+    const dbAnimeId = options.dbAnimeId;
 
-    await page.goto(searchUrl, { waitUntil: "networkidle", timeout: 40000 });
-    await page.waitForTimeout(2000);
+    // Get all title variants from DB if possible to improve matching (e.g. English vs. Romaji)
+    const titleVariants = new Set();
+    titleVariants.add(title);
 
-    // Wait for result cards to appear
-    try {
-      await page.waitForSelector(".item", { timeout: 6000 });
-    } catch (_) {
-      console.warn("⚠️ No .item cards appeared — results may be empty");
+    if (dbAnimeId) {
+      try {
+        const { data: animeRecord } = await supabase
+          .from("anime")
+          .select("title, title_romaji, title_japanese, title_synonyms")
+          .eq("id", dbAnimeId)
+          .maybeSingle();
+
+        if (animeRecord) {
+          if (animeRecord.title) titleVariants.add(animeRecord.title);
+          if (animeRecord.title_romaji) titleVariants.add(animeRecord.title_romaji);
+          if (animeRecord.title_synonyms && Array.isArray(animeRecord.title_synonyms)) {
+            for (const syn of animeRecord.title_synonyms) {
+              if (syn && /^[a-zA-Z0-9\s\-':!,.&]+$/.test(syn)) {
+                titleVariants.add(syn);
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.log("⚠️ Failed to fetch title variants from DB in AnimeSuge:", e.message);
+      }
     }
 
-    // Extract links + titles from .item containers.
-    // Each .item's innerText looks like: "TV\n12\n12\n12\nAnime Title Here"
-    // The title is the last non-numeric non-empty line.
-    const animeLinks = await page.evaluate(() => {
-      const seen = new Set();
-      const results = [];
-
-      document.querySelectorAll(".item").forEach((item) => {
-        const link = item.querySelector('a[href*="/anime/"]');
-        if (!link || !link.href || seen.has(link.href)) return;
-        if (link.href.includes("/filter") || link.href.includes("/genre")) return;
-        seen.add(link.href);
-
-        // Extract title: split on newlines, discard empty lines, type labels, and pure numbers
-        const lines = (item.innerText || "")
-          .split("\n")
-          .map((l) => l.trim())
-          .filter(
-            (l) =>
-              l.length > 0 &&
-              !/^\d+$/.test(l) &&
-              !["TV", "MOVIE", "ONA", "OVA", "SPECIAL", "MUSIC"].includes(l.toUpperCase())
-          );
-
-        const titleText = lines[lines.length - 1] || "";
-        results.push({ href: link.href, text: titleText });
-      });
-
-      return results;
-    });
-
-    console.log(`📋 AnimeSuge found ${animeLinks.length} results`);
-    animeLinks.slice(0, 5).forEach((l, i) =>
-      console.log(`   [${i + 1}] "${l.text}" → ${l.href}`)
-    );
-
-    if (animeLinks.length === 0) {
-      throw new Error(
-        `No results found on AnimeSuge for "${title}". Try pasting a direct AnimeSuge URL instead.`
-      );
-    }
-
-    const targetSeason = extractSeasonNumber(title);
-
-    // Normalization functions
     const cleanStr = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
     const sortWords = (s) => s.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(Boolean).sort().join(" ");
+
+    // Build unique search keywords to try, starting with the original title
+    const searchKeywords = [...titleVariants];
     
-    const targetClean = cleanStr(title);
-    const targetSorted = sortWords(title);
-    const targetCore = getCoreTitle(title);
+    let lastError = null;
+    let finalMatch = null;
 
-    let exactMatch = null;
-    let reorderMatch = null;
-    let coreMatch = null;
+    for (const keyword of searchKeywords) {
+      try {
+        const searchUrl = `${this.BASE_URL}/filter?keyword=${encodeURIComponent(keyword)}`;
+        console.log(`🔍 AnimeSuge search: ${searchUrl}`);
 
-    for (const link of animeLinks) {
-      const resultSeason = extractSeasonNumber(link.text);
-      if (targetSeason !== resultSeason) {
-        continue;
+        await page.goto(searchUrl, { waitUntil: "networkidle", timeout: 40000 });
+        await page.waitForTimeout(2000);
+
+        // Wait for result cards to appear
+        try {
+          await page.waitForSelector(".item", { timeout: 6000 });
+        } catch (_) {
+          console.warn("⚠️ No .item cards appeared — results may be empty");
+        }
+
+        // Extract links + titles from .item containers
+        const animeLinks = await page.evaluate(() => {
+          const seen = new Set();
+          const results = [];
+
+          document.querySelectorAll(".item").forEach((item) => {
+            const link = item.querySelector('a[href*="/anime/"]');
+            if (!link || !link.href || seen.has(link.href)) return;
+            if (link.href.includes("/filter") || link.href.includes("/genre")) return;
+            seen.add(link.href);
+
+            const lines = (item.innerText || "")
+              .split("\n")
+              .map((l) => l.trim())
+              .filter(
+                (l) =>
+                  l.length > 0 &&
+                  !/^\d+$/.test(l) &&
+                  !["TV", "MOVIE", "ONA", "OVA", "SPECIAL", "MUSIC"].includes(l.toUpperCase())
+              );
+
+            const titleText = lines[lines.length - 1] || "";
+            results.push({ href: link.href, text: titleText });
+          });
+
+          return results;
+        });
+
+        console.log(`📋 AnimeSuge found ${animeLinks.length} results for keyword "${keyword}"`);
+        if (animeLinks.length > 0) {
+          animeLinks.slice(0, 5).forEach((l, i) =>
+            console.log(`   [${i + 1}] "${l.text}" → ${l.href}`)
+          );
+        }
+
+        if (animeLinks.length === 0) {
+          continue; // Try next keyword if no results found
+        }
+
+        let exactMatch = null;
+        let reorderMatch = null;
+        let coreMatch = null;
+        let coreMatchScore = -1;
+
+        for (const link of animeLinks) {
+          const resultSeason = extractSeasonNumber(link.text);
+          const textClean = cleanStr(link.text);
+          const textSorted = sortWords(link.text);
+          const textCore = getCoreTitle(link.text);
+
+          // Check if link matches ANY of our known title variants
+          for (const variant of titleVariants) {
+            const targetSeason = extractSeasonNumber(variant);
+            if (targetSeason !== resultSeason) {
+              continue;
+            }
+
+            const targetClean = cleanStr(variant);
+            const targetSorted = sortWords(variant);
+            const targetCore = getCoreTitle(variant);
+
+            // 1. Direct exact clean match
+            if (textClean === targetClean) {
+              exactMatch = link.href;
+              console.log(`🎯 EXACT match with variant "${variant}": "${link.text}" -> ${link.href}`);
+              break;
+            }
+
+            // 2. Token-sorted word match (e.g. "Baki Hanma" vs "Hanma Baki")
+            if (textSorted === targetSorted && targetSorted !== "") {
+              reorderMatch = link.href;
+              console.log(`🎯 REORDER match with variant "${variant}": "${link.text}" -> ${link.href}`);
+            }
+
+            // 3. Core match
+            const isCoreMatch = textCore && targetCore && (textCore === targetCore || textCore.includes(targetCore) || (targetCore.includes(textCore) && textCore.length / targetCore.length >= 0.8));
+            if (isCoreMatch) {
+              const lenRatio = Math.min(textClean.length, targetClean.length) / Math.max(textClean.length, targetClean.length || 1);
+              const containsBonus = (textClean.includes(targetClean) || targetClean.includes(textClean)) ? 0.05 : 0;
+              const score = lenRatio + containsBonus;
+              console.log(`🎯 CORE match with variant "${variant}": "${link.text}" -> ${link.href} (score: ${score.toFixed(2)})`);
+              if (score > coreMatchScore) {
+                coreMatch = link.href;
+                coreMatchScore = score;
+              }
+            }
+          }
+
+          if (exactMatch) break;
+        }
+
+        finalMatch = exactMatch || reorderMatch || coreMatch;
+        if (finalMatch) {
+          return finalMatch;
+        }
+      } catch (err) {
+        console.warn(`⚠️ AnimeSuge search query "${keyword}" failed:`, err.message);
+        lastError = err;
       }
-
-      const textClean = cleanStr(link.text);
-      const textSorted = sortWords(link.text);
-      const textCore = getCoreTitle(link.text);
-
-      // 1. Direct exact clean match
-      if (textClean === targetClean) {
-        exactMatch = link.href;
-        console.log(`🎯 EXACT match: "${link.text}" -> ${link.href}`);
-        break;
-      }
-
-      // 2. Token-sorted word match (e.g. "Baki Hanma" vs "Hanma Baki")
-      if (textSorted === targetSorted && targetSorted !== "") {
-        reorderMatch = link.href;
-        console.log(`🎯 REORDER match: "${link.text}" -> ${link.href}`);
-      }
-
-      // 3. Core exact match (excluding season suffix variations)
-      if (textCore === targetCore && targetCore !== "") {
-        coreMatch = link.href;
-        console.log(`🎯 CORE match: "${link.text}" -> ${link.href}`);
-      }
-    }
-
-    const finalMatch = exactMatch || reorderMatch || coreMatch;
-
-    if (finalMatch) {
-      return finalMatch;
     }
 
     // Strict reject: throw error instead of falling back to a mismatch season link
     throw new Error(
-      `Could not find a secure search result matching "${title}" (Season ${targetSeason}) on AnimeSuge.`
+      `Could not find a secure search result matching "${title}" on AnimeSuge.`
     );
   }
 
@@ -170,7 +268,7 @@ export class AnimeSugeScraperService {
       animeDetailUrl = normalized;
     } else {
       // Title search
-      animeDetailUrl = await this.searchAnimeUrl(page, inputUrl);
+      animeDetailUrl = await this.searchAnimeUrl(page, inputUrl, options);
     }
 
     // Strip trailing slash and existing /ep-N
@@ -217,6 +315,13 @@ export class AnimeSugeScraperService {
 
         const page = await context.newPage();
 
+        // Proactively block popups/ads by overriding window.open
+        await page.addInitScript(() => {
+          try {
+            window.open = () => null;
+          } catch (e) {}
+        });
+
         // Capture all AJAX /ajax/server?get= responses
         const capturedUrlsQueue = [];
         page.on("response", async (response) => {
@@ -242,6 +347,12 @@ export class AnimeSugeScraperService {
 
         // Wait for the player area to render
         await page.waitForTimeout(5000);
+
+        // Verify that the page URL actually matches the requested episode!
+        const finalUrl = page.url();
+        if (!verifyEpisodeNumberInUrl(finalUrl, episodeNumber)) {
+          throw new Error(`AnimeSuge redirected from ${watchUrl} to ${finalUrl}. Episode ${episodeNumber} is likely not available yet.`);
+        }
 
         // ── Try to detect a "not found" / 404 page ──────────────────────────
         const pageTitle = await page.title().catch(() => "");

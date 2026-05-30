@@ -6,6 +6,7 @@ export function getCoreTitle(title) {
   return title
     .toLowerCase()
     .replace(/(?:season\s*\d+|s\d+|\d+(?:nd|rd|th|st)?\s*season|\d+(?:nd|rd|th|st)?\s*sseason)/gi, "")
+    .replace(/\b(?:movie|film|ova|ona|special|part)\b\s*\d*/gi, "")
     .replace(/\b(?:i{1,3}|iv|v|vi{1,3}|ix|x)\b\s*$/i, "")
     .replace(/\b\d+\b\s*$/gi, "")
     .replace(/\b(?:dub|sub|uncensored|uncut|tv|dual[- ]audio|uncut)\b/g, " ")
@@ -13,6 +14,53 @@ export function getCoreTitle(title) {
     .replace(/\[[^\]]*\]/g, " ")
     .replace(/[^a-z0-9]/g, "")
     .trim();
+}
+
+function verifyEpisodeNumberInUrl(loadedUrl, requestedEpisode) {
+  try {
+    const url = new URL(loadedUrl);
+    
+    // Check if redirected to home page or completely different section
+    if (url.pathname === "/" || url.pathname === "") {
+      return false; // Mismatch!
+    }
+
+    // Check query params
+    const epParam = url.searchParams.get("ep");
+    if (epParam) {
+      const parsedEp = parseInt(epParam);
+      if (!isNaN(parsedEp) && parsedEp !== requestedEpisode) {
+        return false; // Mismatch!
+      }
+    }
+    
+    // Check path suffix (e.g. /ep-10 or -episode-10 or /episode/10)
+    const pathname = url.pathname.toLowerCase();
+    const pathPatterns = [
+      /\/ep-(\d+)(?:\/|$)/i,
+      /\/-episode-(\d+)(?:\/|$)/i,
+      /\/episode\/(\d+)(?:\/|$)/i,
+      /\/episode-(\d+)(?:\/|$)/i
+    ];
+    let foundEpisodeInPath = false;
+    for (const pattern of pathPatterns) {
+      const match = pathname.match(pattern);
+      if (match) {
+        foundEpisodeInPath = true;
+        const parsedEp = parseInt(match[1]);
+        if (!isNaN(parsedEp) && parsedEp !== requestedEpisode) {
+          return false; // Mismatch!
+        }
+      }
+    }
+
+    if (!epParam && !foundEpisodeInPath && (pathname.includes("/watch") || pathname.includes("/anime"))) {
+      if (requestedEpisode > 1) {
+        return false;
+      }
+    }
+  } catch (e) {}
+  return true;
 }
 
 export class SanjiAnimeScraperService {
@@ -77,25 +125,40 @@ export class SanjiAnimeScraperService {
           const filteredLinks = links.filter((link) => {
             const resultSeason = extractSeasonNumber(link.text);
             const isMatch = targetSeason === resultSeason;
-            if (!isMatch) {
-              console.log(`   ⏭️ Skipping result "${link.text}" (Season ${resultSeason}) - mismatch with target (Season ${targetSeason})`);
-            }
+            // Silent skip
             return isMatch;
           });
 
           const normalizedTitle = inputUrl.toLowerCase().replace(/[^a-z0-9]/g, "");
           const targetCore = getCoreTitle(inputUrl);
 
-          const directMatch = filteredLinks.find((link) => {
+          let bestMatch = null;
+          let bestScore = -1;
+
+          for (const link of filteredLinks) {
             const normalizedText = link.text.toLowerCase().replace(/[^a-z0-9]/g, "");
             const textCore = getCoreTitle(link.text);
 
-            const isCleanMatch = normalizedText && (normalizedText.includes(normalizedTitle) || normalizedTitle.includes(normalizedText));
-            const isCoreMatch = textCore && (textCore.includes(targetCore) || targetCore.includes(textCore));
-            return isCleanMatch || isCoreMatch;
-          });
+            // Guard: only allow "target contains result" if result is ≥80% as long (prevents short titles matching longer targets)
+            const isCleanMatch = normalizedText && (normalizedText.includes(normalizedTitle) || (normalizedTitle.includes(normalizedText) && normalizedText.length / normalizedTitle.length >= 0.8));
+            const isCoreMatch = textCore && (textCore.includes(targetCore) || (targetCore.includes(textCore) && textCore.length / targetCore.length >= 0.8));
+            
+            if (isCleanMatch || isCoreMatch) {
+              const lenRatio = Math.min(normalizedText.length, normalizedTitle.length) / Math.max(normalizedText.length, normalizedTitle.length || 1);
+              const containsBonus = (normalizedText.includes(normalizedTitle) || normalizedTitle.includes(normalizedText)) ? 0.05 : 0;
+              const cleanBonus = isCleanMatch ? 0.1 : 0;
+              const score = lenRatio + containsBonus + cleanBonus;
+              const displayLogText = (link.text || '').replace(/\s+/g, ' ').trim();
+              const truncatedText = displayLogText.length > 80 ? displayLogText.slice(0, 77) + "..." : displayLogText;
+              console.log(`🎯 Candidate match: "${truncatedText}" -> ${link.href} (score: ${score.toFixed(2)})`);
+              if (score > bestScore) {
+                bestMatch = link;
+                bestScore = score;
+              }
+            }
+          }
 
-          matchedAnimeUrl = directMatch?.href || filteredLinks[0]?.href || "";
+          matchedAnimeUrl = bestMatch?.href || "";
           if (matchedAnimeUrl) break;
         } catch (error) {
           console.log(`⚠️ Search URL failed: ${searchUrl} — ${error.message}`);
@@ -334,11 +397,25 @@ export class SanjiAnimeScraperService {
         });
 
         const page = await context.newPage();
+
+        // Proactively block popups/ads by overriding window.open
+        await page.addInitScript(() => {
+          try {
+            window.open = () => null;
+          } catch (e) {}
+        });
+
         const watchUrl = await this.resolveWatchUrlWithPage(page, inputUrl, episodeNumber, options);
         console.log(`🔗 Resolved Sanji Anime watch URL: ${watchUrl}`);
 
         await page.goto(watchUrl, { waitUntil: "domcontentloaded", timeout });
         await page.waitForTimeout(2500);
+
+        // Verify that the page URL actually matches the requested episode!
+        const finalUrl = page.url();
+        if (!verifyEpisodeNumberInUrl(finalUrl, episodeNumber)) {
+          throw new Error(`Sanji Anime redirected from ${watchUrl} to ${finalUrl}. Episode ${episodeNumber} is likely not available yet.`);
+        }
 
         const { sources, streamUrl } = await this.collectServerSources(page, fallbackLang);
         if (!streamUrl) {
@@ -422,16 +499,29 @@ export class SanjiAnimeScraperService {
           )
           : [];
 
+        const genericRegex = /^(episode|ep|ep\.|ep\.\s)\s*\d+$/i;
+        const isGeneric = !existingEpisode.title || 
+                          genericRegex.test(existingEpisode.title.trim()) || 
+                          (episodeData.animeTitle && existingEpisode.title.trim().toLowerCase() === `${episodeData.animeTitle.toLowerCase()} - episode ${episodeData.episodeNumber}`) ||
+                          existingEpisode.title.trim().toLowerCase() === `episode ${episodeData.episodeNumber}`;
+
+        const updateFields = {
+          video_url: episodeData.videoUrl,
+          video_servers: [...otherServers, ...mergedServers],
+          duration: episodeData.duration || 1440,
+          thumbnail_url: episodeData.thumbnailUrl || existingEpisode.thumbnail_url || null,
+        };
+
+        if (isGeneric && episodeData.title) {
+          updateFields.title = episodeData.title;
+        }
+        if (!existingEpisode.description && episodeData.description) {
+          updateFields.description = episodeData.description;
+        }
+
         await supabase
           .from("episodes")
-          .update({
-            video_url: episodeData.videoUrl,
-            video_servers: [...otherServers, ...mergedServers],
-            duration: episodeData.duration || 1440,
-            title: episodeData.title,
-            description: episodeData.description,
-            thumbnail_url: episodeData.thumbnailUrl || existingEpisode.thumbnail_url || null,
-          })
+          .update(updateFields)
           .eq("id", existingEpisode.id);
 
         return { success: true };

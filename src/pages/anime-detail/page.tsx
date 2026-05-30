@@ -325,7 +325,7 @@ export default function AnimeDetailPage() {
       {/* Hero Section */}
       <div className="relative">
         {/* Background Image */}
-        <div className="absolute inset-0 h-96 md:h-[500px] lg:h-[600px]">
+        <div className="absolute inset-0">
           <img
             src={getProxiedImageUrl(
               (anime.banner_url && typeof anime.banner_url === 'string' && anime.banner_url.trim())
@@ -349,7 +349,7 @@ export default function AnimeDetailPage() {
               }
             }}
           />
-          <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/50 to-black/30" />
+          <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-black/75 to-black/90 md:bg-gradient-to-r md:from-black/80 md:via-black/50 md:to-black/35" />
           <div className="absolute inset-0 backdrop-blur-sm" />
         </div>
 

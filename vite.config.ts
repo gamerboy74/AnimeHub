@@ -82,16 +82,16 @@ export default defineConfig({
     // Source map strategy: hidden for prod (for debugging without exposing), full for dev
     sourcemap: isProd ? (process.env.SOURCE_MAP === 'true' ? 'hidden' : false) : true,
     outDir: 'out',
-    // Enable tree-shaking
-    treeshake: {
-      preset: 'recommended',
-      moduleSideEffects: (id) => {
-        // Keep side effects for CSS imports and specific files
-        if (id.endsWith('.css')) return true
-        return false
-      }
-    },
     rollupOptions: {
+      // Enable tree-shaking
+      treeshake: {
+        preset: 'recommended',
+        moduleSideEffects: (id: string) => {
+          // Keep side effects for CSS imports and specific files
+          if (id.endsWith('.css')) return true
+          return false
+        }
+      },
       // Externalize large dependencies if safe
       external: isProd ? [
         // Example: if using CDN for react/react-dom
@@ -154,8 +154,7 @@ export default defineConfig({
         unsafe_regexp: false,
         unsafe_undefined: false,
         dead_code: true,
-        unused: true,
-        warnings: false
+        unused: true
       },
       mangle: {
         safari10: true,
@@ -167,6 +166,20 @@ export default defineConfig({
       }
     },
     reportCompressedSize: false,
+    // Optimize chunk preloading
+    modulePreload: {
+      polyfill: true,
+      resolveDependencies(_filename, deps) {
+        // Filter out admin, player and other non-critical dynamic chunks from preload links in HTML
+        return deps.filter(dep => {
+          const isNonCritical = dep.includes('admin') || 
+                                dep.includes('player') || 
+                                dep.includes('charts') || 
+                                dep.includes('virtualization');
+          return !isNonCritical;
+        });
+      }
+    },
     // Optimize chunk splitting
     cssCodeSplit: true,
     // Asset inlining threshold (small assets as base64)

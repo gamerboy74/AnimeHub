@@ -83,7 +83,7 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
     if (searchTimeoutRef.current) {
       clearTimeout(searchTimeoutRef.current);
     }
-    
+
     searchTimeoutRef.current = setTimeout(() => {
       setDebouncedSearchQuery(searchQuery);
     }, 300);
@@ -127,7 +127,7 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
       timestamp: new Date().toISOString(),
       source
     };
-    
+
     const newHistory = [historyItem, ...importHistory.slice(0, 9)];
     setImportHistory(newHistory);
     localStorage.setItem('animeImportHistory', JSON.stringify(newHistory));
@@ -206,7 +206,7 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
     try {
       const pageSize = source === 'jikan' ? 25 : 50;
       let results: any[] = [];
-      
+
       if (source === 'jikan') {
         results = await AnimeImporterService.searchJikanAnime(query, pageSize, page);
       } else {
@@ -234,31 +234,31 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
 
   const applyFiltersToResults = (results: SearchResult[]): SearchResult[] => {
     let filteredResults = results;
-    
+
     if (searchFilters.year) {
-      filteredResults = filteredResults.filter(anime => 
-        anime.year === parseInt(searchFilters.year) || 
+      filteredResults = filteredResults.filter(anime =>
+        anime.year === parseInt(searchFilters.year) ||
         anime.originalData.startDate?.year === parseInt(searchFilters.year)
       );
     }
-    
+
     if (searchFilters.genre) {
-      filteredResults = filteredResults.filter(anime => 
-        anime.genres?.some((g: string) => 
+      filteredResults = filteredResults.filter(anime =>
+        anime.genres?.some((g: string) =>
           g.toLowerCase().includes(searchFilters.genre.toLowerCase())
         )
       );
     }
-    
+
     if (searchFilters.status) {
-      filteredResults = filteredResults.filter(anime => 
+      filteredResults = filteredResults.filter(anime =>
         anime.status?.toLowerCase().includes(searchFilters.status.toLowerCase())
       );
     }
-    
+
     if (searchFilters.rating) {
       const minRating = parseFloat(searchFilters.rating);
-      filteredResults = filteredResults.filter(anime => 
+      filteredResults = filteredResults.filter(anime =>
         (anime.rating || anime.originalData.score || anime.originalData.averageScore) >= minRating
       );
     }
@@ -266,16 +266,16 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
     filteredResults.sort((a, b) => {
       switch (searchFilters.sortBy) {
         case 'rating':
-          return (b.rating || b.originalData.score || b.originalData.averageScore || 0) - 
-                 (a.rating || a.originalData.score || a.originalData.averageScore || 0);
+          return (b.rating || b.originalData.score || b.originalData.averageScore || 0) -
+            (a.rating || a.originalData.score || a.originalData.averageScore || 0);
         case 'year':
-          return (b.year || b.originalData.startDate?.year || 0) - 
-                 (a.year || a.originalData.startDate?.year || 0);
+          return (b.year || b.originalData.startDate?.year || 0) -
+            (a.year || a.originalData.startDate?.year || 0);
         case 'title':
           return (a.title || '').localeCompare(b.title || '');
         case 'popularity':
-          return (b.originalData.popularity || b.originalData.members || 0) - 
-                 (a.originalData.popularity || a.originalData.members || 0);
+          return (b.originalData.popularity || b.originalData.members || 0) -
+            (a.originalData.popularity || a.originalData.members || 0);
         default:
           return 0;
       }
@@ -286,12 +286,12 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
 
   const handleSelectAnime = (anime: SearchResult) => {
     setSelectedAnime(prev => {
-      const isSelected = prev.some(selected => 
+      const isSelected = prev.some(selected =>
         selected.title === anime.title && selected.source === anime.source
       );
-      
+
       if (isSelected) {
-        return prev.filter(selected => 
+        return prev.filter(selected =>
           !(selected.title === anime.title && selected.source === anime.source)
         );
       } else {
@@ -327,14 +327,14 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
       const currentBatchSize = batchSize || 3;
       for (let i = 0; i < selectedAnime.length; i += currentBatchSize) {
         const batch = selectedAnime.slice(i, i + currentBatchSize);
-        
+
         const batchPromises = batch.map(async (anime) => {
           try {
-            const mappedData = anime.source === 'jikan' 
+            const mappedData = anime.source === 'jikan'
               ? AnimeImporterService.mapJikanToDatabase(anime.originalData)
               : AnimeImporterService.mapAniListToDatabase(anime.originalData);
 
-            const imported = anime.source === 'anilist' 
+            const imported = anime.source === 'anilist'
               ? await (AnimeImporterService as any).importAnimeFromAniList(anime.originalData)
               : await AnimeImporterService.importAnime(mappedData);
             return {
@@ -353,16 +353,16 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
         });
 
         const batchResults = await Promise.allSettled(batchPromises);
-        
+
         batchResults.forEach((settledResult, batchIndex) => {
-          const result = settledResult.status === 'fulfilled' 
-            ? settledResult.value 
+          const result = settledResult.status === 'fulfilled'
+            ? settledResult.value
             : {
-                success: false,
-                title: batch[batchIndex]?.title || 'Unknown',
-                error: settledResult.reason?.message || 'Unknown error',
-                isDuplicate: false
-              };
+              success: false,
+              title: batch[batchIndex]?.title || 'Unknown',
+              error: settledResult.reason?.message || 'Unknown error',
+              isDuplicate: false
+            };
 
           setImportProgress(prev => prev ? {
             ...prev,
@@ -390,7 +390,7 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
       saveImportHistory(results, searchQuery);
       setSelectedAnime([]);
       setSearchResults([]);
-      
+
       if (results.imported > 0 && onImportComplete) {
         onImportComplete();
       }
@@ -408,14 +408,14 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
     setImportResult(null);
 
     try {
-      const mappedData = anime.source === 'jikan' 
+      const mappedData = anime.source === 'jikan'
         ? AnimeImporterService.mapJikanToDatabase(anime.originalData)
         : AnimeImporterService.mapAniListToDatabase(anime.originalData);
 
-      const imported = anime.source === 'anilist' 
+      const imported = anime.source === 'anilist'
         ? await (AnimeImporterService as any).importAnimeFromAniList(anime.originalData)
         : await AnimeImporterService.importAnime(mappedData);
-      
+
       if (imported) {
         const result = {
           success: true,
@@ -424,14 +424,14 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
           errors: [],
           duplicates: []
         };
-        
+
         setImportResult(result);
         saveImportHistory(result, anime.title);
-        
-        setSearchResults(prev => prev.filter(res => 
+
+        setSearchResults(prev => prev.filter(res =>
           !(res.title === anime.title && res.source === anime.source)
         ));
-        
+
         if (onImportComplete) {
           onImportComplete();
         }
@@ -551,7 +551,7 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
     try {
       const pageSize = source === 'jikan' ? 25 : 50;
       let results: any[] = [];
-      
+
       if (source === 'anilist') {
         results = await AnimeImporterService.getTrendingAniListAnime(pageSize, page);
       } else {
@@ -575,7 +575,7 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
     const currentDate = new Date();
     const year = currentDate.getFullYear();
     const month = currentDate.getMonth() + 1;
-    
+
     let season = 'winter';
     if (month >= 3 && month <= 5) season = 'spring';
     else if (month >= 6 && month <= 8) season = 'summer';
@@ -594,7 +594,7 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
     try {
       const pageSize = source === 'jikan' ? 25 : 50;
       let results: any[] = [];
-      
+
       if (source === 'anilist') {
         results = await (AnimeImporterService as any).getSeasonalAniListAnime(year, season, pageSize, page);
       } else {
@@ -659,7 +659,7 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
   return (
     <div className="space-y-6">
       {/* Premium Header */}
-      <motion.div 
+      <motion.div
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
         className="text-center mb-4 bg-white/80 backdrop-blur-md p-6 rounded-2xl border border-slate-100 shadow-sm"
@@ -692,11 +692,10 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
-                className={`relative flex-1 flex items-center justify-center gap-2 px-5 py-3 rounded-lg text-sm font-bold transition-all duration-300 select-none ${
-                  activeTab === tab.id
+                className={`relative flex-1 flex items-center justify-center gap-2 px-5 py-3 rounded-lg text-sm font-bold transition-all duration-300 select-none ${activeTab === tab.id
                     ? 'bg-white text-indigo-950 shadow-md transform scale-[1.02]'
                     : 'text-white/70 hover:text-white hover:bg-white/5'
-                }`}
+                  }`}
               >
                 <i className={`${tab.icon} text-base`}></i>
                 {tab.label}
@@ -732,7 +731,7 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
                         className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
                       />
                     </div>
-                    
+
                     <div className="md:col-span-3">
                       <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">
                         <i className="ri-database-2-line mr-1 text-slate-400"></i> Metadata Source
@@ -746,7 +745,7 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
                         <option value="anilist">AniList GraphQL API</option>
                       </select>
                     </div>
-                    
+
                     <div className="md:col-span-2">
                       <button
                         onClick={() => handleSearch(searchQuery)}
@@ -851,13 +850,12 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
               >
                 {/* Active Maintenance Log banner */}
                 {message && (
-                  <div className={`flex items-start gap-3 p-4 rounded-xl text-sm font-medium border shadow-sm ${
-                    message.includes('❌') || message.includes('Error') || message.includes('error')
+                  <div className={`flex items-start gap-3 p-4 rounded-xl text-sm font-medium border shadow-sm ${message.includes('❌') || message.includes('Error') || message.includes('error')
                       ? 'bg-red-50 border-red-200 text-red-700'
                       : message.includes('⏳') || message.includes('🔍') || message.includes('📺')
                         ? 'bg-blue-50 border-blue-200 text-blue-700'
                         : 'bg-emerald-50 border-emerald-200 text-emerald-700'
-                  }`}>
+                    }`}>
                     <p className="whitespace-pre-wrap leading-relaxed flex-1">{message}</p>
                     <button onClick={() => setMessage(null)} className="shrink-0 opacity-60 hover:opacity-100 transition-opacity p-0.5 rounded-lg hover:bg-slate-200/50">
                       <i className="ri-close-line text-lg"></i>
@@ -1149,7 +1147,7 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
                                   .is('video_url', null);
                                 if (unscroped?.length) {
                                   const nums = unscroped.map(e => e.episode_number);
-                                  HiAnimeScraperService.batchScrapeEpisodes(anime.title, anime.id, nums).catch(() => {});
+                                  HiAnimeScraperService.batchScrapeEpisodes(anime.title, anime.id, nums).catch(() => { });
                                 }
                               }
                             } catch (err) {
@@ -1250,6 +1248,274 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
                       {isImporting ? 'Processing...' : 'Run Scraper Backfill'}
                     </button>
                   </div>
+
+                  {/* Tool 5: Rename Generic Episode Titles */}
+                  <div className="bg-white rounded-2xl border border-slate-200 hover:border-emerald-300 hover:shadow-md transition-all duration-200 p-5 flex flex-col justify-between h-48">
+                    <div>
+                      <div className="flex items-center gap-3 mb-2">
+                        <span className="flex items-center justify-center w-9 h-9 rounded-xl bg-emerald-100 text-emerald-600">
+                          <i className="ri-edit-box-line text-lg"></i>
+                        </span>
+                        <h4 className="font-bold text-slate-800 text-sm">Rename Generic Episode Titles</h4>
+                      </div>
+                      <p className="text-slate-500 text-xs leading-relaxed">
+                        Scan the database for generic titles (like "Episode X", "Ep X" or blank) and fetch/update their actual names from Jikan (MAL) API.
+                      </p>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        try {
+                          setIsImporting(true);
+                          setMessage('🔍 Loading anime list from database...');
+
+                          // Fetch all anime upfront
+                          const { data: animeList, error: animeErr } = await supabase
+                            .from('anime')
+                            .select('id, title, mal_id');
+
+                          if (animeErr) {
+                            setMessage(`❌ Failed to load anime metadata: ${animeErr.message}`);
+                            return;
+                          }
+
+                          const animeMap = new Map(animeList?.map(a => [a.id, a]) || []);
+
+                          setMessage('🔍 Scanning all episodes in database (paginated)...');
+
+                          // Fetch all episodes from database with pagination to avoid 1000-row limit
+                          let episodes: any[] = [];
+                          let fromRange = 0;
+                          const batchSize = 2000;
+                          let hasMore = true;
+
+                          while (hasMore) {
+                            const { data: batch, error: fetchErr } = await supabase
+                              .from('episodes')
+                              .select('id, anime_id, episode_number, title')
+                              .range(fromRange, fromRange + batchSize - 1);
+
+                            if (fetchErr) {
+                              setMessage(`❌ Scan failed: ${fetchErr.message}`);
+                              return;
+                            }
+
+                            if (!batch || batch.length === 0) {
+                              hasMore = false;
+                            } else {
+                              episodes = [...episodes, ...batch];
+                              if (batch.length < batchSize) {
+                                hasMore = false;
+                              } else {
+                                fromRange += batchSize;
+                              }
+                            }
+                          }
+
+                          // Identify generic episode titles
+                          const genericRegex = /^(episode|ep|ep\.|ep\.\s)\s*\d+$/i;
+                          const genericEpisodes = episodes.filter(ep => {
+                            if (!ep.title) return true;
+                            const t = ep.title.trim().toLowerCase();
+                            if (t === '' || !isNaN(Number(t))) return true;
+                            if (genericRegex.test(t)) return true;
+
+                            // Check prefix relative to its anime title (common scraper pattern: "Baki - Episode 1")
+                            const animeObj = animeMap.get(ep.anime_id);
+                            if (animeObj && animeObj.title) {
+                              const cleanAnimeTitle = animeObj.title.trim().toLowerCase();
+                              const epNum = ep.episode_number;
+                              const patterns = [
+                                `${cleanAnimeTitle} - episode ${epNum}`,
+                                `${cleanAnimeTitle} - ep ${epNum}`,
+                                `${cleanAnimeTitle} - ep. ${epNum}`,
+                                `${cleanAnimeTitle} - ep.${epNum}`,
+                                `${cleanAnimeTitle} - ${epNum}`,
+                                `${cleanAnimeTitle} episode ${epNum}`,
+                                `${cleanAnimeTitle} ep ${epNum}`,
+                                `${cleanAnimeTitle} ${epNum}`,
+                              ];
+                              if (patterns.includes(t)) return true;
+                            }
+                            return false;
+                          });
+
+                          if (genericEpisodes.length === 0) {
+                            setMessage('✅ No episodes with generic titles found!');
+                            return;
+                          }
+
+                          setMessage(`🔍 Found ${genericEpisodes.length} generic/unnamed episodes. Grouping by anime...`);
+
+                          const byAnime = new Map<string, typeof genericEpisodes>();
+                          for (const ep of genericEpisodes) {
+                            const list = byAnime.get(ep.anime_id) || [];
+                            list.push(ep);
+                            byAnime.set(ep.anime_id, list);
+                          }
+
+                          let totalUpdated = 0;
+                          let animeIndex = 0;
+                          const totalAnime = byAnime.size;
+                          const skippedAnimeList: string[] = [];
+
+                          for (const [animeId, eps] of byAnime) {
+                            animeIndex++;
+                            const animeObj = animeMap.get(animeId);
+                            if (!animeObj) continue;
+
+                            let malId = animeObj.mal_id;
+                            if (!malId) {
+                              setMessage(`🔍 [${animeIndex}/${totalAnime}] Missing MAL ID for "${animeObj.title}". Querying Jikan...`);
+                              try {
+                                await new Promise(r => setTimeout(r, 1200)); // Rate limit buffer
+                                const searchResp = await fetch(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(animeObj.title)}&limit=1`);
+                                if (searchResp.status === 429) {
+                                  setMessage(`⏳ Rate limited. Waiting 5s before retrying search for "${animeObj.title}"...`);
+                                  await new Promise(r => setTimeout(r, 5000));
+                                  const retryResp = await fetch(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(animeObj.title)}&limit=1`);
+                                  if (retryResp.ok) {
+                                    const json = await retryResp.json();
+                                    const match = json.data?.[0];
+                                    if (match) {
+                                      malId = match.mal_id;
+                                    }
+                                  }
+                                } else if (searchResp.ok) {
+                                  const json = await searchResp.json();
+                                  const match = json.data?.[0];
+                                  if (match) {
+                                    malId = match.mal_id;
+                                  }
+                                }
+
+                                if (malId) {
+                                  const { error: updateErr } = await supabase
+                                    .from('anime')
+                                    .update({ mal_id: malId })
+                                    .eq('id', animeObj.id);
+                                  if (!updateErr) {
+                                    animeObj.mal_id = malId;
+                                    setMessage(`✅ Resolved MAL ID ${malId} for "${animeObj.title}"`);
+                                  } else {
+                                    console.error(`Failed to save resolved MAL ID ${malId} for "${animeObj.title}":`, updateErr);
+                                  }
+                                }
+                              } catch (resolveErr) {
+                                console.error(`Failed to resolve MAL ID for "${animeObj.title}":`, resolveErr);
+                              }
+                            }
+
+                            if (!animeObj.mal_id) {
+                              console.warn(`Skipping anime "${animeObj.title}" (could not resolve MAL ID)`);
+                              skippedAnimeList.push(animeObj.title);
+                              continue;
+                            }
+
+                            const maxEpNum = Math.max(...eps.map(e => e.episode_number));
+                            const maxPage = Math.ceil(maxEpNum / 100);
+
+                            setMessage(`⏳ [${animeIndex}/${totalAnime}] Fetching titles for "${animeObj.title}" (up to page ${maxPage})...`);
+
+                            const jikanEpisodesMap = new Map<number, { title: string; aired: string | null }>();
+                            let apiSuccess = true;
+                            let p = 1;
+
+                            while (p <= maxPage) {
+                              if (p > 1 || animeIndex > 1) {
+                                // Respect Jikan rate limits
+                                await new Promise(r => setTimeout(r, 1200));
+                              }
+
+                              try {
+                                const response = await fetch(`https://api.jikan.moe/v4/anime/${animeObj.mal_id}/episodes?page=${p}`);
+                                if (response.status === 429) {
+                                  setMessage(`⏳ Rate limited. Waiting 5s before retrying page ${p} for "${animeObj.title}"...`);
+                                  await new Promise(r => setTimeout(r, 5000));
+                                  continue; // Retry current page without incrementing
+                                }
+
+                                if (!response.ok) {
+                                  throw new Error(`HTTP ${response.status}`);
+                                }
+
+                                const json = await response.json();
+                                const jikanEps = json.data || [];
+                                for (const ep of jikanEps) {
+                                  jikanEpisodesMap.set(ep.mal_id, {
+                                    title: ep.title,
+                                    aired: ep.aired || null
+                                  });
+                                }
+
+                                if (!json.pagination?.has_next_page) {
+                                  break;
+                                }
+
+                                p++;
+                              } catch (err) {
+                                console.error(`Error fetching page ${p} for anime ${animeObj.title}:`, err);
+                                apiSuccess = false;
+                                break;
+                              }
+                            }
+
+                            if (!apiSuccess || jikanEpisodesMap.size === 0) {
+                              continue;
+                            }
+
+                            // Perform batch updates for current anime
+                            const updatePromises = eps.map(async (ep): Promise<number> => {
+                              const jikanEp = jikanEpisodesMap.get(ep.episode_number);
+                              if (jikanEp && jikanEp.title) {
+                                const newTitle = jikanEp.title.trim();
+                                if (newTitle && !genericRegex.test(newTitle) && newTitle !== ep.title) {
+                                  // Also make sure it doesn't match a scraper-format string containing the anime name
+                                  const cleanNewTitle = newTitle.toLowerCase();
+                                  if (cleanNewTitle.includes(`${animeObj.title.toLowerCase()} - episode`) ||
+                                      cleanNewTitle.includes(`${animeObj.title.toLowerCase()} - ep`)) {
+                                    return 0;
+                                  }
+
+                                  const updates: any = { title: newTitle };
+                                  if (jikanEp.aired) {
+                                    updates.air_date = jikanEp.aired.split('T')[0];
+                                  }
+                                  const { error: updateErr } = await supabase
+                                    .from('episodes')
+                                    .update(updates)
+                                    .eq('id', ep.id);
+                                  if (!updateErr) {
+                                    return 1;
+                                  }
+                                }
+                              }
+                              return 0;
+                            });
+
+                            const results = await Promise.all(updatePromises);
+                            const updatedForThisAnime = results.reduce((sum, val) => sum + val, 0);
+                            totalUpdated += updatedForThisAnime;
+
+                            setMessage(`✨ [${animeIndex}/${totalAnime}] Updated ${updatedForThisAnime} episodes for "${animeObj.title}"`);
+                          }
+
+                          let completionMsg = `✅ Completed! Renamed ${totalUpdated} generic episode titles to their proper names.`;
+                          if (skippedAnimeList.length > 0) {
+                            completionMsg += `\n⚠️ Skipped ${skippedAnimeList.length} series due to missing MAL IDs (e.g. ${skippedAnimeList.slice(0, 3).join(', ')}${skippedAnimeList.length > 3 ? '...' : ''})`;
+                          }
+                          setMessage(completionMsg);
+                        } catch (err) {
+                          setMessage(`❌ Error: ${err instanceof Error ? err.message : err}`);
+                        } finally {
+                          setIsImporting(false);
+                        }
+                      }}
+                      disabled={isImporting}
+                      className="w-full bg-emerald-500 hover:bg-emerald-600 text-white py-2.5 rounded-xl font-bold text-xs shadow-sm hover:shadow-md transition-all cursor-pointer"
+                    >
+                      {isImporting ? 'Processing...' : 'Rename Generic Titles'}
+                    </button>
+                  </div>
                 </div>
               </motion.div>
             )}
@@ -1292,7 +1558,7 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
                         <input
                           type="number"
                           value={searchFilters.year}
-                          onChange={(e) => setSearchFilters({...searchFilters, year: e.target.value})}
+                          onChange={(e) => setSearchFilters({ ...searchFilters, year: e.target.value })}
                           placeholder="e.g. 2024"
                           className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
                         />
@@ -1305,7 +1571,7 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
                           type="text"
                           value={searchFilters.genre}
                           onChange={(e) => {
-                            setSearchFilters({...searchFilters, genre: e.target.value});
+                            setSearchFilters({ ...searchFilters, genre: e.target.value });
                             setShowGenreDropdown(true);
                           }}
                           onFocus={() => setShowGenreDropdown(true)}
@@ -1320,7 +1586,7 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
                                 key={genre}
                                 type="button"
                                 onMouseDown={() => {
-                                  setSearchFilters({...searchFilters, genre});
+                                  setSearchFilters({ ...searchFilters, genre });
                                   setShowGenreDropdown(false);
                                 }}
                                 className="w-full text-left px-4 py-2 hover:bg-blue-50 text-slate-700 hover:text-blue-700 text-sm font-semibold transition-colors flex items-center gap-2"
@@ -1336,7 +1602,7 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
                         <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">Airing Status</label>
                         <select
                           value={searchFilters.status}
-                          onChange={(e) => setSearchFilters({...searchFilters, status: e.target.value})}
+                          onChange={(e) => setSearchFilters({ ...searchFilters, status: e.target.value })}
                           className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all cursor-pointer"
                         >
                           <option value="">All Statuses</option>
@@ -1354,7 +1620,7 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
                           min="0"
                           max="10"
                           value={searchFilters.rating}
-                          onChange={(e) => setSearchFilters({...searchFilters, rating: e.target.value})}
+                          onChange={(e) => setSearchFilters({ ...searchFilters, rating: e.target.value })}
                           placeholder="e.g. 8.0"
                           className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
                         />
@@ -1364,7 +1630,7 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
                         <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">Sort Results By</label>
                         <select
                           value={searchFilters.sortBy}
-                          onChange={(e) => setSearchFilters({...searchFilters, sortBy: e.target.value})}
+                          onChange={(e) => setSearchFilters({ ...searchFilters, sortBy: e.target.value })}
                           className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all cursor-pointer"
                         >
                           <option value="relevance">🔍 Relevance</option>
@@ -1472,7 +1738,7 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
                     <span className="text-blue-600 text-sm">{importProgress.percentage}%</span>
                   </div>
                   <div className="w-full bg-slate-200/80 rounded-full h-3 overflow-hidden border border-slate-100">
-                    <motion.div 
+                    <motion.div
                       className="bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 h-full rounded-full"
                       initial={{ width: 0 }}
                       animate={{ width: `${importProgress.percentage}%` }}
@@ -1497,13 +1763,12 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
                 exit={{ opacity: 0, scale: 0.98 }}
                 className="mt-6"
               >
-                <div className={`rounded-2xl p-5 border shadow-sm ${
-                  message.startsWith('✅')
+                <div className={`rounded-2xl p-5 border shadow-sm ${message.startsWith('✅')
                     ? 'bg-gradient-to-r from-green-50 to-emerald-50 border-green-200 text-emerald-800'
                     : message.startsWith('⚠️')
                       ? 'bg-gradient-to-r from-amber-50 to-yellow-50 border-amber-200 text-amber-800'
                       : 'bg-gradient-to-r from-teal-50 to-cyan-50 border-teal-200 text-teal-800'
-                }`}>
+                  }`}>
                   <p className="font-semibold text-sm flex items-center gap-2">
                     <i className="ri-loader-3-line text-lg animate-spin shrink-0"></i>
                     {message}
@@ -1541,7 +1806,7 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
                       <div className="text-[11px] font-bold text-rose-700 uppercase tracking-wider mt-0.5">Errors</div>
                     </div>
                   </div>
-                  
+
                   {importResult.duplicates.length > 0 && (
                     <div className="space-y-2">
                       <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Duplicates detected (skipped):</p>
@@ -1554,7 +1819,7 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
                       </div>
                     </div>
                   )}
-                  
+
                   {importResult.errors.length > 0 && (
                     <div className="space-y-2">
                       <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Encountered errors:</p>
@@ -1598,7 +1863,7 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
                   <i className="ri-check-double-line text-sm"></i>
                   {selectedAnime.length === searchResults.length ? 'Deselect All' : 'Select All'}
                 </button>
-                
+
                 {selectedAnime.length > 0 && (
                   <button
                     onClick={handleBulkImport}
@@ -1625,10 +1890,10 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
             <div className="p-6 md:p-8">
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
                 {searchResults.map((anime, index) => {
-                  const isSelected = selectedAnime.some(selected => 
+                  const isSelected = selectedAnime.some(selected =>
                     selected.title === anime.title && selected.source === anime.source
                   );
-                  
+
                   return (
                     <motion.div
                       key={`${anime.title}-${anime.source}-${index}`}
@@ -1637,9 +1902,8 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
                       transition={{ delay: index * 0.05 }}
                       className="group"
                     >
-                      <div className={`relative bg-white rounded-2xl shadow-md hover:shadow-xl transition-all duration-300 transform hover:scale-[1.03] border-2 overflow-hidden flex flex-col h-full ${
-                        isSelected ? 'border-blue-500 shadow-blue-100 ring-2 ring-blue-500/10' : 'border-slate-200/60 hover:border-blue-400'
-                      }`}>
+                      <div className={`relative bg-white rounded-2xl shadow-md hover:shadow-xl transition-all duration-300 transform hover:scale-[1.03] border-2 overflow-hidden flex flex-col h-full ${isSelected ? 'border-blue-500 shadow-blue-100 ring-2 ring-blue-500/10' : 'border-slate-200/60 hover:border-blue-400'
+                        }`}>
                         {/* Poster visual */}
                         {anime.poster_url && (
                           <div className="relative h-48 bg-slate-900 overflow-hidden">
@@ -1659,21 +1923,20 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
                             <div className="absolute top-2.5 right-2.5 bg-black/60 backdrop-blur-md text-white px-2 py-0.5 rounded-lg text-[10px] font-bold tracking-widest uppercase border border-white/5">
                               {anime.source}
                             </div>
-                            
+
                             {/* Selection check box toggle */}
                             <button
                               onClick={() => handleSelectAnime(anime)}
-                              className={`absolute top-2.5 left-2.5 w-7 h-7 rounded-full flex items-center justify-center border transition-all cursor-pointer ${
-                                isSelected 
-                                  ? 'bg-blue-500 border-blue-400 text-white shadow-md' 
+                              className={`absolute top-2.5 left-2.5 w-7 h-7 rounded-full flex items-center justify-center border transition-all cursor-pointer ${isSelected
+                                  ? 'bg-blue-500 border-blue-400 text-white shadow-md'
                                   : 'bg-black/40 hover:bg-black/60 border-white/30 text-transparent hover:text-white'
-                              }`}
+                                }`}
                             >
                               <i className="ri-check-line text-sm font-bold"></i>
                             </button>
                           </div>
                         )}
-                        
+
                         {/* Card metadata details */}
                         <div className="p-4 flex-1 flex flex-col justify-between space-y-3">
                           <div className="space-y-1">
@@ -1714,11 +1977,10 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
                           <div className="flex gap-1.5 pt-2">
                             <button
                               onClick={() => handleSelectAnime(anime)}
-                              className={`flex-1 px-2 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center justify-center gap-1 ${
-                                isSelected 
-                                  ? 'bg-blue-50 border-blue-200 text-blue-600' 
+                              className={`flex-1 px-2 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center justify-center gap-1 ${isSelected
+                                  ? 'bg-blue-50 border-blue-200 text-blue-600'
                                   : 'bg-slate-50 border-slate-200 hover:bg-slate-100 text-slate-600 hover:text-slate-800'
-                              }`}
+                                }`}
                             >
                               <i className={`ri-${isSelected ? 'checkbox-circle' : 'add-circle'}-line text-sm`}></i>
                               <span>{isSelected ? 'Selected' : 'Select'}</span>
@@ -1819,7 +2081,7 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
                           {new Date(item.timestamp).toLocaleString()} • Source: {item.source}
                         </p>
                       </div>
-                      
+
                       {/* Metric logs */}
                       <div className="flex gap-4 items-center shrink-0 border-t sm:border-t-0 pt-2.5 sm:pt-0">
                         <span className="flex items-center text-xs font-bold text-green-600 bg-green-50 border border-green-200 px-2 py-0.5 rounded-md">

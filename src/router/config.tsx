@@ -2,7 +2,7 @@
 import { lazy } from 'react';
 import type { RouteObject } from 'react-router-dom';
 import ProtectedRoute from '../components/auth/ProtectedRoute';
-import AdminLayout from '../pages/admin/AdminLayout';
+const AdminLayout = lazy(() => import('../pages/admin/AdminLayout'));
 import { RouteWrapper } from './components/RouteWrapper';
 
 const HomePage = lazy(() => import('../pages/home'));
@@ -26,6 +26,7 @@ const AdminRequests = lazy(() => import('../pages/admin/requests/page'));
 const AdminAnalytics = lazy(() => import('../pages/admin/analytics/page'));
 const AdminPerformance = lazy(() => import('../pages/admin/performance/page'));
 const AdminSettings = lazy(() => import('../pages/admin/settings/page'));
+const AdminMaintenance = lazy(() => import('../pages/admin/maintenance/page'));
 
 const routes: RouteObject[] = [
   {
@@ -134,6 +135,10 @@ const routes: RouteObject[] = [
       {
         path: 'settings',
         element: <RouteWrapper path="/admin/settings"><AdminSettings /></RouteWrapper>
+      },
+      {
+        path: 'maintenance',
+        element: <RouteWrapper path="/admin/maintenance"><AdminMaintenance /></RouteWrapper>
       }
     ]
   },

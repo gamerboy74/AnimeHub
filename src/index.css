@@ -1,13 +1,15 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss/base";
+@import "tailwindcss/components";
+@import "tailwindcss/utilities";
 
-/* Fix cursor line issues */
-* {
-  outline: none !important;
+/* Focus Ring Styling for Premium Keyboard Accessibility */
+*:focus-visible {
+  outline: 2px solid #14b8a6 !important; /* premium teal accent */
+  outline-offset: 2px !important;
 }
 
-*:focus {
+/* Hide focus rings for mouse clicks to maintain a polished design, while preserving keyboard a11y */
+*:focus:not(:focus-visible) {
   outline: none !important;
 }
 

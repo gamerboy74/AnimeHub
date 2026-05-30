@@ -550,6 +550,13 @@ export class NineAnimeScraperService {
       // =====================================================================
       if (dbAnimeId) {
         try {
+          // Check in-memory negative cache first to only skip for the current batch scrape run
+          const isNotFoundCached = await cacheGet(`notfound:nineanime:${dbAnimeId}`);
+          if (isNotFoundCached) {
+            console.log(`    ⏭️ NineAnime skipped (cached as not_found in-memory)`);
+            return { success: false, error: "Anime not found on 9anime (cached as not_found in-memory)" };
+          }
+
           const { data: animeRecord } = await supabase
             .from("anime")
             .select("nine_anime_slug, title_english, title_romaji, title_japanese, title_synonyms, mal_id")
@@ -557,8 +564,13 @@ export class NineAnimeScraperService {
             .maybeSingle();
 
           if (animeRecord?.nine_anime_slug) {
-            // If the DB has a slug, prefer a season-specific slug when the requested title includes a season
-            const baseSlug = animeRecord.nine_anime_slug;
+            if (animeRecord.nine_anime_slug === "not_found") {
+              // Self-clean database of legacy permanent not_found values
+              await this.saveVerifiedSlug(dbAnimeId, null);
+              console.log(`🧹 Cleaned legacy "not_found" slug from database for anime ${dbAnimeId}`);
+            } else {
+              // If the DB has a slug, prefer a season-specific slug when the requested title includes a season
+              const baseSlug = animeRecord.nine_anime_slug;
             // Determine season from provided title, if any
             const seasonMatch = animeTitle ? animeTitle.match(/season\s*(\d+)/i) : null;
             if (seasonMatch) {
@@ -601,9 +613,17 @@ export class NineAnimeScraperService {
                 validateStatus: (s) => s < 500,
               });
               if (testResp.status === 200) {
-                const result = { success: true, animeLink: slugUrl, animeId: baseSlug };
-                try { await cacheSet(`search:${animeTitle}:${episodeNumber}`, result, 300_000); } catch { }
-                return result;
+                // Verify page title matches before trusting the cached slug
+                const pageTitle = this.extractPageTitle(testResp.data);
+                const similarity = this.titleSimilarity(animeTitle, pageTitle);
+                if (similarity >= 0.6) {
+                  const result = { success: true, animeLink: slugUrl, animeId: baseSlug };
+                  try { await cacheSet(`search:${animeTitle}:${episodeNumber}`, result, 300_000); } catch { }
+                  return result;
+                } else {
+                  console.log(`⚠️ Cached slug page title mismatch (similarity: ${similarity.toFixed(2)}): page="${pageTitle}" vs expected="${animeTitle}" — re-resolving...`);
+                  // Fall through to re-resolve
+                }
               }
             } catch { }
 
@@ -630,7 +650,8 @@ export class NineAnimeScraperService {
 
             console.log("⚠️ Cached slug no longer works, re-resolving...");
           }
-        } catch (e) {
+        }
+      } catch (e) {
           console.log("⚠️ DB lookup for slug failed:", e.message);
         }
       }
@@ -738,13 +759,25 @@ export class NineAnimeScraperService {
           });
 
           if (testResponse.status === 200) {
-            console.log(`✅ Jikan-resolved URL works: ${directUrl}`);
-            await this.saveVerifiedSlug(dbAnimeId, slug);
-            // Also update the English title in DB if we found one
-            await this.updateTitleEnglish(dbAnimeId, jikanTitle);
-            const result = { success: true, animeLink: directUrl, animeId: slug };
-            try { await cacheSet(`search:${animeTitle}:${episodeNumber}`, result, 300_000); } catch { }
-            return result;
+            // Verify page title matches the ORIGINAL animeTitle — not just the Jikan variant.
+            // Prevents: Jikan returning "Link Click: Bridon Arc" for "Link Click", then
+            // blindly accepting "link-click-bridon-arc" because the URL returns 200.
+            const pageTitle = this.extractPageTitle(testResponse.data);
+            const similarity = this.titleSimilarity(animeTitle, pageTitle);
+            if (similarity >= 0.75) {
+              console.log(`✅ Jikan-resolved URL verified (similarity: ${similarity.toFixed(2)}): ${directUrl}`);
+              await this.saveVerifiedSlug(dbAnimeId, slug);
+              // Only update title_english if jikanTitle is an alternate name for the SAME anime
+              // (high similarity to original) — not a different entry like a sequel.
+              if (this.titleSimilarity(animeTitle, jikanTitle) >= 0.9) {
+                await this.updateTitleEnglish(dbAnimeId, jikanTitle);
+              }
+              const result = { success: true, animeLink: directUrl, animeId: slug };
+              try { await cacheSet(`search:${animeTitle}:${episodeNumber}`, result, 300_000); } catch { }
+              return result;
+            } else {
+              console.log(`⚠️ Jikan-resolved URL rejected — page title mismatch (similarity: ${similarity.toFixed(2)}): page="${pageTitle}" vs expected="${animeTitle}"`);
+            }
           }
         } catch { }
 
@@ -752,10 +785,21 @@ export class NineAnimeScraperService {
         const searchResult = await this.search9animeByKeyword(jikanTitle, animeTitle, episodeNumber);
         if (searchResult.success) {
           await this.saveVerifiedSlug(dbAnimeId, searchResult.animeId);
-          await this.updateTitleEnglish(dbAnimeId, jikanTitle);
+          // Only update title_english if jikanTitle is a genuine alternate name (not a sequel)
+          if (this.titleSimilarity(animeTitle, jikanTitle) >= 0.9) {
+            await this.updateTitleEnglish(dbAnimeId, jikanTitle);
+          }
           try { await cacheSet(`search:${animeTitle}:${episodeNumber}`, searchResult, 300_000); } catch { }
           return searchResult;
         }
+      }
+
+      // Save "not_found" in-memory for 1 hour so we don't repeat the search in the current batch
+      if (dbAnimeId) {
+        try {
+          await cacheSet(`notfound:nineanime:${dbAnimeId}`, true, 3600000);
+          console.log(`    💾 NineAnime marked as not_found in-memory cache`);
+        } catch {}
       }
 
       return {
@@ -803,13 +847,12 @@ export class NineAnimeScraperService {
       try {
         const { data: animeRecord } = await supabase
           .from("anime")
-          .select("title, title_english, title_romaji, title_japanese, title_synonyms")
+          .select("title, title_romaji, title_japanese, title_synonyms")
           .eq("id", dbAnimeId)
           .maybeSingle();
 
         if (animeRecord) {
           if (animeRecord.title) variants.add(animeRecord.title);
-          if (animeRecord.title_english) variants.add(animeRecord.title_english);
           if (animeRecord.title_romaji) variants.add(animeRecord.title_romaji);
           // Don't add Japanese title — it won't produce valid URL slugs
           if (animeRecord.title_synonyms && Array.isArray(animeRecord.title_synonyms)) {
@@ -944,7 +987,9 @@ export class NineAnimeScraperService {
       if (bestSimilarity >= 0.3) {
         const topN = scoredCandidates.slice(0, 5);
         for (const c of topN) {
-          console.log(`   📊 Score ${c.similarity.toFixed(2)}: "${c.text}" → ${c.url}`);
+          const displayLogText = (c.text || '').replace(/\s+/g, ' ').trim();
+          const truncatedText = displayLogText.length > 80 ? displayLogText.slice(0, 77) + "..." : displayLogText;
+          console.log(`   📊 Score ${c.similarity.toFixed(2)}: "${truncatedText}" → ${c.url}`);
         }
       }
 
@@ -1012,8 +1057,10 @@ export class NineAnimeScraperService {
         }
 
         // Check if at least one title in this Jikan entry is similar to the search query
+        // Threshold 0.52: "Link Click: Bridon Arc" scores ~0.476 vs "Link Click"
+        // so raising above 0.476 prevents sequel titles from polluting Jikan variants.
         const hasMatchingTitle = allEntryTitles.some(t => 
-          t && this.titleSimilarity(animeTitle, t) >= 0.4
+          t && this.titleSimilarity(animeTitle, t) >= 0.52
         );
 
         if (!hasMatchingTitle) {
@@ -1154,11 +1201,13 @@ export class NineAnimeScraperService {
 
     if (mWordsB.length >= 2 && meaningfulA.includes(meaningfulB)) {
       const ratio = Math.min(a.length, b.length) / Math.max(a.length, b.length);
-      return ratio >= 0.8 ? 0.9 : 0.4 + ratio * 0.5;
+      // Guard: return raw ratio below 0.8 — prevents "Link Click" (0.48) from scoring
+      // high enough (was 0.64) to pass the 0.6 acceptance threshold vs "Link Click: Bridon Arc"
+      return ratio >= 0.8 ? 0.9 : ratio;
     }
     if (mWordsA.length >= 2 && meaningfulB.includes(meaningfulA)) {
       const ratio = Math.min(a.length, b.length) / Math.max(a.length, b.length);
-      return ratio >= 0.8 ? 0.9 : 0.4 + ratio * 0.5;
+      return ratio >= 0.8 ? 0.9 : ratio;
     }
 
     // -----------------------------------------------------------------------
@@ -1426,6 +1475,14 @@ export class NineAnimeScraperService {
       });
 
       const page = await context.newPage();
+
+      // Proactively block popups/ads by overriding window.open
+      await page.addInitScript(() => {
+        try {
+          window.open = () => null;
+        } catch (e) {}
+      });
+
       let foundHls = null;
 
       await page.route("**/*", (route) => {
@@ -1755,6 +1812,13 @@ export class NineAnimeScraperService {
       }
 
       const page = await context.newPage();
+
+      // Proactively block popups/ads by overriding window.open
+      await page.addInitScript(() => {
+        try {
+          window.open = () => null;
+        } catch (e) {}
+      });
 
       // Navigate to the anime page with minimal timeout
       try {

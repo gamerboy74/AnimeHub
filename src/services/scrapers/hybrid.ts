@@ -58,7 +58,7 @@ export class HybridHiAnimeScraperService {
         // Step 1: Use Cheerio for fast search and initial data extraction
         const searchResult = await this.searchAnimeWithCheerio(animeTitle);
         
-        if (!searchResult.success) {
+        if (!searchResult.success || !searchResult.animeLink || !searchResult.animeId) {
           throw new Error(searchResult.error || 'Search failed');
         }
 
@@ -316,29 +316,73 @@ export class HybridHiAnimeScraperService {
     }
   }
 
-  /**
-   * Save episode to database
-   */
   static async saveEpisodeToDatabase(episodeData: EpisodeScrapeData): Promise<{ success: boolean; error?: string }> {
     try {
-      const { error } = await supabase.from('episodes').upsert(
-        {
-          anime_id: episodeData.animeId,
-          episode_number: episodeData.episodeNumber,
-          title: episodeData.title,
+      console.log('💾 Saving episode to database...', episodeData);
+
+      // Check if episode already exists
+      const { data: existingEpisode } = await supabase
+        .from('episodes')
+        .select('id, title')
+        .eq('anime_id', episodeData.animeId)
+        .eq('episode_number', episodeData.episodeNumber)
+        .maybeSingle();
+
+      if (existingEpisode) {
+        console.log('⚠️ Episode already exists, updating...');
+
+        const genericRegex = /^(episode|ep|ep\.|ep\.\s)\s*\d+$/i;
+        const currentTitle = existingEpisode.title?.trim() || '';
+        const isCurrentGeneric =
+          currentTitle === '' ||
+          !isNaN(Number(currentTitle)) ||
+          genericRegex.test(currentTitle) ||
+          currentTitle.toLowerCase().includes(' - episode') ||
+          currentTitle.toLowerCase().includes(' - ep');
+
+        const updatePayload: any = {
           video_url: episodeData.videoUrl,
           thumbnail_url: episodeData.thumbnailUrl,
           duration: episodeData.duration,
-          description: episodeData.description,
-          created_at: episodeData.createdAt.toISOString(),
-        },
-        { onConflict: ['anime_id', 'episode_number'] }
-      );
+          description: episodeData.description
+        };
 
-      if (error) {
-        console.error('DB Error:', error.message);
-        return { success: false, error: error.message };
+        if (isCurrentGeneric) {
+          updatePayload.title = episodeData.title;
+        }
+
+        const { error: updateError } = await supabase
+          .from('episodes')
+          .update(updatePayload)
+          .eq('id', existingEpisode.id);
+
+        if (updateError) {
+          console.error('❌ Update error:', updateError.message);
+          return { success: false, error: updateError.message };
+        }
+      } else {
+        console.log('➕ Creating new episode...');
+
+        const { error: insertError } = await supabase
+          .from('episodes')
+          .insert({
+            id: uuidv4(),
+            anime_id: episodeData.animeId,
+            episode_number: episodeData.episodeNumber,
+            title: episodeData.title,
+            video_url: episodeData.videoUrl,
+            thumbnail_url: episodeData.thumbnailUrl,
+            duration: episodeData.duration,
+            description: episodeData.description,
+            created_at: episodeData.createdAt.toISOString()
+          });
+
+        if (insertError) {
+          console.error('❌ Insert error:', insertError.message);
+          return { success: false, error: insertError.message };
+        }
       }
+
       console.log('🎉 Stream saved to Supabase!');
       return { success: true };
     } catch (error: any) {

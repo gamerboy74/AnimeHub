@@ -20,6 +20,7 @@ interface SchedulerStatus {
       episode: number;
       status: string;
       error?: string;
+      serversCount?: number;
     }>;
   } | null;
 }
@@ -291,6 +292,7 @@ export default function EpisodeScheduler() {
                       'bg-slate-100 text-slate-600'
                   }`}>
                   {d.status === 'not_available' ? 'no new ep' : d.status}
+                  {d.status === 'found' && d.serversCount && ` (${d.serversCount} servers)`}
                 </span>
               </div>
             </div>

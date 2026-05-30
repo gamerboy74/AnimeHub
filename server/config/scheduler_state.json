@@ -1,0 +1,8 @@
+{
+  "episodeScheduler": {
+    "lastRun": null,
+    "lastResults": null,
+    "scrapedThisHour": 50,
+    "rateLimitReset": 1780134713126
+  }
+}

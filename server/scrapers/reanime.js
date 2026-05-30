@@ -6,6 +6,7 @@ export function getCoreTitle(title) {
   return title
     .toLowerCase()
     .replace(/(?:season\s*\d+|s\d+|\d+(?:nd|rd|th|st)?\s*season|\d+(?:nd|rd|th|st)?\s*sseason)/gi, "")
+    .replace(/\b(?:movie|film|ova|ona|special|part)\b\s*\d*/gi, "")
     .replace(/\b(?:i{1,3}|iv|v|vi{1,3}|ix|x)\b\s*$/i, "")
     .replace(/\b\d+\b\s*$/gi, "")
     .replace(/\b(?:dub|sub|uncensored|uncut|tv|dual[- ]audio|uncut)\b/g, " ")
@@ -13,6 +14,53 @@ export function getCoreTitle(title) {
     .replace(/\[[^\]]*\]/g, " ")
     .replace(/[^a-z0-9]/g, "")
     .trim();
+}
+
+function verifyEpisodeNumberInUrl(loadedUrl, requestedEpisode) {
+  try {
+    const url = new URL(loadedUrl);
+    
+    // Check if redirected to home page or completely different section
+    if (url.pathname === "/" || url.pathname === "") {
+      return false; // Mismatch!
+    }
+
+    // Check query params
+    const epParam = url.searchParams.get("ep");
+    if (epParam) {
+      const parsedEp = parseInt(epParam);
+      if (!isNaN(parsedEp) && parsedEp !== requestedEpisode) {
+        return false; // Mismatch!
+      }
+    }
+    
+    // Check path suffix (e.g. /ep-10 or -episode-10 or /episode/10)
+    const pathname = url.pathname.toLowerCase();
+    const pathPatterns = [
+      /\/ep-(\d+)(?:\/|$)/i,
+      /\/-episode-(\d+)(?:\/|$)/i,
+      /\/episode\/(\d+)(?:\/|$)/i,
+      /\/episode-(\d+)(?:\/|$)/i
+    ];
+    let foundEpisodeInPath = false;
+    for (const pattern of pathPatterns) {
+      const match = pathname.match(pattern);
+      if (match) {
+        foundEpisodeInPath = true;
+        const parsedEp = parseInt(match[1]);
+        if (!isNaN(parsedEp) && parsedEp !== requestedEpisode) {
+          return false; // Mismatch!
+        }
+      }
+    }
+
+    if (!epParam && !foundEpisodeInPath && (pathname.includes("/watch") || pathname.includes("/anime"))) {
+      if (requestedEpisode > 1) {
+        return false;
+      }
+    }
+  } catch (e) {}
+  return true;
 }
 
 export class ReAnimeScraperService {
@@ -101,23 +149,34 @@ export class ReAnimeScraperService {
       const targetCore = getCoreTitle(inputUrl);
 
       let matchedLink = null;
+      let bestScore = -1;
       for (const link of animeLinks) {
-        const resultSeason = extractSeasonNumber(link.text);
-        if (targetSeason !== resultSeason) {
-          console.log(`   ⏭️ Skipping result "${link.text}" (Season ${resultSeason}) - mismatch with target (Season ${targetSeason})`);
+        const resultSeason = extractSeasonNumber(inputUrl);
+        const resultSeasonNum = extractSeasonNumber(link.text);
+        if (targetSeason !== resultSeasonNum) {
+          console.log(`   ⏭️ Skipping result "${link.text}" (Season ${resultSeasonNum}) - mismatch with target (Season ${targetSeason})`);
           continue;
         }
 
         const textClean = cleanStr(link.text);
         const textCore = getCoreTitle(link.text);
 
-        const isCleanMatch = textClean && (textClean.includes(targetClean) || targetClean.includes(textClean));
-        const isCoreMatch = textCore && (textCore.includes(targetCore) || targetCore.includes(textCore));
+        // Guard: only allow "target contains result" if result is ≥80% as long (prevents "Link Click" matching "Link Click: Bridon Arc")
+        const isCleanMatch = textClean && (textClean.includes(targetClean) || (targetClean.includes(textClean) && textClean.length / targetClean.length >= 0.8));
+        const isCoreMatch = textCore && (textCore.includes(targetCore) || (targetCore.includes(textCore) && textCore.length / targetCore.length >= 0.8));
 
         if (isCleanMatch || isCoreMatch) {
-          matchedLink = link.href;
-          console.log(`🎯 Found matching anime page: "${link.text}" -> ${link.href}`);
-          break;
+          const lenRatio = Math.min(textClean.length, targetClean.length) / Math.max(textClean.length, targetClean.length || 1);
+          const containsBonus = (textClean.includes(targetClean) || targetClean.includes(textClean)) ? 0.05 : 0;
+          const cleanBonus = isCleanMatch ? 0.1 : 0;
+          const score = lenRatio + containsBonus + cleanBonus;
+          const displayLogText = (link.text || '').replace(/\s+/g, ' ').trim();
+          const truncatedText = displayLogText.length > 80 ? displayLogText.slice(0, 77) + "..." : displayLogText;
+          console.log(`🎯 Candidate match: "${truncatedText}" -> ${link.href} (score: ${score.toFixed(2)})`);
+          if (score > bestScore) {
+            matchedLink = link.href;
+            bestScore = score;
+          }
         }
       }
 
@@ -214,6 +273,13 @@ export class ReAnimeScraperService {
 
         const page = await context.newPage();
         
+        // Proactively block popups/ads by overriding window.open
+        await page.addInitScript(() => {
+          try {
+            window.open = () => null;
+          } catch (e) {}
+        });
+
         // Resolve watchUrl using the page (so we bypass Cloudflare via Playwright)
         const watchUrl = await this.resolveWatchUrlWithPage(page, inputUrl, episodeNumber, options);
         console.log(`🔗 Resolved Re:ANIME watch URL: ${watchUrl}`);
@@ -225,6 +291,12 @@ export class ReAnimeScraperService {
         });
 
         await page.waitForTimeout(4000);
+
+        // Verify that the page URL actually matches the requested episode!
+        const finalUrl = page.url();
+        if (!verifyEpisodeNumberInUrl(finalUrl, episodeNumber)) {
+          throw new Error(`Re:ANIME redirected from ${watchUrl} to ${finalUrl}. Episode ${episodeNumber} is likely not available yet.`);
+        }
 
         try {
           await page.waitForFunction(

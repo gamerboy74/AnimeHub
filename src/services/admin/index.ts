@@ -138,7 +138,7 @@ export class AdminService {
         .from('user_watch_progress_detailed')
         .select('progress_seconds')
 
-      const totalWatchTimeSeconds = watchTimeResult.data?.reduce((total, progress) => 
+      const totalWatchTimeSeconds = watchTimeResult.data?.reduce((total, progress) =>
         total + (progress.progress_seconds || 0), 0) || 0
 
       const totalWatchTimeHours = Math.round(totalWatchTimeSeconds / 3600)
@@ -183,7 +183,7 @@ export class AdminService {
 
       // Get additional user stats
       const userIds = users?.map(u => u.id) || []
-      
+
       const [watchTimeResult, animeWatchedResult] = await Promise.all([
         supabase
           .from('user_watch_progress_detailed')
@@ -282,7 +282,7 @@ export class AdminService {
   static async getSystemHealth(): Promise<SystemHealth> {
     try {
       const startTime = Date.now()
-      
+
       // Test database connection
       const { error: dbError } = await supabase
         .from('users')
@@ -388,7 +388,7 @@ export class AdminService {
           }
         }
       }))
- 
+
       // Add watch progress
       newProgressMapped.forEach((progress: any) => {
         activities.push({
@@ -912,7 +912,7 @@ export class AdminService {
         return {
           ...item,
           episode_count: item.episodes?.length || 0,
-          average_rating: item.reviews?.length > 0 
+          average_rating: item.reviews?.length > 0
             ? (item.reviews.reduce((sum: number, review: any) => sum + review.rating, 0) / item.reviews.length).toFixed(1)
             : 'N/A',
           total_reviews: item.reviews?.length || 0,
@@ -952,7 +952,7 @@ export class AdminService {
   static async updateAnime(animeId: string, updates: any): Promise<boolean> {
     try {
       console.log('Updating anime with data:', updates)
-      
+
       // Clean the updates object - remove null/undefined values and convert empty strings to null
       const cleanedUpdates = Object.entries(updates).reduce((acc, [key, value]) => {
         if (value === '' || value === null || value === undefined) {
@@ -979,7 +979,7 @@ export class AdminService {
         console.error('Supabase update error:', error)
         throw error
       }
-      
+
       console.log('Anime updated successfully')
       return true
     } catch (error) {
@@ -1000,26 +1000,26 @@ export class AdminService {
 
       const episodeIds = episodes?.map(ep => ep.id) || [];
 
-          // Delete related data in proper order
-          await Promise.all([
-            // Delete user progress for all episodes of this anime
-            episodeIds.length > 0 ? (supabase.from('user_progress').delete().in('episode_id', episodeIds) as any) : Promise.resolve(),
-            
-            // Delete reviews for this anime
-            (supabase.from('reviews').delete().eq('anime_id', animeId) as any),
-            
-            // Delete user watchlist entries for this anime
-            (supabase.from('user_watchlist').delete().eq('anime_id', animeId) as any),
-            
-            // Delete user favorites for this anime
-            (supabase.from('user_favorites').delete().eq('anime_id', animeId) as any),
-            
-            // Delete content reports for this anime (with fallback)
-            (supabase.from('content_reports').delete().eq('content_id', animeId).eq('content_type', 'anime') as any),
-            
-            // Delete episodes for this anime (this will cascade to user_progress via ON DELETE CASCADE)
-            (supabase.from('episodes').delete().eq('anime_id', animeId) as any)
-          ]);
+      // Delete related data in proper order
+      await Promise.all([
+        // Delete user progress for all episodes of this anime
+        episodeIds.length > 0 ? (supabase.from('user_progress').delete().in('episode_id', episodeIds) as any) : Promise.resolve(),
+
+        // Delete reviews for this anime
+        (supabase.from('reviews').delete().eq('anime_id', animeId) as any),
+
+        // Delete user watchlist entries for this anime
+        (supabase.from('user_watchlist').delete().eq('anime_id', animeId) as any),
+
+        // Delete user favorites for this anime
+        (supabase.from('user_favorites').delete().eq('anime_id', animeId) as any),
+
+        // Delete content reports for this anime (with fallback)
+        (supabase.from('content_reports').delete().eq('content_id', animeId).eq('content_type', 'anime') as any),
+
+        // Delete episodes for this anime (this will cascade to user_progress via ON DELETE CASCADE)
+        (supabase.from('episodes').delete().eq('anime_id', animeId) as any)
+      ]);
 
       // Finally delete the anime itself
       const { error } = await supabase
@@ -1028,7 +1028,7 @@ export class AdminService {
         .eq('id', animeId);
 
       if (error) throw error;
-      
+
       console.log(`Successfully deleted anime ${animeId} and all related data`);
       return true;
     } catch (error) {
@@ -1085,26 +1085,26 @@ export class AdminService {
 
       const episodeIds = episodes?.map(ep => ep.id) || [];
 
-          // Delete related data for all anime
-          await Promise.all([
-            // Delete user progress for all episodes of these anime
-            episodeIds.length > 0 ? (supabase.from('user_progress').delete().in('episode_id', episodeIds) as any) : Promise.resolve(),
-            
-            // Delete reviews for these anime
-            (supabase.from('reviews').delete().in('anime_id', animeIds) as any),
-            
-            // Delete user watchlist entries for these anime
-            (supabase.from('user_watchlist').delete().in('anime_id', animeIds) as any),
-            
-            // Delete user favorites for these anime
-            (supabase.from('user_favorites').delete().in('anime_id', animeIds) as any),
-            
-            // Delete content reports for these anime (with fallback)
-            supabase.from('content_reports').delete().in('content_id', animeIds).eq('content_type', 'anime'),
-            
-            // Delete episodes for these anime
-            supabase.from('episodes').delete().in('anime_id', animeIds)
-          ]);
+      // Delete related data for all anime
+      await Promise.all([
+        // Delete user progress for all episodes of these anime
+        episodeIds.length > 0 ? (supabase.from('user_progress').delete().in('episode_id', episodeIds) as any) : Promise.resolve(),
+
+        // Delete reviews for these anime
+        (supabase.from('reviews').delete().in('anime_id', animeIds) as any),
+
+        // Delete user watchlist entries for these anime
+        (supabase.from('user_watchlist').delete().in('anime_id', animeIds) as any),
+
+        // Delete user favorites for these anime
+        (supabase.from('user_favorites').delete().in('anime_id', animeIds) as any),
+
+        // Delete content reports for these anime (with fallback)
+        supabase.from('content_reports').delete().in('content_id', animeIds).eq('content_type', 'anime'),
+
+        // Delete episodes for these anime
+        supabase.from('episodes').delete().in('anime_id', animeIds)
+      ]);
 
       // Delete the anime
       const { error } = await supabase
@@ -1113,7 +1113,7 @@ export class AdminService {
         .in('id', animeIds);
 
       if (error) throw error;
-      
+
       console.log(`Successfully bulk deleted ${animeIds.length} anime and all related data`);
       return true;
     } catch (error) {
@@ -1199,10 +1199,10 @@ export class AdminService {
 
   static async reorderEpisodes(_animeId: string, episodeOrders: { id: string; episode_number: number }[]): Promise<boolean> {
     try {
-      const updates = episodeOrders.map(({ id, episode_number }) => 
+      const updates = episodeOrders.map(({ id, episode_number }) =>
         supabase
           .from('episodes')
-          .update({ 
+          .update({
             episode_number,
             updated_at: new Date().toISOString()
           })
@@ -1298,26 +1298,26 @@ export class AdminService {
           .in('episode_id', episodeIds)
         : { data: [] };
 
-        // Get content reports for this anime
-        let reports = null;
-        try {
-          const { data: reportsData } = await supabase
-            .from('content_reports')
-            .select('id, report_type, status, priority, created_at')
-            .eq('content_id', animeId)
-            .eq('content_type', 'anime');
-          reports = reportsData;
-        } catch (error) {
-          // If content_reports table doesn't exist, just return empty array
-          console.warn('content_reports table not found, skipping reports');
-          reports = [];
-        }
+      // Get content reports for this anime
+      let reports = null;
+      try {
+        const { data: reportsData } = await supabase
+          .from('content_reports')
+          .select('id, report_type, status, priority, created_at')
+          .eq('content_id', animeId)
+          .eq('content_type', 'anime');
+        reports = reportsData;
+      } catch (error) {
+        // If content_reports table doesn't exist, just return empty array
+        console.warn('content_reports table not found, skipping reports');
+        reports = [];
+      }
 
       // Calculate analytics
       const uniqueViewers = new Set(viewers?.map(v => v.user_id) || []).size
       const completedViews = viewers?.filter(v => v.is_completed).length || 0
       const totalWatchTime = viewers?.reduce((sum, v) => sum + (v.progress_seconds || 0), 0) || 0
-      const averageRating = reviews && reviews.length > 0 
+      const averageRating = reviews && reviews.length > 0
         ? (reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length).toFixed(1)
         : 'N/A'
 

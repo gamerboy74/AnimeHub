@@ -67,6 +67,8 @@ export default function AdminLayout() {
       setActiveTab('requests')
     } else if (path.includes('/admin/settings')) {
       setActiveTab('settings')
+    } else if (path.includes('/admin/maintenance')) {
+      setActiveTab('maintenance')
     } else {
       setActiveTab('dashboard')
     }

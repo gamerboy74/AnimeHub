@@ -41,16 +41,38 @@ export const useAnimePlayer = () => {
         return cached.data;
       }
 
-      // Get episode data from database
-      const { data: episode, error } = await supabase
-        .from('episodes')
-        .select('*')
-        .eq('anime_id', animeId)
-        .eq('episode_number', episodeNumber)
-        .single();
+      // Try checking React Query cache for the already loaded episode (with video_servers!)
+      let episode = null;
+      const queries = queryClient.getQueryCache().findAll({
+        queryKey: ['anime', 'byId', animeId]
+      });
 
-      if (error || !episode) {
-        throw new Error('Episode not found');
+      for (const q of queries) {
+        if (q.state.data) {
+          const animeData = q.state.data as any;
+          if (animeData.episodes && Array.isArray(animeData.episodes)) {
+            const found = animeData.episodes.find((e: any) => e.episode_number === episodeNumber);
+            if (found && (found.video_url || (found.video_servers && found.video_servers.length > 0))) {
+              episode = found;
+              break;
+            }
+          }
+        }
+      }
+
+      if (!episode) {
+        // Fallback to direct Supabase select if not preloaded in React Query cache
+        const { data, error } = await supabase
+          .from('episodes')
+          .select('*')
+          .eq('anime_id', animeId)
+          .eq('episode_number', episodeNumber)
+          .single();
+
+        if (error || !data) {
+          throw new Error('Episode not found');
+        }
+        episode = data;
       }
 
       // Generate video sources based on the video URL and servers list
@@ -103,7 +125,7 @@ export const useAnimePlayer = () => {
       console.error('Error fetching episode sources:', error);
       throw new Error('Failed to fetch episode sources');
     }
-  }, []);
+  }, [queryClient]);
 
   const updateWatchProgress = useCallback(async (
     animeId: string, 
@@ -116,11 +138,11 @@ export const useAnimePlayer = () => {
   ): Promise<void> => {
     console.log('⏳ [WatchProgress] Triggering progress save...', { animeId, episodeNumber, timestamp, accuracy, episodeId, userId });
     try {
-      // Get user ID
+      // Get user ID (fast local in-memory session fetch instead of network getUser)
       let activeUserId = userId;
       if (!activeUserId) {
-        const { data: { user } } = await supabase.auth.getUser();
-        activeUserId = user?.id;
+        const { data: { session } } = await supabase.auth.getSession();
+        activeUserId = session?.user?.id;
       }
       
       // Always save to localStorage as backup
@@ -159,19 +181,40 @@ export const useAnimePlayer = () => {
       let activeDuration = duration;
 
       if (!activeEpisodeId) {
-        const { data: episode, error: episodeError } = await supabase
-          .from('episodes')
-          .select('id, duration')
-          .eq('anime_id', animeId)
-          .eq('episode_number', episodeNumber)
-          .single();
+        // Try checking React Query cache first (saving another network call)
+        const queries = queryClient.getQueryCache().findAll({
+          queryKey: ['anime', 'byId', animeId]
+        });
 
-        if (episodeError || !episode) {
-          console.warn('⚠️ [WatchProgress] Episode not found in database for progress:', episodeError);
-          return; // localStorage backup is already saved
+        for (const q of queries) {
+          if (q.state.data) {
+            const animeData = q.state.data as any;
+            if (animeData.episodes && Array.isArray(animeData.episodes)) {
+              const found = animeData.episodes.find((e: any) => e.episode_number === episodeNumber);
+              if (found) {
+                activeEpisodeId = found.id;
+                activeDuration = found.duration || undefined;
+                break;
+              }
+            }
+          }
         }
-        activeEpisodeId = episode.id;
-        activeDuration = episode.duration || undefined;
+
+        if (!activeEpisodeId) {
+          const { data: episode, error: episodeError } = await supabase
+            .from('episodes')
+            .select('id, duration')
+            .eq('anime_id', animeId)
+            .eq('episode_number', episodeNumber)
+            .single();
+
+          if (episodeError || !episode) {
+            console.warn('⚠️ [WatchProgress] Episode not found in database for progress:', episodeError);
+            return; // localStorage backup is already saved
+          }
+          activeEpisodeId = episode.id;
+          activeDuration = episode.duration || undefined;
+        }
       }
 
       // Determine if episode is completed (90%+ watched)
@@ -241,29 +284,49 @@ export const useAnimePlayer = () => {
       const localSaved = localStorage.getItem(key);
       const localProgress = localSaved ? parseInt(localSaved) : 0;
 
-      // Get current user
-      const { data: { user } } = await supabase.auth.getUser();
+      // Get current user session (non-blocking in-memory retrieval)
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user) return localProgress;
 
-      // Fetch episode + progress in parallel (instead of sequential)
-      const [episodeResult] = await Promise.all([
-        supabase
+      // Get episode ID from React Query cache first
+      let resolvedEpisodeId = null;
+      const queries = queryClient.getQueryCache().findAll({
+        queryKey: ['anime', 'byId', animeId]
+      });
+
+      for (const q of queries) {
+        if (q.state.data) {
+          const animeData = q.state.data as any;
+          if (animeData.episodes && Array.isArray(animeData.episodes)) {
+            const found = animeData.episodes.find((e: any) => e.episode_number === episodeNumber);
+            if (found) {
+              resolvedEpisodeId = found.id;
+              break;
+            }
+          }
+        }
+      }
+
+      if (!resolvedEpisodeId) {
+        const { data: episode, error: episodeError } = await supabase
           .from('episodes')
           .select('id')
           .eq('anime_id', animeId)
           .eq('episode_number', episodeNumber)
-          .single()
-      ]);
+          .single();
 
-      if (episodeResult.error || !episodeResult.data) {
-        return localProgress;
+        if (episodeError || !episode) {
+          return localProgress;
+        }
+        resolvedEpisodeId = episode.id;
       }
 
       const { data: progress, error: progressError } = await supabase
         .from('user_progress')
         .select('progress_seconds')
         .eq('user_id', user.id)
-        .eq('episode_id', episodeResult.data.id)
+        .eq('episode_id', resolvedEpisodeId)
         .maybeSingle();
 
       if (progressError) {
@@ -280,7 +343,7 @@ export const useAnimePlayer = () => {
       const saved = localStorage.getItem(key);
       return saved ? parseInt(saved) : 0;
     }
-  }, []);
+  }, [queryClient]);
 
   return {
     getEpisodeSources,

@@ -74,9 +74,9 @@ export class ServerHiAnimeScraperService {
 
         // Step 1: Try different search approaches
         const searchUrls = [
-          `https://hianime.do/search?q=${encodeURIComponent(animeTitle)}`,
-          `https://hianime.do/search?keyword=${encodeURIComponent(animeTitle)}`,
-          `https://hianime.do/search?search=${encodeURIComponent(animeTitle)}`
+          `${this.BASE_URL}/search?q=${encodeURIComponent(animeTitle)}`,
+          `${this.BASE_URL}/search?keyword=${encodeURIComponent(animeTitle)}`,
+          `${this.BASE_URL}/search?search=${encodeURIComponent(animeTitle)}`
         ];
 
         let searchSuccess = false;
@@ -101,7 +101,7 @@ export class ServerHiAnimeScraperService {
             for (const selector of selectors) {
               try {
                 await page.waitForSelector(selector, { timeout: 5000 });
-                animeLink = await page.$eval(selector, el => el.href);
+                animeLink = await page.$eval(selector, el => (el as HTMLAnchorElement).href);
                 console.log(`Found anime link with selector ${selector}:`, animeLink);
                 searchSuccess = true;
                 break;
@@ -109,9 +109,8 @@ export class ServerHiAnimeScraperService {
                 console.log(`Selector ${selector} not found, trying next...`);
               }
             }
-
             if (searchSuccess) break;
-          } catch (e) {
+          } catch (e: any) {
             console.log(`Search URL ${searchUrl} failed:`, e.message);
           }
         }
@@ -127,7 +126,7 @@ export class ServerHiAnimeScraperService {
         }
 
         // Step 3: Get episode servers
-        const epApiUrl = `https://hianime.do/ajax/v2/episode/servers?episodeId=${animeId}`;
+        const epApiUrl = `${this.BASE_URL}/ajax/v2/episode/servers?episodeId=${animeId}`;
         await page.goto(epApiUrl, { waitUntil: 'networkidle', timeout: 10000 });
         
         const epResponse = await page.evaluate(() => document.body.innerText);
@@ -140,7 +139,7 @@ export class ServerHiAnimeScraperService {
         }
 
         // Step 4: Get stream iframe
-        const streamApiUrl = `https://hianime.do/ajax/server/${serverLink}`;
+        const streamApiUrl = `${this.BASE_URL}/ajax/server/${serverLink}`;
         await page.goto(streamApiUrl, { waitUntil: 'networkidle', timeout: 10000 });
         
         const streamResponse = await page.evaluate(() => document.body.innerText);
@@ -205,23 +204,37 @@ export class ServerHiAnimeScraperService {
       // Check if episode already exists
       const { data: existingEpisode } = await supabase
         .from('episodes')
-        .select('id')
+        .select('id, title')
         .eq('anime_id', episodeData.animeId)
         .eq('episode_number', episodeData.episodeNumber)
         .maybeSingle();
 
       if (existingEpisode) {
         console.log('⚠️ Episode already exists, updating...');
-        
+
+        const genericRegex = /^(episode|ep|ep\.|ep\.\s)\s*\d+$/i;
+        const currentTitle = existingEpisode.title?.trim() || '';
+        const isCurrentGeneric =
+          currentTitle === '' ||
+          !isNaN(Number(currentTitle)) ||
+          genericRegex.test(currentTitle) ||
+          currentTitle.toLowerCase().includes(' - episode') ||
+          currentTitle.toLowerCase().includes(' - ep');
+
+        const updatePayload: any = {
+          video_url: episodeData.videoUrl,
+          thumbnail_url: episodeData.thumbnailUrl,
+          duration: episodeData.duration,
+          description: episodeData.description
+        };
+
+        if (isCurrentGeneric) {
+          updatePayload.title = episodeData.title;
+        }
+
         const { error: updateError } = await supabase
           .from('episodes')
-          .update({
-            title: episodeData.title,
-            video_url: episodeData.videoUrl,
-            thumbnail_url: episodeData.thumbnailUrl,
-            duration: episodeData.duration,
-            description: episodeData.description
-          })
+          .update(updatePayload)
           .eq('id', existingEpisode.id);
 
         if (updateError) {
