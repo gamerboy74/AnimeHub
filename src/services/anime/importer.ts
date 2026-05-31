@@ -608,30 +608,46 @@ export class AnimeImporterService {
     skipped = existingSet.size
     console.log(`✅ ${animeTitle}: created ${created} stubs (episodes ${missingNums[0]}-${missingNums[missingNums.length - 1]})`)
 
-    // ── Step 4 (optional): Enrich titles from Jikan ──────────────
-    // Only try first page — if it works, update stub titles
-    try {
-      await new Promise(r => setTimeout(r, 1500))
-      const resp = await fetch(`${this.JIKAN_BASE_URL}/anime/${malId}/episodes?page=1`)
-      if (resp.ok) {
-        const json = await resp.json()
-        const episodes = json.data || []
-        for (const ep of episodes) {
-          if (ep.title && ep.title !== `Episode ${ep.mal_id}`) {
-            await supabase
+    // ── Step 4 (optional): Enrich titles from Jikan (Non-blocking Background Task) ──
+    // Run in background so we don't block the database import thread with Jikan's 1.5s rate-limit delay
+    (async () => {
+      try {
+        await new Promise(r => setTimeout(r, 1500))
+        const resp = await fetch(`${this.JIKAN_BASE_URL}/anime/${malId}/episodes?page=1`)
+        if (resp.ok) {
+          const json = await resp.json()
+          const episodes = json.data || []
+          
+          // Only enrich titles for newly created stubs (missingNums) to prevent overwriting existing scraped episode data
+          const missingSet = new Set(missingNums)
+          const enrichments = episodes
+            .filter((ep: any) => ep.title && ep.title !== `Episode ${ep.mal_id}` && missingSet.has(ep.mal_id))
+            .map((ep: any) => ({
+              anime_id: animeId,
+              episode_number: ep.mal_id,
+              title: ep.title,
+              air_date: ep.aired ? ep.aired.split('T')[0] : null,
+            }))
+
+          if (enrichments.length > 0) {
+            const { error: enrichErr } = await supabase
               .from('episodes')
-              .update({
-                title: ep.title,
-                air_date: ep.aired ? ep.aired.split('T')[0] : null,
+              .upsert(enrichments, { 
+                onConflict: 'anime_id,episode_number',
+                ignoreDuplicates: false 
               })
-              .eq('anime_id', animeId)
-              .eq('episode_number', ep.mal_id)
-              .is('video_url', null) // Only update stubs, not scraped episodes
+
+            if (enrichErr) {
+              console.warn(`Failed to batch enrich episode titles:`, enrichErr.message)
+            } else {
+              console.log(`📺 ${animeTitle}: enriched titles for first ${episodes.length} episodes in a single batch upsert!`)
+            }
           }
         }
-        console.log(`📺 ${animeTitle}: enriched titles for first ${episodes.length} episodes`)
+      } catch (err) {
+        console.warn('⚠️ Optional Jikan enrichment failed (non-fatal):', err)
       }
-    } catch { /* Jikan enrichment is optional */ }
+    })()
 
     return { created, skipped, total }
   }
@@ -1283,6 +1299,7 @@ export class AnimeImporterService {
 
       let successCount = 0
       let errorCount = 0
+      const relationsToUpsert = []
 
       for (const relation of anilistData.relations.edges) {
         try {
@@ -1311,7 +1328,7 @@ export class AnimeImporterService {
             }
           }
 
-          const relationData = {
+          relationsToUpsert.push({
             anime_id: animeId,
             related_anime_id: relation.node.idMal?.toString() || relation.node.id?.toString(),
             relation_type: relation.relationType,
@@ -1323,25 +1340,27 @@ export class AnimeImporterService {
             episodes: relation.node.episodes,
             year: relation.node.startDate?.year,
             poster_url: relation.node.coverImage?.large || relation.node.coverImage?.medium
-          }
-
-          const { error } = await supabase
-            .from('anime_relations')
-            .upsert(relationData, { 
-              onConflict: 'anime_id,related_anime_id,relation_type',
-              ignoreDuplicates: true 
-            })
-
-          if (error) {
-            console.error(`Error importing relation for anime ${animeId}:`, error)
-            errorCount++
-          } else {
-            successCount++
-            console.log(`✅ Imported relation: ${relationData.title} (${relationData.relation_type})`)
-          }
+          })
         } catch (error) {
           console.error(`Error processing relation for anime ${animeId}:`, error)
           errorCount++
+        }
+      }
+
+      if (relationsToUpsert.length > 0) {
+        const { error } = await supabase
+          .from('anime_relations')
+          .upsert(relationsToUpsert, { 
+            onConflict: 'anime_id,related_anime_id,relation_type',
+            ignoreDuplicates: true 
+          })
+
+        if (error) {
+          console.error(`Error batch importing AniList relations:`, error)
+          errorCount += relationsToUpsert.length
+        } else {
+          successCount += relationsToUpsert.length
+          console.log(`✅ Batch imported ${relationsToUpsert.length} AniList relations successfully!`)
         }
       }
 
@@ -1379,6 +1398,7 @@ export class AnimeImporterService {
 
       let successCount = 0
       let errorCount = 0
+      const relationsToUpsert = []
 
       for (const rel of relations) {
         for (const entry of rel.entry) {
@@ -1417,29 +1437,31 @@ export class AnimeImporterService {
               }
             }
 
-            const relationData = {
+            relationsToUpsert.push({
               anime_id: animeId,
               related_anime_id: entry.mal_id.toString(),
               relation_type: relationType,
               mal_id: entry.mal_id,
               title: entry.name,
-            }
-
-            const { error } = await supabase
-              .from('anime_relations')
-              .upsert(relationData, { onConflict: 'anime_id,related_anime_id,relation_type', ignoreDuplicates: true })
-
-            if (error) {
-              console.error(`Error importing Jikan relation "${entry.name}":`, error)
-              errorCount++
-            } else {
-              successCount++
-              console.log(`✅ Imported relation: ${entry.name} (${relationType})`)
-            }
+            })
           } catch (err) {
             console.error(`Error processing Jikan relation:`, err)
             errorCount++
           }
+        }
+      }
+
+      if (relationsToUpsert.length > 0) {
+        const { error } = await supabase
+          .from('anime_relations')
+          .upsert(relationsToUpsert, { onConflict: 'anime_id,related_anime_id,relation_type', ignoreDuplicates: true })
+
+        if (error) {
+          console.error(`Error batch importing Jikan relations:`, error)
+          errorCount += relationsToUpsert.length
+        } else {
+          successCount += relationsToUpsert.length
+          console.log(`✅ Batch imported ${relationsToUpsert.length} Jikan relations successfully!`)
         }
       }
 
@@ -1458,52 +1480,47 @@ export class AnimeImporterService {
         return { success: 0, errors: 0 }
       }
 
-      let successCount = 0
-      let errorCount = 0
+      const mainStudios = jikanStudios.slice(0, 2)
+      const studiosData = mainStudios.map(s => ({ name: s.name }))
 
-      for (const studio of jikanStudios.slice(0, 2)) {
-        try {
-          // Upsert studio by name (Jikan doesn't have anilist_id)
-          const { data: studioResult, error: studioError } = await supabase
-            .from('anime_studios')
-            .upsert({ name: studio.name }, { onConflict: 'name' })
-            .select('id')
-            .single()
+      // Step 1: Bulk upsert studios by name
+      const { data: upsertedStudios, error: upsertError } = await supabase
+        .from('anime_studios')
+        .upsert(studiosData, { onConflict: 'name' })
+        .select('id, name')
 
-          if (studioError) {
-            console.error(`Error upserting studio "${studio.name}":`, studioError)
-            errorCount++
-            continue
-          }
-
-          if (!studioResult?.id) {
-            console.error(`Failed to get UUID for studio: ${studio.name}`)
-            errorCount++
-            continue
-          }
-
-          // Create the anime-studio relation
-          const { error: relError } = await supabase
-            .from('anime_studio_relations')
-            .upsert(
-              { anime_id: animeId, studio_id: studioResult.id, role: 'animation' },
-              { onConflict: 'anime_id,studio_id,role', ignoreDuplicates: true }
-            )
-
-          if (relError) {
-            console.error(`Error creating studio relation for "${studio.name}":`, relError)
-            errorCount++
-          } else {
-            successCount++
-            console.log(`✅ Imported studio: ${studio.name}`)
-          }
-        } catch (err) {
-          console.error(`Error processing Jikan studio:`, err)
-          errorCount++
-        }
+      if (upsertError) {
+        console.error('Error batch importing Jikan studios:', upsertError)
+        return { success: 0, errors: mainStudios.length }
       }
 
-      return { success: successCount, errors: errorCount }
+      if (!upsertedStudios || upsertedStudios.length === 0) {
+        console.error('No Jikan studios returned after batch upsert.')
+        return { success: 0, errors: mainStudios.length }
+      }
+
+      // Step 2: Build studio relation data
+      const relationsData = upsertedStudios.map((studio: any) => ({
+        anime_id: animeId,
+        studio_id: studio.id,
+        role: 'animation'
+      }))
+
+      // Step 3: Bulk upsert studio relations
+      const { error: relError } = await supabase
+        .from('anime_studio_relations')
+        .upsert(relationsData, { 
+          onConflict: 'anime_id,studio_id,role',
+          ignoreDuplicates: true 
+        })
+
+      if (relError) {
+        console.error('Error batch creating Jikan studio relations:', relError)
+        return { success: 0, errors: mainStudios.length }
+      }
+
+      console.log(`✅ Batch imported ${upsertedStudios.length} Jikan studios & relations successfully!`)
+      return { success: upsertedStudios.length, errors: 0 }
     } catch (error) {
       console.error('Error importing Jikan studios:', error)
       return { success: 0, errors: 1 }
@@ -1561,6 +1578,9 @@ export class AnimeImporterService {
         existingByNorm.set(normalizeName(ec.name), { id: ec.id, name: ec.name })
       }
 
+      const recordsToUpsertByName: any[] = []
+      const updatesToRun: Promise<any>[] = []
+
       for (const entry of filtered) {
         try {
           const japaneseVA = entry.voice_actors?.find(va => va.language === 'Japanese')
@@ -1568,7 +1588,7 @@ export class AnimeImporterService {
 
           const roleMap: Record<string, string> = { Main: 'main', Supporting: 'supporting' }
 
-          const characterData = {
+          const characterData: any = {
             anime_id: animeId,
             name: entry.character.name,
             image_url: entry.character.images?.jpg?.image_url || null,
@@ -1583,47 +1603,65 @@ export class AnimeImporterService {
 
           if (existingMatch && existingMatch.name !== characterData.name) {
             // Existing char has better name — just update voice actors if missing
-            const { error } = await supabase
-              .from('anime_characters')
-              .update({
-                voice_actor: characterData.voice_actor,
-                voice_actor_japanese: characterData.voice_actor_japanese,
-                image_url: characterData.image_url,
-              })
-              .eq('id', existingMatch.id)
-              .is('voice_actor', null) // Only update if voice_actor is currently null
-
-            if (error) {
-              // Try without the .is() filter
-              await supabase
+            updatesToRun.push(
+              supabase
                 .from('anime_characters')
                 .update({
                   voice_actor: characterData.voice_actor,
                   voice_actor_japanese: characterData.voice_actor_japanese,
+                  image_url: characterData.image_url,
                 })
                 .eq('id', existingMatch.id)
-            }
-            successCount++
-            console.log(`🔄 Merged Jikan data into existing character "${existingMatch.name}"`)
+                .is('voice_actor', null)
+                .then(async ({ error }) => {
+                  if (error) {
+                    // Try without the .is() filter
+                    return supabase
+                      .from('anime_characters')
+                      .update({
+                        voice_actor: characterData.voice_actor,
+                        voice_actor_japanese: characterData.voice_actor_japanese,
+                      })
+                      .eq('id', existingMatch.id)
+                  }
+                })
+                .then(() => {
+                  successCount++
+                  console.log(`🔄 Merged Jikan data into existing character "${existingMatch.name}"`)
+                })
+                .catch(err => {
+                  console.error('Error merging character:', err)
+                  errorCount++
+                })
+            )
           } else {
-            const { error } = await supabase
-              .from('anime_characters')
-              .upsert(characterData, { onConflict: 'anime_id,name', ignoreDuplicates: false })
-
-            if (error) {
-              console.error(`Error importing Jikan character "${entry.character.name}":`, error)
-              errorCount++
-            } else {
-              successCount++
-              existingByNorm.set(normalizedNew, { id: '', name: characterData.name })
-              console.log(`✅ Imported character: ${entry.character.name} (${characterData.role})`)
-            }
+            recordsToUpsertByName.push(characterData)
+            existingByNorm.set(normalizedNew, { id: '', name: characterData.name })
           }
         } catch (err) {
           console.error(`Error processing Jikan character:`, err)
           errorCount++
         }
       }
+
+      if (recordsToUpsertByName.length > 0) {
+        updatesToRun.push(
+          supabase
+            .from('anime_characters')
+            .upsert(recordsToUpsertByName, { onConflict: 'anime_id,name', ignoreDuplicates: false })
+            .then(({ error }) => {
+              if (error) {
+                console.error(`Error batch importing Jikan characters:`, error)
+                errorCount += recordsToUpsertByName.length
+              } else {
+                successCount += recordsToUpsertByName.length
+                console.log(`✅ Batch upserted ${recordsToUpsertByName.length} Jikan characters by name.`)
+              }
+            })
+        )
+      }
+
+      await Promise.all(updatesToRun)
 
       return { success: successCount, errors: errorCount }
     } catch (error) {
@@ -1691,6 +1729,9 @@ export class AnimeImporterService {
         existingByNorm.set(normalizeName(ec.name), { id: ec.id, name: ec.name })
       }
 
+      const recordsToUpsertByName: any[] = []
+      const recordsToUpsertById: any[] = []
+
       for (const character of mainCharacters) {
         try {
           console.log('Processing character:', character.node.name?.full, 'Role:', character.role)
@@ -1708,7 +1749,7 @@ export class AnimeImporterService {
             ? character.node.name.alternative.filter(Boolean).join(', ')
             : character.node.name?.alternative || null
 
-          const characterData = {
+          const characterData: any = {
             anime_id: animeId,
             name: character.node.name?.full || character.node.name?.native,
             name_japanese: character.node.name?.native,
@@ -1719,60 +1760,71 @@ export class AnimeImporterService {
             voice_actor: englishVA?.name?.full || japaneseVA?.name?.full || null,
             voice_actor_japanese: japaneseVA?.name?.native || japaneseVA?.name?.full || null
           }
-          
-          console.log('Character data to insert:', characterData)
 
-          // Check if a character with a different name format already exists (e.g. Jikan "Luffy, Monkey D." vs AniList "Monkey D. Luffy")
+          // Check if a character with a different name format already exists
           const normalizedNew = normalizeName(characterData.name)
           const existingMatch = existingByNorm.get(normalizedNew)
 
-          if (existingMatch && existingMatch.name !== characterData.name) {
-            // Update the existing row with the better data instead of creating a duplicate
-            console.log(`🔄 Updating existing character "${existingMatch.name}" → "${characterData.name}"`)
-            const { error } = await supabase
-              .from('anime_characters')
-              .update({
-                name: characterData.name,
-                name_japanese: characterData.name_japanese,
-                name_romaji: characterData.name_romaji,
-                image_url: characterData.image_url,
-                description: characterData.description,
-                voice_actor: characterData.voice_actor,
-                voice_actor_japanese: characterData.voice_actor_japanese,
+          if (existingMatch) {
+            if (existingMatch.name !== characterData.name) {
+              console.log(`🔄 Preparing fuzzy name update for character "${existingMatch.name}" → "${characterData.name}"`)
+              recordsToUpsertById.push({
+                id: existingMatch.id,
+                ...characterData
               })
-              .eq('id', existingMatch.id)
-
-            if (error) {
-              console.error(`Error updating character "${existingMatch.name}":`, error)
-              errorCount++
-            } else {
-              successCount++
-              // Update the lookup so future checks use the new name
+              // Update local lookup so subsequent operations align
               existingByNorm.delete(normalizedNew)
               existingByNorm.set(normalizedNew, { id: existingMatch.id, name: characterData.name })
+            } else {
+              recordsToUpsertByName.push(characterData)
             }
           } else {
-            // Normal upsert (no fuzzy duplicate found)
-            const { error } = await supabase
-              .from('anime_characters')
-              .upsert(characterData, { 
-                onConflict: 'anime_id,name',
-                ignoreDuplicates: false 
-              })
-
-            if (error) {
-              console.error(`Error importing character for anime ${animeId}:`, error)
-              errorCount++
-            } else {
-              successCount++
-              console.log(`✅ Imported character: ${characterData.name} (${characterData.role})`)
-            }
+            recordsToUpsertByName.push(characterData)
+            existingByNorm.set(normalizedNew, { id: '', name: characterData.name })
           }
         } catch (error) {
           console.error(`Error processing character for anime ${animeId}:`, error)
           errorCount++
         }
       }
+
+      const promises: Promise<any>[] = []
+
+      if (recordsToUpsertByName.length > 0) {
+        promises.push(
+          supabase
+            .from('anime_characters')
+            .upsert(recordsToUpsertByName, { onConflict: 'anime_id,name', ignoreDuplicates: false })
+            .then(({ error }) => {
+              if (error) {
+                console.error('Error batch upserting characters by name:', error)
+                errorCount += recordsToUpsertByName.length
+              } else {
+                successCount += recordsToUpsertByName.length
+                console.log(`✅ Batch upserted ${recordsToUpsertByName.length} characters by name.`)
+              }
+            })
+        )
+      }
+
+      if (recordsToUpsertById.length > 0) {
+        promises.push(
+          supabase
+            .from('anime_characters')
+            .upsert(recordsToUpsertById, { onConflict: 'id', ignoreDuplicates: false })
+            .then(({ error }) => {
+              if (error) {
+                console.error('Error batch updating characters by ID:', error)
+                errorCount += recordsToUpsertById.length
+              } else {
+                successCount += recordsToUpsertById.length
+                console.log(`✅ Batch updated ${recordsToUpsertById.length} fuzzy matched characters by ID.`)
+              }
+            })
+        )
+      }
+
+      await Promise.all(promises)
 
       return { success: successCount, errors: errorCount }
     } catch (error) {
@@ -1794,62 +1846,50 @@ export class AnimeImporterService {
 
       // Only import first 2 main studios
       const mainStudios = anilistData.studios.nodes.slice(0, 2)
-      for (const studio of mainStudios) {
-        try {
-          // First, upsert the studio
-          const studioData = {
-            anilist_id: studio.id,
-            name: studio.name
-          }
+      
+      const studiosData = mainStudios.map((s: any) => ({
+        anilist_id: s.id,
+        name: s.name
+      }))
 
-          const { data: studioResult, error: studioError } = await supabase
-            .from('anime_studios')
-            .upsert(studioData, { 
-              onConflict: 'anilist_id'
-            })
-            .select('id')
-            .single()
+      // Step 1: Bulk upsert studios by anilist_id
+      const { data: upsertedStudios, error: upsertError } = await supabase
+        .from('anime_studios')
+        .upsert(studiosData, { onConflict: 'anilist_id' })
+        .select('id, anilist_id, name')
 
-          if (studioError) {
-            console.error(`Error importing studio:`, studioError)
-            errorCount++
-            continue
-          }
-
-          // Get the studio UUID from the database
-          const studioUuid = studioResult?.id
-          if (!studioUuid) {
-            console.error(`Failed to get studio UUID for studio: ${studio.name}`)
-            errorCount++
-            continue
-          }
-
-          // Then, create the relation
-          const relationData = {
-            anime_id: animeId,
-            studio_id: studioUuid,
-            role: 'animation' // Default role for animation studios
-          }
-
-          const { error: relationError } = await supabase
-            .from('anime_studio_relations')
-            .upsert(relationData, { 
-              onConflict: 'anime_id,studio_id,role',
-              ignoreDuplicates: true 
-            })
-
-          if (relationError) {
-            console.error(`Error creating studio relation for anime ${animeId}:`, relationError)
-            errorCount++
-          } else {
-            successCount++
-            console.log(`✅ Imported studio: ${studioData.name}`)
-          }
-        } catch (error) {
-          console.error(`Error processing studio for anime ${animeId}:`, error)
-          errorCount++
-        }
+      if (upsertError) {
+        console.error('Error batch importing studios:', upsertError)
+        return { success: 0, errors: mainStudios.length }
       }
+
+      if (!upsertedStudios || upsertedStudios.length === 0) {
+        console.error('No studios returned after batch upsert.')
+        return { success: 0, errors: mainStudios.length }
+      }
+
+      // Step 2: Build studio relation data
+      const relationsData = upsertedStudios.map((studio: any) => ({
+        anime_id: animeId,
+        studio_id: studio.id,
+        role: 'animation'
+      }))
+
+      // Step 3: Bulk upsert studio relations
+      const { error: relError } = await supabase
+        .from('anime_studio_relations')
+        .upsert(relationsData, { 
+          onConflict: 'anime_id,studio_id,role',
+          ignoreDuplicates: true 
+        })
+
+      if (relError) {
+        console.error('Error batch creating studio relations:', relError)
+        return { success: 0, errors: mainStudios.length }
+      }
+
+      console.log(`✅ Batch imported ${upsertedStudios.length} studios & relations successfully!`)
+      return { success: upsertedStudios.length, errors: 0 }
 
       return { success: successCount, errors: errorCount }
     } catch (error) {
@@ -2008,8 +2048,10 @@ export class AnimeImporterService {
         console.log(`Anime "${animeData.title}" already exists, importing characters/relations for existing anime`)
         animeId = existingAnime.id
       } else {
-        // Enhance trailer data by checking both sources
-        await this.enhanceTrailerData(animeData)
+        // Skip slow redundant Jikan trailer searches since the AniList payload is complete
+        if (!animeData.trailer_url) {
+          console.log(`🎬 AniList trailer missing for "${animeData.title}", skipping slow Jikan search to speed up import.`)
+        }
         
         const { data: insertedAnime, error: insertError } = await supabase
           .from('anime')

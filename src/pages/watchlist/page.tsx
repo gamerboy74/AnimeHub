@@ -15,7 +15,15 @@ export default function WatchlistPage() {
   const [viewMode, setViewMode] = useState('grid');
   const navigate = useNavigate();
   const user = useCurrentUser();
-  const { watchlist, loading, error } = useWatchlist();
+  const { watchlist, loading, error, removeFromWatchlist } = useWatchlist();
+
+  const markAsCompleted = async (animeId: string) => {
+    try {
+      await removeFromWatchlist(animeId);
+    } catch (err) {
+      console.error('Failed to mark as completed:', err);
+    }
+  };
 
   // Redirect if not authenticated
   if (!user) {

@@ -69,6 +69,8 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
   const [trendingPage, setTrendingPage] = useState(1);
   const [seasonalPage, setSeasonalPage] = useState(1);
   const [canLoadMoreResults, setCanLoadMoreResults] = useState(false);
+  const [dbAnimeList, setDbAnimeList] = useState<any[]>([]);
+  const [selectedDbAnimeId, setSelectedDbAnimeId] = useState<string>('');
 
   // Autocomplete Genre states
   const [availableGenres, setAvailableGenres] = useState<string[]>([]);
@@ -94,6 +96,26 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
       }
     };
   }, [searchQuery]);
+
+  // Load database anime list for maintenance tools
+  useEffect(() => {
+    if (activeTab === 'debug') {
+      const fetchDbAnimeList = async () => {
+        try {
+          const { data, error } = await supabase
+            .from('anime')
+            .select('id, title')
+            .order('title');
+          if (!error && data) {
+            setDbAnimeList(data);
+          }
+        } catch (err) {
+          console.error('Failed to fetch anime list:', err);
+        }
+      };
+      fetchDbAnimeList();
+    }
+  }, [activeTab]);
 
   // Load import history and database genres on mount
   useEffect(() => {
@@ -201,6 +223,8 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
       setImportResult(null);
       setSearchPage(1);
       setCanLoadMoreResults(false);
+      setMessage(null);
+      setScrapingAnimeId(null);
     }
 
     try {
@@ -308,6 +332,8 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
 
     setIsImporting(true);
     setImportResult(null);
+    setMessage(null);
+    setScrapingAnimeId(null);
     setImportProgress({
       total: selectedAnime.length,
       completed: 0,
@@ -406,6 +432,8 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
   const handleQuickImport = async (anime: SearchResult) => {
     setIsImporting(true);
     setImportResult(null);
+    setMessage(null);
+    setScrapingAnimeId(null);
 
     try {
       const mappedData = anime.source === 'jikan'
@@ -461,6 +489,7 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
     setIsImporting(true);
     setImportResult(null);
     setScrapingAnimeId(null);
+    setMessage(null);
 
     try {
       const mappedData = anime.source === 'jikan'
@@ -517,6 +546,7 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
           setMessage(`⚠️ Import succeeded but scraping failed: ${scrapeErr instanceof Error ? scrapeErr.message : 'Unknown error'}`);
         }
       } else {
+        setScrapingAnimeId(importedAnime?.id || 'unknown');
         setMessage(`✅ Imported "${anime.title}"! (Episode count unknown — scrape manually from the Scraper tab.)`);
       }
 
@@ -533,7 +563,6 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
       });
     } finally {
       setIsImporting(false);
-      setScrapingAnimeId(null);
     }
   };
 
@@ -546,6 +575,8 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
       setImportResult(null);
       setTrendingPage(1);
       setCanLoadMoreResults(false);
+      setMessage(null);
+      setScrapingAnimeId(null);
     }
 
     try {
@@ -589,6 +620,8 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
       setImportResult(null);
       setSeasonalPage(1);
       setCanLoadMoreResults(false);
+      setMessage(null);
+      setScrapingAnimeId(null);
     }
 
     try {
@@ -691,7 +724,11 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
             ].map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
+                onClick={() => {
+                  setActiveTab(tab.id as any);
+                  setMessage(null);
+                  setScrapingAnimeId(null);
+                }}
                 className={`relative flex-1 flex items-center justify-center gap-2 px-5 py-3 rounded-lg text-sm font-bold transition-all duration-300 select-none ${activeTab === tab.id
                     ? 'bg-white text-indigo-950 shadow-md transform scale-[1.02]'
                     : 'text-white/70 hover:text-white hover:bg-white/5'
@@ -1516,6 +1553,93 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
                       {isImporting ? 'Processing...' : 'Rename Generic Titles'}
                     </button>
                   </div>
+
+                  {/* Tool 6: Clear Stream & Scraper Metadata */}
+                  <div className="bg-white rounded-2xl border border-slate-200 hover:border-red-300 hover:shadow-md transition-all duration-200 p-5 flex flex-col justify-between min-h-48">
+                    <div>
+                      <div className="flex items-center gap-3 mb-2">
+                        <span className="flex items-center justify-center w-9 h-9 rounded-xl bg-red-100 text-red-600">
+                          <i className="ri-refresh-line text-lg"></i>
+                        </span>
+                        <h4 className="font-bold text-slate-800 text-sm">Reset Stream & Scraper Data</h4>
+                      </div>
+                      <p className="text-slate-500 text-xs leading-relaxed mb-3">
+                        Completely clear the scraped stream URLs, 9anime slug, and all associated episode server links for a selected anime. Useful for forcing a clean re-scrape.
+                      </p>
+                      
+                      {/* Anime Dropdown Selector */}
+                      <div className="relative mb-3">
+                        <select
+                          value={selectedDbAnimeId}
+                          onChange={(e) => setSelectedDbAnimeId(e.target.value)}
+                          className="w-full px-3 py-2 pr-8 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-red-500 transition-all cursor-pointer appearance-none font-semibold text-slate-700"
+                        >
+                          <option value="">-- Select an Anime from Catalog --</option>
+                          {dbAnimeList.map(anime => (
+                            <option key={anime.id} value={anime.id}>
+                              {anime.title}
+                            </option>
+                          ))}
+                        </select>
+                        <i className="ri-arrow-down-s-line absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-500 pointer-events-none text-sm"></i>
+                      </div>
+                    </div>
+                    
+                    <button
+                      onClick={async () => {
+                        if (!selectedDbAnimeId) {
+                          alert('Please select an anime to reset');
+                          return;
+                        }
+                        
+                        const anime = dbAnimeList.find(a => a.id === selectedDbAnimeId);
+                        const confirmReset = window.confirm(
+                          `Are you absolutely sure you want to delete all scraped streams, server links, and scraper slug metadata for "${anime?.title || 'this anime'}"?\n\nThis action cannot be undone.`
+                        );
+                        
+                        if (!confirmReset) return;
+                        
+                        try {
+                          setIsImporting(true);
+                          setMessage(`⏳ Resetting streaming metadata for "${anime?.title || 'Anime'}"...`);
+                          
+                          // 1. Reset nine_anime_slug and scraper_urls in anime table
+                          const { error: animeErr } = await supabase
+                            .from('anime')
+                            .update({
+                              nine_anime_slug: null,
+                              scraper_urls: null,
+                              updated_at: new Date().toISOString()
+                            })
+                            .eq('id', selectedDbAnimeId);
+                            
+                          if (animeErr) throw new Error(`Anime reset failed: ${animeErr.message}`);
+                          
+                          // 2. Reset video_url and video_servers in episodes table
+                          const { error: epErr } = await supabase
+                            .from('episodes')
+                            .update({
+                              video_url: null,
+                              video_servers: null
+                            })
+                            .eq('anime_id', selectedDbAnimeId);
+                            
+                          if (epErr) throw new Error(`Episodes reset failed: ${epErr.message}`);
+                          
+                          setMessage(`✅ Success! Stream metadata and scraper caches have been fully cleared for "${anime?.title}". You can now perform a clean re-scrape.`);
+                          setSelectedDbAnimeId('');
+                        } catch (err) {
+                          setMessage(`❌ Reset failed: ${err instanceof Error ? err.message : err}`);
+                        } finally {
+                          setIsImporting(false);
+                        }
+                      }}
+                      disabled={isImporting || !selectedDbAnimeId}
+                      className="w-full bg-red-600 hover:bg-red-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white py-2.5 rounded-xl font-bold text-xs shadow-sm hover:shadow-md transition-all cursor-pointer"
+                    >
+                      {isImporting ? 'Resetting...' : 'Reset Stream Data'}
+                    </button>
+                  </div>
                 </div>
               </motion.div>
             )}
@@ -1770,7 +1894,13 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
                       : 'bg-gradient-to-r from-teal-50 to-cyan-50 border-teal-200 text-teal-800'
                   }`}>
                   <p className="font-semibold text-sm flex items-center gap-2">
-                    <i className="ri-loader-3-line text-lg animate-spin shrink-0"></i>
+                    {message.startsWith('✅') ? (
+                      <i className="ri-checkbox-circle-fill text-lg shrink-0 text-emerald-600"></i>
+                    ) : message.startsWith('⚠️') ? (
+                      <i className="ri-error-warning-fill text-lg shrink-0 text-amber-600"></i>
+                    ) : (
+                      <i className="ri-loader-3-line text-lg animate-spin shrink-0"></i>
+                    )}
                     {message}
                   </p>
                 </div>

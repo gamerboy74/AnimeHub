@@ -96,12 +96,8 @@ export default function AnimeDetailPage() {
 
       try {
         if (user) {
-          const [watchlistResult, favoritesResult] = await Promise.all([
-            checkWatchlist(anime.id),
-            checkFavorites(anime.id),
-          ]);
-          setWatchlistStatus(watchlistResult); // Regular state update
-          setFavoriteStatus(favoritesResult); // Regular state update
+          setWatchlistStatus(anime.is_in_watchlist ?? false);
+          setFavoriteStatus(anime.is_favorited ?? false);
 
           // Extract continue watching data
           if (anime.user_progress?.length) {

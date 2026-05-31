@@ -1243,8 +1243,8 @@ This action cannot be undone.`,
                         <h3 className="text-2xl font-bold text-slate-900 group-hover:text-blue-600 transition-colors line-clamp-2">
                           {item.title}
                         </h3>
-                        <span className={`flex-shrink-0 px-4 py-1.5 rounded-full text-xs font-bold border-2 ${getStatusColor(item.status)} shadow-sm`}>
-                          {getStatusIcon(item.status)} {item.status.toUpperCase()}
+                        <span className={`flex-shrink-0 px-4 py-1.5 rounded-full text-xs font-bold border-2 ${getStatusColor(item.status || 'draft')} shadow-sm`}>
+                          {getStatusIcon(item.status || 'draft')} {(item.status || 'draft').toUpperCase()}
                         </span>
                       </div>
 
@@ -1310,7 +1310,7 @@ This action cannot be undone.`,
                       <div className="flex items-center gap-3">
                         <label className="text-sm font-semibold text-slate-700">Status:</label>
                         <select
-                          value={item.status}
+                          value={item.status || 'draft'}
                           onChange={(e) => handleStatusChange(item.id, e.target.value as any)}
                           disabled={updatingAnime === item.id}
                           className="flex-1 px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50 transition-all"

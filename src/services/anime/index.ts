@@ -32,8 +32,60 @@ const setCachedData = (key: string, data: any) => {
   cache.set(key, { data, timestamp: Date.now() })
 }
 
+let searchIndex: any[] | null = null
+let indexLoadingPromise: Promise<any[]> | null = null
+
 const clearCache = () => {
   cache.clear()
+  searchIndex = null
+  indexLoadingPromise = null
+  try {
+    if (typeof window !== 'undefined') {
+      window.sessionStorage.removeItem('anime_search_index')
+    }
+  } catch (e) {}
+}
+
+const loadSearchIndex = async (): Promise<any[]> => {
+  if (searchIndex) return searchIndex
+  if (indexLoadingPromise) return indexLoadingPromise
+
+  try {
+    if (typeof window !== 'undefined') {
+      const cached = window.sessionStorage.getItem('anime_search_index')
+      if (cached) {
+        searchIndex = JSON.parse(cached)
+        return searchIndex!
+      }
+    }
+  } catch (e) {}
+
+  indexLoadingPromise = (async () => {
+    try {
+      // Fetch only essential columns for search to reduce payload size
+      const { data, error } = await supabase
+        .from('anime')
+        .select('id, title, title_english, title_romaji, poster_url, year, rating, genres, status, type')
+        .limit(3000)
+
+      if (error) throw error
+      searchIndex = data || []
+
+      try {
+        if (typeof window !== 'undefined') {
+          window.sessionStorage.setItem('anime_search_index', JSON.stringify(searchIndex))
+        }
+      } catch (e) {}
+
+      return searchIndex
+    } catch (err) {
+      console.error('Failed to pre-fetch search index:', err)
+      indexLoadingPromise = null
+      return []
+    }
+  })()
+
+  return indexLoadingPromise
 }
 
 export class AnimeService {
@@ -459,13 +511,96 @@ export class AnimeService {
     }
   }
 
-  static async searchAnime(query: string, limit: number = 20, filters?: {
-    genres?: string[]
-    year?: string
-    status?: string
-    sortBy?: string
-  }) {
+  static async searchAnime(
+    query: string,
+    limitOrFilters: number | { limit?: number; genres?: string[]; year?: string; status?: string; sortBy?: string } = 20,
+    filtersInput?: {
+      genres?: string[]
+      year?: string
+      status?: string
+      sortBy?: string
+    }
+  ) {
     try {
+      let limit = 20
+      let filters = filtersInput
+
+      if (typeof limitOrFilters === 'number') {
+        limit = limitOrFilters
+      } else if (limitOrFilters && typeof limitOrFilters === 'object') {
+        const obj = limitOrFilters as any
+        limit = obj.limit || 20
+        filters = obj
+      }
+
+      // 1. Try to search client-side if the pre-fetched search index is available
+      const index = await loadSearchIndex()
+      if (index && index.length > 0) {
+        let results = [...index]
+
+        // Match query case-insensitively across multiple title formats
+        if (query && query.trim()) {
+          const q = query.trim().toLowerCase()
+          results = results.filter(anime => 
+            (anime.title && anime.title.toLowerCase().includes(q)) ||
+            (anime.title_english && anime.title_english.toLowerCase().includes(q)) ||
+            (anime.title_romaji && anime.title_romaji.toLowerCase().includes(q))
+          )
+        }
+
+        // Apply filters locally
+        if (filters?.genres && filters.genres.length > 0) {
+          results = results.filter(anime => 
+            anime.genres && filters!.genres!.every(g => anime.genres.includes(g))
+          )
+        }
+
+        if (filters?.year) {
+          const y = parseInt(filters.year)
+          results = results.filter(anime => anime.year === y)
+        }
+
+        if (filters?.status) {
+          const s = filters.status.toLowerCase()
+          results = results.filter(anime => anime.status && anime.status.toLowerCase() === s)
+        }
+
+        // Apply sorting locally
+        if (!filters?.sortBy || filters.sortBy === 'relevance') {
+          // Sort by relevance (exact/prefix match first, then by rating)
+          const q = query.trim().toLowerCase()
+          results.sort((a, b) => {
+            const aTitle = (a.title || '').toLowerCase()
+            const bTitle = (b.title || '').toLowerCase()
+            const aEng = (a.title_english || '').toLowerCase()
+            const bEng = (b.title_english || '').toLowerCase()
+            
+            const aStartsWith = aTitle.startsWith(q) || aEng.startsWith(q)
+            const bStartsWith = bTitle.startsWith(q) || bEng.startsWith(q)
+            
+            if (aStartsWith && !bStartsWith) return -1
+            if (!aStartsWith && bStartsWith) return 1
+            
+            return (b.rating || 0) - (a.rating || 0)
+          })
+        } else {
+          switch (filters.sortBy) {
+            case 'rating':
+              results.sort((a, b) => (b.rating || 0) - (a.rating || 0))
+              break
+            case 'year':
+              results.sort((a, b) => (b.year || 0) - (a.year || 0))
+              break
+            case 'title':
+              results.sort((a, b) => (a.title || '').localeCompare(b.title || ''))
+              break
+          }
+        }
+
+        return results.slice(0, limit)
+      }
+
+      // 2. Database Fallback (Highly Optimized select projection)
       const hasMultipleGenres = filters?.genres && filters.genres.length > 1;
       const sortByTitle = filters?.sortBy === 'title';
 
@@ -490,14 +625,14 @@ export class AnimeService {
         }
       }
 
-      // Standard query fallback
+      // Fallback query (selecting only search-related columns instead of all '*')
       let searchQuery = supabase
         .from('anime')
-        .select('*')
+        .select('id, title, title_english, title_romaji, poster_url, year, rating, genres, status, type')
 
       // Apply search query
       if (query && query.trim()) {
-        searchQuery = searchQuery.or(`title.ilike.%${query}%,description.ilike.%${query}%,title_japanese.ilike.%${query}%`)
+        searchQuery = searchQuery.or(`title.ilike.%${query}%,title_english.ilike.%${query}%,title_romaji.ilike.%${query}%`)
       }
 
       // Apply filters
@@ -533,7 +668,7 @@ export class AnimeService {
       const { data, error } = await searchQuery.limit(limit)
 
       if (error) {
-        console.error('Search anime error:', error)
+        console.error('Search anime fallback error:', error)
         throw new Error(`Failed to search anime: ${error.message}`)
       }
 

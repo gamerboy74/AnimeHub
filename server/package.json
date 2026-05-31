@@ -10,6 +10,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
     "axios": "^1.13.0",
+    "bull": "^4.16.5",
     "cheerio": "^1.1.2",
     "compression": "^1.8.1",
     "cors": "^2.8.5",
@@ -18,6 +19,7 @@
     "helmet": "^8.1.0",
     "morgan": "^1.10.1",
     "playwright-extra": "^4.3.6",
-    "puppeteer-extra-plugin-stealth": "^2.11.2"
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "redis": "^4.7.1"
   }
 }

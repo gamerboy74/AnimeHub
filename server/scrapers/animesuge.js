@@ -1,9 +1,21 @@
 import { getBrowser, supabase } from "../index.js";
 import { extractSeasonNumber } from "../utils/seasonExtractor.js";
 
+export function decodeHtmlEntities(str) {
+  if (!str) return "";
+  return str
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;/g, "'")
+    .replace(/&apos;/g, "'");
+}
+
 export function getCoreTitle(title) {
   if (!title) return "";
-  return title
+  const decoded = decodeHtmlEntities(title);
+  return decoded
     .toLowerCase()
     .replace(/(?:season\s*\d+|s\d+|\d+(?:nd|rd|th|st)?\s*season|\d+(?:nd|rd|th|st)?\s*sseason)/gi, "")
     .replace(/\b(?:movie|film|ova|ona|special|part)\b\s*\d*/gi, "")
@@ -179,21 +191,23 @@ export class AnimeSugeScraperService {
         let coreMatchScore = -1;
 
         for (const link of animeLinks) {
-          const resultSeason = extractSeasonNumber(link.text);
-          const textClean = cleanStr(link.text);
-          const textSorted = sortWords(link.text);
-          const textCore = getCoreTitle(link.text);
+          const decodedText = decodeHtmlEntities(link.text);
+          const resultSeason = extractSeasonNumber(decodedText);
+          const textClean = cleanStr(decodedText);
+          const textSorted = sortWords(decodedText);
+          const textCore = getCoreTitle(decodedText);
 
           // Check if link matches ANY of our known title variants
           for (const variant of titleVariants) {
-            const targetSeason = extractSeasonNumber(variant);
+            const decodedVariant = decodeHtmlEntities(variant);
+            const targetSeason = extractSeasonNumber(decodedVariant);
             if (targetSeason !== resultSeason) {
               continue;
             }
 
-            const targetClean = cleanStr(variant);
-            const targetSorted = sortWords(variant);
-            const targetCore = getCoreTitle(variant);
+            const targetClean = cleanStr(decodedVariant);
+            const targetSorted = sortWords(decodedVariant);
+            const targetCore = getCoreTitle(decodedVariant);
 
             // 1. Direct exact clean match
             if (textClean === targetClean) {
@@ -218,6 +232,34 @@ export class AnimeSugeScraperService {
               if (score > coreMatchScore) {
                 coreMatch = link.href;
                 coreMatchScore = score;
+              }
+            }
+
+            // 4. Token overlap match (e.g. "Koutetsujou no Kabaneri Soushuuhen Zenpen" vs "Koutetsujou no Kabaneri Movie 1")
+            if (!exactMatch && !reorderMatch && !coreMatch) {
+              const getTokens = (s) =>
+                s.toLowerCase()
+                 .replace(/[^a-z0-9\s]/g, "")
+                 .split(/\s+/)
+                 .filter(Boolean);
+              
+              const tokens1 = getTokens(decodedVariant);
+              const tokens2 = getTokens(decodedText);
+              
+              if (tokens1.length > 0 && tokens2.length > 0) {
+                const set2 = new Set(tokens2);
+                const intersection = tokens1.filter(t => set2.has(t));
+                const maxLen = Math.max(tokens1.length, tokens2.length);
+                const overlapScore = intersection.length / maxLen;
+                
+                // If overlap score is high (>= 0.65), count as a match!
+                if (overlapScore >= 0.65) {
+                  console.log(`🎯 TOKEN OVERLAP match with variant "${variant}": "${link.text}" -> ${link.href} (score: ${overlapScore.toFixed(2)})`);
+                  if (overlapScore > coreMatchScore) {
+                    coreMatch = link.href;
+                    coreMatchScore = overlapScore;
+                  }
+                }
               }
             }
           }
@@ -282,7 +324,7 @@ export class AnimeSugeScraperService {
    */
   static async scrapeAnimeEpisode(inputUrl, episodeNumber = 1, options = {}) {
     const { timeout = 40000, retries = 2 } = options;
-    const requestedLang = options.lang === "dub" ? "dub" : "sub";
+    const requestedLang = options.lang ? (options.lang === "dub" ? "dub" : "sub") : "all";
 
     console.log(
       `🎬 AnimeSuge scrape: "${inputUrl}" ep ${episodeNumber} [${requestedLang}]`
@@ -391,6 +433,7 @@ export class AnimeSugeScraperService {
           const rowLang = cleanType.includes("dub") ? "dub" : "sub";
 
           const isTargetLang =
+            requestedLang === "all" ||
             (requestedLang === "dub" && rowLang === "dub") ||
             (requestedLang === "sub" && rowLang === "sub");
 
@@ -425,7 +468,7 @@ export class AnimeSugeScraperService {
               const [res] = await Promise.all([
                 page.waitForResponse(
                   (r) => r.url().includes("/ajax/server?get="),
-                  { timeout: 7000 }
+                  { timeout: 3500 }
                 ),
                 button.click(),
               ]);
@@ -457,7 +500,7 @@ export class AnimeSugeScraperService {
               s.startsWith("http")
           );
           if (valid.length > 0) {
-            sources.push({ label: "iframe-fallback", iframeUrl: valid[0], lang: requestedLang });
+            sources.push({ label: "iframe-fallback", iframeUrl: valid[0], lang: requestedLang === "all" ? "sub" : requestedLang });
             console.log(`⚠️ Using iframe fallback: ${valid[0]}`);
           }
         }
@@ -466,7 +509,7 @@ export class AnimeSugeScraperService {
         for (const url of capturedUrlsQueue) {
           if (!seenUrls.has(url)) {
             seenUrls.add(url);
-            sources.push({ label: "auto-captured", iframeUrl: url, lang: requestedLang });
+            sources.push({ label: "auto-captured", iframeUrl: url, lang: requestedLang === "all" ? "sub" : requestedLang });
             console.log(`  🎣 Auto-captured AJAX server URL: ${url}`);
           }
         }
@@ -490,7 +533,7 @@ export class AnimeSugeScraperService {
             sources,
             sourceCount: sources.length,
             episodeNumber,
-            lang: requestedLang,
+            lang: requestedLang === "all" ? "sub" : requestedLang,
           },
         };
       } catch (error) {

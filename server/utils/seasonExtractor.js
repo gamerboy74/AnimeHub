@@ -7,7 +7,7 @@
 
 export function extractSeasonNumber(title) {
   if (!title) return 1;
-  
+
   // 1. Normalize and clean the title by removing common trailing metadata / suffixes
   let clean = title.toLowerCase()
     .replace(/\b(?:dub|sub|uncensored|uncut|tv|dual[- ]audio|uncut)\b/g, " ")

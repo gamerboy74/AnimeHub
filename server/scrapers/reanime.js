@@ -1,5 +1,9 @@
 import { getBrowser } from "../index.js";
 import { extractSeasonNumber } from "../utils/seasonExtractor.js";
+import fs from "fs";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
+import { chromium } from "playwright-extra";
 
 export function getCoreTitle(title) {
   if (!title) return "";
@@ -107,18 +111,71 @@ export class ReAnimeScraperService {
       await page.goto(this.BASE_URL, { waitUntil: "domcontentloaded", timeout: 30000 });
       await page.waitForTimeout(3000); // Wait for Cloudflare/Turnstile
 
-      // Find search input using various selectors
-      let searchInput = await page.$('input[placeholder*="Search" i], input[type="search"], input[name="search"]');
-      if (!searchInput) {
-        searchInput = await page.$('input[type="text"]');
+      // Check for Cloudflare Turnstile block
+      let pageTitle = await page.title().catch(() => "");
+      let hasTurnstile = (await page.$('iframe[src*="challenges.cloudflare.com"]').catch(() => null)) || 
+                            (await page.$('[name="cf-turnstile-response"]').catch(() => null)) ||
+                            pageTitle.includes("Just a moment...");
+      if (hasTurnstile) {
+        console.log("⚠️ Cloudflare challenge detected on search/home page — waiting 12s for auto-resolve...");
+        await page.waitForTimeout(12000);
+        
+        // Re-check
+        pageTitle = await page.title().catch(() => "");
+        const stillBlocked = (await page.$('iframe[src*="challenges.cloudflare.com"]').catch(() => null)) || 
+                             (await page.$('[name="cf-turnstile-response"]').catch(() => null)) ||
+                             pageTitle.includes("Just a moment...");
+        if (stillBlocked) {
+          throw new Error("Cloudflare Turnstile challenge active on search/home page — manual solve required");
+        } else {
+          console.log("🎉 Cloudflare challenge auto-resolved on search/home page!");
+        }
       }
 
+      // Find search input using robust waiting and multiple selector fallbacks
+      let searchInput = null;
+      try {
+        searchInput = await page.waitForSelector('input[placeholder*="Search" i], input[type="search"], input[name="search"]', { timeout: 8000 });
+      } catch (e) {
+        try {
+          searchInput = await page.waitForSelector('input[type="text"]', { timeout: 4000 });
+        } catch (e2) {
+          // If direct input not found, try finding the search icon/button to toggle the input visibility
+          console.log("🔍 Search input not immediately visible, looking for toggle button...");
+          const searchIcon = await page.$('.search-btn, .search-icon, button:has-text("Search"), [class*="search"]');
+          if (searchIcon) {
+            await searchIcon.click();
+            await page.waitForTimeout(1500);
+            try {
+              searchInput = await page.waitForSelector('input[placeholder*="Search" i], input[type="search"], input[type="text"]', { timeout: 5000 });
+            } catch (e3) {}
+          }
+        }
+      }
+
+      // Ultimate Fallback: Iterate all <input> elements on the page and match keyword attributes
       if (!searchInput) {
-        const searchIcon = await page.$('.search-btn, .search-icon, button:has-text("Search"), [class*="search"]');
-        if (searchIcon) {
-          await searchIcon.click();
-          await page.waitForTimeout(1000);
-          searchInput = await page.$('input[placeholder*="Search" i], input[type="search"], input[type="text"]');
+        console.log("🔍 Running ultimate search input scanner fallback...");
+        const inputs = await page.$$('input');
+        for (const input of inputs) {
+          const placeholder = await input.getAttribute('placeholder').catch(() => '') || '';
+          const type = await input.getAttribute('type').catch(() => '') || '';
+          const id = await input.getAttribute('id').catch(() => '') || '';
+          const name = await input.getAttribute('name').catch(() => '') || '';
+          const className = await input.getAttribute('class').catch(() => '') || '';
+          
+          if (
+            placeholder.toLowerCase().includes('search') ||
+            id.toLowerCase().includes('search') ||
+            name.toLowerCase().includes('search') ||
+            className.toLowerCase().includes('search') ||
+            type === 'search' ||
+            type === 'text'
+          ) {
+            searchInput = input;
+            console.log(`🎯 Ultimate Fallback matched input: name="${name}" placeholder="${placeholder}" type="${type}"`);
+            break;
+          }
         }
       }
 
@@ -236,11 +293,72 @@ export class ReAnimeScraperService {
     return watchUrlObj.toString();
   }
 
+  static async launchManualBypass() {
+    console.log("\n⚠️ Headless Cloudflare bypass failed. Launching headful verification browser...");
+    console.log("🚨 A Chrome window will open on your desktop. Please solve the CAPTCHA there!");
+    
+    let browser;
+    try {
+      browser = await chromium.launch({
+        headless: false,
+        channel: "chrome",
+        args: ["--no-sandbox", "--disable-setuid-sandbox"]
+      });
+      
+      const context = await browser.newContext({
+        viewport: { width: 1280, height: 720 },
+        userAgent: this.USER_AGENT
+      });
+      
+      const page = await context.newPage();
+      await page.goto(this.BASE_URL, { waitUntil: "domcontentloaded", timeout: 45000 });
+      
+      // Poll and check if Turnstile is solved
+      let solved = false;
+      for (let i = 0; i < 30; i++) {
+        await page.waitForTimeout(2000);
+        const title = await page.title().catch(() => "");
+        const hasTurnstile = (await page.$('iframe[src*="challenges.cloudflare.com"]').catch(() => null)) || 
+                             (await page.$('[name="cf-turnstile-response"]').catch(() => null)) ||
+                             title.includes("Just a moment...");
+        
+        if (!hasTurnstile && title && !title.includes("Just a moment...")) {
+          console.log(`\n🎉 Turnstile solved! Current Title: "${title}"`);
+          solved = true;
+          break;
+        }
+        process.stdout.write(".");
+      }
+      
+      if (solved) {
+        const userAgent = await page.evaluate(() => navigator.userAgent);
+        const storageState = await context.storageState();
+        const statePath = join(dirname(fileURLToPath(import.meta.url)), "..", "cf-state.json");
+        
+        fs.writeFileSync(statePath, JSON.stringify({ userAgent, storageState }, null, 2));
+        console.log(`💾 Successfully saved cookies and User-Agent to cf-state.json`);
+        return true;
+      } else {
+        console.log("\n❌ Timeout waiting for manual verification solve.");
+        return false;
+      }
+      
+    } catch (e) {
+      console.error("❌ Failed to run manual bypass browser:", e.message);
+      return false;
+    } finally {
+      if (browser) {
+        await browser.close().catch(() => {});
+      }
+    }
+  }
+
   static async scrapeAnimeEpisode(inputUrl, episodeNumber = 1, options = {}) {
     const { timeout = 30000, retries = 2 } = options;
+    const requestedLang = options.lang ? (options.lang === "dub" ? "dub" : "sub") : "all";
 
     console.log(
-      `🎬 Scraping Re:ANIME for "${inputUrl}" (episode ${episodeNumber})...`
+      `🎬 Scraping Re:ANIME for "${inputUrl}" (episode ${episodeNumber}) [${requestedLang}]...`
     );
 
     let lastError = null;
@@ -255,8 +373,31 @@ export class ReAnimeScraperService {
           throw new Error("Failed to initialize browser");
         }
 
+        const statePath = join(dirname(fileURLToPath(import.meta.url)), "..", "cf-state.json");
+        const hasState = fs.existsSync(statePath);
+        let loadedState = undefined;
+        let activeUserAgent = this.USER_AGENT;
+
+        if (hasState) {
+          try {
+            const raw = fs.readFileSync(statePath, "utf-8");
+            const parsed = JSON.parse(raw);
+            if (parsed.storageState && parsed.userAgent) {
+              console.log("💾 Loading combined Cloudflare clearance session and matching User-Agent...");
+              loadedState = parsed.storageState;
+              activeUserAgent = parsed.userAgent;
+            } else if (parsed.cookies || parsed.origins) {
+              console.log("💾 Loading standard Playwright storageState from cf-state.json");
+              loadedState = parsed;
+            }
+          } catch (e) {
+            console.error("⚠️ Failed to parse cf-state.json:", e.message);
+          }
+        }
+
         context = await browser.newContext({
-          userAgent: this.USER_AGENT,
+          storageState: loadedState,
+          userAgent: activeUserAgent,
           viewport: { width: 1280, height: 720 },
           bypassCSP: true,
           javaScriptEnabled: true,
@@ -292,10 +433,43 @@ export class ReAnimeScraperService {
 
         await page.waitForTimeout(4000);
 
+        // Check for Cloudflare Turnstile block on watch page
+        let watchPageTitle = await page.title().catch(() => "");
+        let watchHasTurnstile = (await page.$('iframe[src*="challenges.cloudflare.com"]').catch(() => null)) || 
+                                  (await page.$('[name="cf-turnstile-response"]').catch(() => null)) ||
+                                  watchPageTitle.includes("Just a moment...");
+        if (watchHasTurnstile) {
+          console.log("⚠️ Cloudflare challenge detected on watch page — waiting 12s for auto-resolve...");
+          await page.waitForTimeout(12000);
+          
+          // Re-check
+          watchPageTitle = await page.title().catch(() => "");
+          const stillBlocked = (await page.$('iframe[src*="challenges.cloudflare.com"]').catch(() => null)) || 
+                               (await page.$('[name="cf-turnstile-response"]').catch(() => null)) ||
+                               watchPageTitle.includes("Just a moment...");
+          if (stillBlocked) {
+            throw new Error("Cloudflare Turnstile challenge active on watch page — manual solve required");
+          } else {
+            console.log("🎉 Cloudflare challenge auto-resolved on watch page!");
+          }
+        }
+
         // Verify that the page URL actually matches the requested episode!
         const finalUrl = page.url();
         if (!verifyEpisodeNumberInUrl(finalUrl, episodeNumber)) {
           throw new Error(`Re:ANIME redirected from ${watchUrl} to ${finalUrl}. Episode ${episodeNumber} is likely not available yet.`);
+        }
+
+        // Check if the page displays a "No streaming servers available" notification
+        const noServersAvailable = await page.evaluate(() => {
+          const bodyText = document.body.innerText;
+          return bodyText.includes("No streaming servers available") || 
+                 bodyText.includes("doesn't have any server yet") ||
+                 bodyText.includes("This episode doesn't have any server yet");
+        });
+
+        if (noServersAvailable) {
+          throw new Error("No streaming servers are available for this episode on Re:ANIME.");
         }
 
         try {
@@ -329,72 +503,101 @@ export class ReAnimeScraperService {
         };
 
         // Isolate scope to the requested language container (SUB or DUB)
-        const requestedLang = options.lang === "dub" ? "dub" : "sub";
-        const langLabel = requestedLang === "dub" ? "DUB" : "SUB";
-        let targetScope = page;
-        let scopeIsolated = false;
-        
-        try {
-          const span = page.locator('span').filter({ hasText: new RegExp(`^\\s*${langLabel}\\s*:?\\s*$`, 'i') }).filter({ visible: true }).first();
-          const hasSpan = await span.count() > 0;
-          if (hasSpan) {
-            targetScope = span.locator('..');
-            scopeIsolated = true;
-            console.log(`🎯 Isolated Re:ANIME scraper scope to visible ${langLabel} container`);
-          } else {
-            console.warn(`⚠️ Could not find visible ${langLabel} span — falling back to full page. Lang may be inaccurate.`);
+        const languagesToScrape = requestedLang === "all" ? ["sub", "dub"] : [requestedLang];
+
+        for (const lang of languagesToScrape) {
+          const langLabel = lang === "dub" ? "DUB" : "SUB";
+          let targetScope = page;
+          let scopeIsolated = false;
+          
+          try {
+            const span = page.locator('span').filter({ hasText: new RegExp(`^\\s*${langLabel}\\s*:?\\s*$`, 'i') }).filter({ visible: true }).first();
+            const hasSpan = await span.count() > 0;
+            if (hasSpan) {
+              targetScope = span.locator('..');
+              scopeIsolated = true;
+              console.log(`🎯 Isolated Re:ANIME scraper scope to visible ${langLabel} container`);
+            } else {
+              console.warn(`⚠️ Could not find visible ${langLabel} span — falling back to full page. Lang may be inaccurate.`);
+            }
+          } catch (e) {
+            console.warn("⚠️ Failed to isolate Re:ANIME container scope, falling back to full page search:", e.message);
           }
-        } catch (e) {
-          console.warn("⚠️ Failed to isolate Re:ANIME container scope, falling back to full page search:", e.message);
-        }
 
-        // Use the requested lang for all sources captured in this run
-        const capturedLang = requestedLang;
+          for (const label of ["HD-2", "HD-1"]) {
+            const buttonCount = await targetScope.getByRole("button", { name: label }).count().catch(() => 0);
 
-        for (const label of ["HD-2", "HD-1"]) {
-          const buttonCount = await targetScope.getByRole("button", { name: label }).count().catch(() => 0);
-
-          for (let index = 0; index < buttonCount; index++) {
-            try {
-              await targetScope.getByRole("button", { name: label }).nth(index).click({
-                timeout: 5000,
-              });
-              await page.waitForTimeout(2500);
-
-              const iframeUrl = await page
-                .locator("iframe")
-                .first()
-                .getAttribute("src")
-                .catch(() => null);
-
-              if (iframeUrl && !seen.has(normUrl(iframeUrl))) {
-                seen.add(normUrl(iframeUrl));
-                sources.push({
-                  label,
-                  occurrence: index,
-                  iframeUrl,
-                  lang: capturedLang,
-                  scopeIsolated,
+            for (let index = 0; index < buttonCount; index++) {
+              try {
+                await targetScope.getByRole("button", { name: label }).nth(index).click({
+                  timeout: 5000,
                 });
+                await page.waitForTimeout(2500);
+
+                const iframeUrl = await page
+                  .locator("iframe")
+                  .first()
+                  .getAttribute("src")
+                  .catch(() => null);
+
+                if (iframeUrl && !seen.has(normUrl(iframeUrl))) {
+                  seen.add(normUrl(iframeUrl));
+                  sources.push({
+                    label,
+                    occurrence: index,
+                    iframeUrl,
+                    lang,
+                    scopeIsolated,
+                  });
+                  console.log(`  ✨ Re:ANIME found server [${langLabel} - ${label}]: ${iframeUrl}`);
+                }
+              } catch (clickError) {
+                console.warn(
+                  `⚠️ Failed to click Re:ANIME button ${label} #${index}`,
+                  clickError.message
+                );
               }
-            } catch (clickError) {
-              console.warn(
-                `⚠️ Failed to click Re:ANIME button ${label} #${index}`,
-                clickError.message
-              );
             }
           }
         }
 
         // Fallback: If no sources were extracted via clicking, use the initial active iframe URL
-        if (sources.length === 0 && fallbackUrl) {
+        const isValidPlayerUrl = (url) => {
+          if (!url) return false;
+          const u = url.toLowerCase();
+          if (u.includes("about:blank") || u.includes("disqus") || u.includes("discord") || u.includes("google") || u.includes("ads") || u.includes("doubleclick")) {
+            return false;
+          }
+          return u.includes("embed") || u.includes("player") || u.includes("flix") || u.includes("reanime.to") || u.includes("vidsrc") || u.includes("vidplay") || u.includes("megaembed") || u.includes("filemoon");
+        };
+
+        if (sources.length === 0 && fallbackUrl && isValidPlayerUrl(fallbackUrl)) {
           sources.push({
             label: "active",
             occurrence: 0,
             iframeUrl: fallbackUrl,
-            lang: capturedLang,
-            scopeIsolated,
+            lang: requestedLang === "all" ? "sub" : requestedLang,
+            scopeIsolated: false,
           });
+        }
+
+        if (sources.length === 0) {
+          throw new Error("No video player sources could be resolved for this episode on Re:ANIME.");
+        }
+
+        // Save storage state on successful extraction
+        if (sources.length > 0) {
+          try {
+            const storageState = await context.storageState();
+            const combined = {
+              userAgent: activeUserAgent,
+              storageState
+            };
+            fs.writeFileSync(statePath, JSON.stringify(combined, null, 2));
+            console.log("💾 Successfully saved persistent Cloudflare clearance session and User-Agent to cf-state.json");
+          } catch (e) {
+            console.warn("⚠️ Failed to save Cloudflare clearance state:", e.message);
+          }
         }
 
         await context.close();
@@ -410,6 +613,7 @@ export class ReAnimeScraperService {
             sources,
             sourceCount: sources.length,
             episodeNumber,
+            lang: requestedLang === "all" ? "sub" : requestedLang,
           },
         };
       } catch (error) {
@@ -418,6 +622,22 @@ export class ReAnimeScraperService {
 
         if (context) {
           await context.close().catch(() => {});
+        }
+
+        if (error.message.toLowerCase().includes("manual solve required")) {
+          console.log("🛑 Headless Turnstile challenge block — triggering automatic headful bypass...");
+          const success = await ReAnimeScraperService.launchManualBypass();
+          if (success) {
+            console.log("🚀 Manual bypass successful! Retrying scrape with active clearance cookies...");
+            continue; // Continue to the next attempt in the loop!
+          } else {
+            break; // Manual bypass failed or timed out, exit the loop
+          }
+        }
+
+        if (error.message.toLowerCase().includes("cloudflare turnstile")) {
+          console.log("🛑 Re:ANIME Turnstile block detected — skipping retries to save CPU.");
+          break; // Exit the attempt loop immediately!
         }
 
         if (attempt < retries) {

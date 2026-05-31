@@ -4,9 +4,9 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 
 // Check if Supabase is properly configured
-const hasValidConfig = supabaseUrl && 
-  supabaseAnonKey && 
-  supabaseUrl !== 'your-supabase-url' && 
+const hasValidConfig = supabaseUrl &&
+  supabaseAnonKey &&
+  supabaseUrl !== 'your-supabase-url' &&
   supabaseAnonKey !== 'your-supabase-anon-key' &&
   supabaseUrl.startsWith('https://') &&
   supabaseUrl.includes('.supabase.co')
@@ -14,21 +14,21 @@ const hasValidConfig = supabaseUrl &&
 export const isSupabaseConfigured = hasValidConfig
 
 // Create Supabase client
-export const supabase = hasValidConfig 
+export const supabase = hasValidConfig
   ? createClient(supabaseUrl, supabaseAnonKey, {
-      auth: {
-        persistSession: true,
-        autoRefreshToken: true,
-        detectSessionInUrl: true
-      }
-    })
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true
+    }
+  })
   : createClient('https://placeholder.supabase.co', 'placeholder-key', {
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-        detectSessionInUrl: false
-      }
-    })
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false
+    }
+  })
 
 // Log configuration status
 if (!hasValidConfig) {

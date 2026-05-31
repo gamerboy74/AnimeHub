@@ -42,7 +42,13 @@ export async function getBrowser() {
       ],
     };
 
-    if (process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH) {
+    if (process.env.PLAYWRIGHT_CHROMIUM_CHANNEL) {
+      launchOptions.channel = process.env.PLAYWRIGHT_CHROMIUM_CHANNEL;
+      console.log(`Using browser channel: ${launchOptions.channel}`);
+    } else if (process.platform === "win32") {
+      launchOptions.channel = "chrome";
+      console.log("Using system Google Chrome channel for maximum trust");
+    } else if (process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH) {
       launchOptions.executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
       console.log(`Using Chromium at: ${launchOptions.executablePath}`);
     } else if (process.platform === "linux") {

@@ -55,7 +55,8 @@ export {
 import { enqueue, getBrowser, closeBrowser } from "./services/queue.js";
 export { enqueue, getBrowser, closeBrowser };
 
-import { episodeScheduler, newAnimeScheduler } from "./scheduler.js";
+import { productionScheduler } from "./services/production-scheduler.js";
+import { connectRedis, disconnectRedis } from "./services/bull-queue.js";
 
 // Import modular routes
 import resolverRouter from "./routes/resolver.js";
@@ -158,29 +159,36 @@ app.use(errorHandler);
 // 404 handler (must be last)
 app.use(notFoundHandler);
 
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, async () => {
   console.log(`🚀 AnimeHub Server booting as a standalone bootstrapper on port ${PORT}`);
   console.log(`📡 Health check: http://localhost:${PORT}/health`);
   console.log(`🎬 Scrapers, Resolver, Anime, and Admin routers successfully mounted!`);
 
-  // Start the schedulers
-  episodeScheduler.start();
-  newAnimeScheduler.start();
+  // Connect to Redis and start the production scheduler
+  try {
+    await connectRedis();
+    await productionScheduler.start();
+  } catch (err) {
+    console.error('❌ Failed to initialize production scheduler:', err.message);
+  }
 });
 
 // Graceful Shutdown Handler
 async function gracefulShutdown(signal) {
   console.log(`\n⚠️  ${signal} received. Initiating graceful shutdown...`);
 
-  // 1. Stop schedulers
-  console.log("⏱️ Stopping schedulers...");
-  episodeScheduler.stop();
-  newAnimeScheduler.stop();
+  // 1. Stop scheduler
+  console.log("⏱️ Stopping scheduler...");
+  await productionScheduler.stop();
 
-  // 2. Close Playwright browser instance
+  // 2. Disconnect Redis
+  console.log("🔴 Disconnecting Redis...");
+  await disconnectRedis();
+
+  // 3. Close Playwright browser instance
   await closeBrowser();
 
-  // 3. Stop Express HTTP server
+  // 4. Stop Express HTTP server
   console.log("🕸️ Closing HTTP server connections...");
   server.close(() => {
     console.log("✅ HTTP server closed. Process exiting.");

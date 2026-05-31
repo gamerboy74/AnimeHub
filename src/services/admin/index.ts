@@ -774,7 +774,7 @@ export class AdminService {
       const searchTerm = filters?.search?.trim()
 
       const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Request timeout')), 8000)
+        setTimeout(() => reject(new Error('Request timeout')), 15000)
       )
 
       let countQuery = supabase
@@ -812,7 +812,7 @@ export class AdminService {
         .from('anime')
         .select(`
           *,
-          episodes:episodes(id, title, episode_number, duration, video_url, created_at),
+          episodes:episodes(id),
           reviews:reviews(id, rating, created_at)
         `)
 
@@ -851,17 +851,20 @@ export class AdminService {
       const animeIds = anime?.map((item: any) => item.id) || []
       const allEpisodeIds = anime?.flatMap((item: any) => item.episodes?.map((ep: any) => ep.id) || []) || []
 
-      // 1. Bulk query unique viewers in a single query
+      // 1. Bulk query unique viewers in a single query (with aggressive 3s timeout safety fallback)
       const viewersByEpisode: Record<string, string[]> = {}
       if (allEpisodeIds.length > 0) {
         try {
+          const viewerTimeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Viewer stats timeout')), 3000)
+          )
           const { data: viewers } = await Promise.race([
             supabase
               .from('user_watch_progress_detailed')
               .select('user_id, episode_id')
               .in('episode_id', allEpisodeIds)
               .not('user_id', 'is', null),
-            timeoutPromise
+            viewerTimeoutPromise
           ]) as any
 
           viewers?.forEach((v: any) => {
@@ -871,7 +874,7 @@ export class AdminService {
             viewersByEpisode[v.episode_id].push(v.user_id)
           })
         } catch (viewerErr) {
-          console.error('Error fetching watch progress bulk data:', viewerErr)
+          console.warn('⚠️ Skipped unique viewers stats fetch (took >3s or timed out):', viewerErr instanceof Error ? viewerErr.message : viewerErr)
         }
       }
 

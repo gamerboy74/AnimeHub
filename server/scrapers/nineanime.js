@@ -571,87 +571,87 @@ export class NineAnimeScraperService {
             } else {
               // If the DB has a slug, prefer a season-specific slug when the requested title includes a season
               const baseSlug = animeRecord.nine_anime_slug;
-            // Determine season from provided title, if any
-            const seasonMatch = animeTitle ? animeTitle.match(/season\s*(\d+)/i) : null;
-            if (seasonMatch) {
-              const seasonNum = seasonMatch[1];
-              const seasonSlug = `${baseSlug}-season-${seasonNum}`;
-              const seasonUrl = `${this.BASE_URL}/${seasonSlug}-episode-${episodeNumber}/`;
-              console.log(`🔗 Testing cached season-specific slug: ${seasonUrl}`);
+              // Determine season from provided title, if any
+              const seasonMatch = animeTitle ? animeTitle.match(/season\s*(\d+)/i) : null;
+              if (seasonMatch) {
+                const seasonNum = seasonMatch[1];
+                const seasonSlug = `${baseSlug}-season-${seasonNum}`;
+                const seasonUrl = `${this.BASE_URL}/${seasonSlug}-episode-${episodeNumber}/`;
+                console.log(`🔗 Testing cached season-specific slug: ${seasonUrl}`);
+                try {
+                  const seasonResp = await axios.get(seasonUrl, {
+                    headers: { "User-Agent": this.USER_AGENT },
+                    timeout: 5000,
+                    validateStatus: (s) => s < 500,
+                  });
+                  if (seasonResp.status === 200) {
+                    // Verify page title similarity before accepting
+                    const pageTitle = this.extractPageTitle(seasonResp.data);
+                    const similarity = this.titleSimilarity(animeTitle, pageTitle);
+                    if (similarity >= 0.6) {
+                      console.log(`✅ Using season-specific cached slug (similarity: ${similarity.toFixed(2)}): ${seasonUrl}`);
+                      // Save the verified season slug back to DB
+                      await this.saveVerifiedSlug(dbAnimeId, seasonSlug);
+                      const result = { success: true, animeLink: seasonUrl, animeId: seasonSlug };
+                      try { await cacheSet(`search:${animeTitle}:${episodeNumber}`, result, 300_000); } catch { }
+                      return result;
+                    } else {
+                      console.log(`⚠️ Season-specific slug page exists but title mismatch (similarity: ${similarity.toFixed(2)})`);
+                    }
+                  }
+                } catch (e) {
+                  // ignore and fall back to base slug
+                }
+              }
+
+              const slugUrl = `${this.BASE_URL}/${baseSlug}-episode-${episodeNumber}/`;
+              console.log(`🔗 Using cached 9anime slug: ${slugUrl}`);
               try {
-                const seasonResp = await axios.get(seasonUrl, {
+                const testResp = await axios.get(slugUrl, {
                   headers: { "User-Agent": this.USER_AGENT },
                   timeout: 5000,
                   validateStatus: (s) => s < 500,
                 });
-                if (seasonResp.status === 200) {
-                  // Verify page title similarity before accepting
-                  const pageTitle = this.extractPageTitle(seasonResp.data);
+                if (testResp.status === 200) {
+                  // Verify page title matches before trusting the cached slug
+                  const pageTitle = this.extractPageTitle(testResp.data);
                   const similarity = this.titleSimilarity(animeTitle, pageTitle);
                   if (similarity >= 0.6) {
-                    console.log(`✅ Using season-specific cached slug (similarity: ${similarity.toFixed(2)}): ${seasonUrl}`);
-                    // Save the verified season slug back to DB
-                    await this.saveVerifiedSlug(dbAnimeId, seasonSlug);
-                    const result = { success: true, animeLink: seasonUrl, animeId: seasonSlug };
+                    const result = { success: true, animeLink: slugUrl, animeId: baseSlug };
                     try { await cacheSet(`search:${animeTitle}:${episodeNumber}`, result, 300_000); } catch { }
                     return result;
                   } else {
-                    console.log(`⚠️ Season-specific slug page exists but title mismatch (similarity: ${similarity.toFixed(2)})`);
+                    console.log(`⚠️ Cached slug page title mismatch (similarity: ${similarity.toFixed(2)}): page="${pageTitle}" vs expected="${animeTitle}" — re-resolving...`);
+                    // Fall through to re-resolve
                   }
                 }
-              } catch (e) {
-                // ignore and fall back to base slug
-              }
-            }
-
-            const slugUrl = `${this.BASE_URL}/${baseSlug}-episode-${episodeNumber}/`;
-            console.log(`🔗 Using cached 9anime slug: ${slugUrl}`);
-            try {
-              const testResp = await axios.get(slugUrl, {
-                headers: { "User-Agent": this.USER_AGENT },
-                timeout: 5000,
-                validateStatus: (s) => s < 500,
-              });
-              if (testResp.status === 200) {
-                // Verify page title matches before trusting the cached slug
-                const pageTitle = this.extractPageTitle(testResp.data);
-                const similarity = this.titleSimilarity(animeTitle, pageTitle);
-                if (similarity >= 0.6) {
-                  const result = { success: true, animeLink: slugUrl, animeId: baseSlug };
-                  try { await cacheSet(`search:${animeTitle}:${episodeNumber}`, result, 300_000); } catch { }
-                  return result;
-                } else {
-                  console.log(`⚠️ Cached slug page title mismatch (similarity: ${similarity.toFixed(2)}): page="${pageTitle}" vs expected="${animeTitle}" — re-resolving...`);
-                  // Fall through to re-resolve
-                }
-              }
-            } catch { }
-
-            // Episode URL didn't work — verify the slug itself is still valid via episode 1
-            if (episodeNumber > 1) {
-              try {
-                const ep1Url = `${this.BASE_URL}/${animeRecord.nine_anime_slug}-episode-1/`;
-                const ep1Resp = await axios.get(ep1Url, {
-                  headers: { "User-Agent": this.USER_AGENT },
-                  timeout: 5000,
-                  validateStatus: (s) => s < 500,
-                });
-                if (ep1Resp.status === 200) {
-                  // Slug is valid — this episode just isn't available yet
-                  console.log(`ℹ️ Slug "${animeRecord.nine_anime_slug}" is valid but episode ${episodeNumber} is not available yet on 9anime`);
-                  return {
-                    success: false,
-                    error: `Episode ${episodeNumber} not yet available on 9anime`,
-                    slugValid: true,
-                  };
-                }
               } catch { }
-            }
 
-            console.log("⚠️ Cached slug no longer works, re-resolving...");
+              // Episode URL didn't work — verify the slug itself is still valid via episode 1
+              if (episodeNumber > 1) {
+                try {
+                  const ep1Url = `${this.BASE_URL}/${animeRecord.nine_anime_slug}-episode-1/`;
+                  const ep1Resp = await axios.get(ep1Url, {
+                    headers: { "User-Agent": this.USER_AGENT },
+                    timeout: 5000,
+                    validateStatus: (s) => s < 500,
+                  });
+                  if (ep1Resp.status === 200) {
+                    // Slug is valid — this episode just isn't available yet
+                    console.log(`ℹ️ Slug "${animeRecord.nine_anime_slug}" is valid but episode ${episodeNumber} is not available yet on 9anime`);
+                    return {
+                      success: false,
+                      error: `Episode ${episodeNumber} not yet available on 9anime`,
+                      slugValid: true,
+                    };
+                  }
+                } catch { }
+              }
+
+              console.log("⚠️ Cached slug no longer works, re-resolving...");
+            }
           }
-        }
-      } catch (e) {
+        } catch (e) {
           console.log("⚠️ DB lookup for slug failed:", e.message);
         }
       }
@@ -746,6 +746,13 @@ export class NineAnimeScraperService {
           continue;
         }
 
+        // Don't accept a base-title entry when the original has a distinctive
+        // subtitle (e.g. reject "High School DxD" when looking for "High School DxD HERO").
+        if (this.hasMissingDistinctiveSubtitle(animeTitle, jikanTitle)) {
+          console.log(`⚠️ Skipping Jikan result "${jikanTitle}" — missing distinctive subtitle from "${animeTitle}"`);
+          continue;
+        }
+
         const slug = this.buildSlug(jikanTitle);
         if (!slug) continue;
 
@@ -764,6 +771,14 @@ export class NineAnimeScraperService {
             // blindly accepting "link-click-bridon-arc" because the URL returns 200.
             const pageTitle = this.extractPageTitle(testResponse.data);
             const similarity = this.titleSimilarity(animeTitle, pageTitle);
+
+            // Extra guard: if the original has a distinctive subtitle (e.g. "HERO"),
+            // the page title must also contain it — otherwise it's a different anime entry.
+            if (this.hasMissingDistinctiveSubtitle(animeTitle, pageTitle)) {
+              console.log(`⚠️ Jikan-resolved URL rejected — page title missing distinctive subtitle: page="${pageTitle}" vs expected="${animeTitle}"`);
+              continue;
+            }
+
             if (similarity >= 0.75) {
               console.log(`✅ Jikan-resolved URL verified (similarity: ${similarity.toFixed(2)}): ${directUrl}`);
               await this.saveVerifiedSlug(dbAnimeId, slug);
@@ -799,7 +814,7 @@ export class NineAnimeScraperService {
         try {
           await cacheSet(`notfound:nineanime:${dbAnimeId}`, true, 3600000);
           console.log(`    💾 NineAnime marked as not_found in-memory cache`);
-        } catch {}
+        } catch { }
       }
 
       return {
@@ -814,6 +829,55 @@ export class NineAnimeScraperService {
   // =========================================================================
   // HELPER: Build a URL slug from a title
   // =========================================================================
+  // =========================================================================
+  // HELPER: Detect distinctive subtitle words that identify a specific entry
+  // e.g. "High School DxD HERO" → ["hero"]
+  //      "Attack on Titan: The Final Season" → ["final"]
+  // These are ALL-CAPS or title-cased suffix words that are NOT stopwords and
+  // not already covered by the season/roman-numeral extractor.
+  // =========================================================================
+  static getDistinctiveSubtitleWords(title) {
+    if (!title) return new Set();
+
+    // Grab words that come AFTER the base show name — look for words that are
+    // fully uppercase (like HERO, NEW, BorN) or are otherwise not in our
+    // generic stopwords set AND appear only in the original title.
+    // Strategy: normalise, strip season patterns, split into words, keep those
+    // that are ≥ 2 chars and not in the similarity stopwords list.
+    const cleaned = title
+      .replace(/\b(?:season\s*\d+|s\d+|\d+(?:nd|rd|th|st)?\s*season)/gi, "")
+      .replace(/\b(?:I|II|III|IV|V|VI|VII|VIII|IX|X)\b\s*$/i, "")
+      .replace(/\b\d+\b\s*$/g, "")
+      .replace(/[^a-zA-Z0-9\s]/g, " ")
+      .trim();
+
+    const words = cleaned.toLowerCase().split(/\s+/).filter(
+      w => w.length >= 2 && !this.SIMILARITY_STOPWORDS.has(w)
+    );
+
+    return new Set(words);
+  }
+
+  // Returns true if resolvedTitle is MISSING a distinctive subtitle word that
+  // originalTitle has — meaning they are different anime entries.
+  static hasMissingDistinctiveSubtitle(originalTitle, resolvedTitle) {
+    const origWords = this.getDistinctiveSubtitleWords(originalTitle);
+    const resolvedWords = this.getDistinctiveSubtitleWords(resolvedTitle);
+
+    // Find words in original that are absent in resolved
+    for (const w of origWords) {
+      if (!resolvedWords.has(w)) {
+        // Only flag as "missing" when the resolved title is a strict *subset*
+        // (i.e. it has fewer distinctive words). This avoids false positives
+        // where the resolved title just uses a different phrasing.
+        if (resolvedWords.size < origWords.size) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   // Check if two titles refer to different seasons of the same show
   static hasDifferentSeason(originalTitle, resolvedTitle) {
     return extractSeasonNumber(originalTitle) !== extractSeasonNumber(resolvedTitle);
@@ -1059,7 +1123,7 @@ export class NineAnimeScraperService {
         // Check if at least one title in this Jikan entry is similar to the search query
         // Threshold 0.52: "Link Click: Bridon Arc" scores ~0.476 vs "Link Click"
         // so raising above 0.476 prevents sequel titles from polluting Jikan variants.
-        const hasMatchingTitle = allEntryTitles.some(t => 
+        const hasMatchingTitle = allEntryTitles.some(t =>
           t && this.titleSimilarity(animeTitle, t) >= 0.52
         );
 
@@ -1480,7 +1544,7 @@ export class NineAnimeScraperService {
       await page.addInitScript(() => {
         try {
           window.open = () => null;
-        } catch (e) {}
+        } catch (e) { }
       });
 
       let foundHls = null;
@@ -1817,7 +1881,7 @@ export class NineAnimeScraperService {
       await page.addInitScript(() => {
         try {
           window.open = () => null;
-        } catch (e) {}
+        } catch (e) { }
       });
 
       // Navigate to the anime page with minimal timeout

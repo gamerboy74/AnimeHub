@@ -6,7 +6,6 @@ import RecentActivity from './components/RecentActivity';
 import QuickActions from './components/QuickActions';
 import SystemHealth from './components/SystemHealth';
 import EpisodeScheduler from './components/EpisodeScheduler';
-import { SparkleLoadingSpinner } from '../../components/base/LoadingSpinner';
 import { useAdminStats, useRecentActivity, useSystemHealth } from '../../hooks/admin';
 import { sessionManager } from '../../utils/session/manager';
 import { usePerformanceMetrics } from '../../components/common/PerformanceMonitor';
@@ -16,9 +15,9 @@ export default function AdminDashboard() {
   const navigate = useNavigate();
   const refreshSession = sessionManager.forceRefresh;
   const isSessionValid = sessionManager.isSessionValid;
-  const { stats: adminStats, loading: statsLoading, error: statsError, refetch: refetchStats } = useAdminStats();
-  const { activities, loading: activitiesLoading, error: activitiesError, refetch: refetchActivities } = useRecentActivity();
-  const { health, loading: healthLoading, error: healthError, refetch: refetchHealth } = useSystemHealth();
+  const { stats: adminStats, refetch: refetchStats } = useAdminStats();
+  const { activities, refetch: refetchActivities } = useRecentActivity();
+  const { health, refetch: refetchHealth } = useSystemHealth();
   
   // Performance monitoring
   const webVitals = usePerformanceMetrics();
@@ -41,8 +40,6 @@ export default function AdminDashboard() {
     }
   };
 
-  // Show error if there are database issues
-  const hasErrors = statsError || activitiesError || healthError;
 
   const handleQuickAction = (action: string) => {
     switch (action) {
@@ -65,52 +62,7 @@ export default function AdminDashboard() {
     }
   };
 
-  const isLoading = statsLoading || activitiesLoading || healthLoading;
-
-  // Show error message if there are database issues
-  if (hasErrors && !isLoading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex items-center justify-center">
-        <div className="text-center max-w-md mx-auto p-6">
-          <i className="ri-error-warning-line text-6xl text-red-500 mb-4"></i>
-          <h2 className="text-2xl font-bold text-slate-800 mb-2">Database Connection Error</h2>
-          <p className="text-slate-600 mb-4">
-            The admin dashboard cannot load due to database policy issues.
-          </p>
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4 text-left">
-            <p className="text-sm text-red-700 font-medium mb-2">To fix this:</p>
-            <ol className="text-sm text-red-700 list-decimal list-inside space-y-1">
-              <li>Open your Supabase Dashboard</li>
-              <li>Go to SQL Editor</li>
-              <li>Copy the content from <code className="bg-red-100 px-1 rounded">comprehensive-fix.sql</code></li>
-              <li>Paste and run the script</li>
-              <li>Refresh this page</li>
-            </ol>
-          </div>
-          <button
-            onClick={handleRefresh}
-            className="px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-          >
-            Try Again
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // Add timeout to prevent infinite loading
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex items-center justify-center">
-        <div className="text-center">
-          <SparkleLoadingSpinner size="xl" text="Loading admin dashboard..." />
-          <p className="text-sm text-slate-500 mt-4">
-            Fetching latest data from database
-          </p>
-        </div>
-      </div>
-    );
-  }
+  // Don't block the whole page on loading — each section renders independently
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">

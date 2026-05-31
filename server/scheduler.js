@@ -269,10 +269,22 @@ export class EpisodeScheduler {
 
     const { data: existingEps } = await supabase
       .from('episodes')
-      .select('episode_number, video_url')
+      .select('episode_number, video_url, video_servers, created_at')
       .eq('anime_id', anime.id);
+
+    const minServers = parseInt(process.env.SCHEDULER_MIN_SERVERS || '2', 10);
+    const cooldownMs = 24 * 60 * 60 * 1000; // 24 hours cooldown
+    const nowMs = Date.now();
+
     const scrapedSet = new Set(
-      (existingEps || []).filter(e => e.video_url).map(e => e.episode_number)
+      (existingEps || [])
+        .filter(e => {
+          const serversCount = Array.isArray(e.video_servers) ? e.video_servers.length : 0;
+          const lastScrapedMs = e.created_at ? new Date(e.created_at).getTime() : 0;
+          const isCooldownActive = (nowMs - lastScrapedMs) < cooldownMs;
+          return e.video_url && (serversCount >= minServers || isCooldownActive);
+        })
+        .map(e => e.episode_number)
     );
 
     let ep = 1;
@@ -449,57 +461,7 @@ export class NewAnimeScheduler {
         }
       }
 
-      // 2. Discover and auto-import currently airing seasonal anime
-      try {
-        console.log('🔍 Fetching current season releases from Jikan...');
-        const seasonRes = await axios.get('https://api.jikan.moe/v4/seasons/now?filter=tv');
-        const seasonAnime = seasonRes.data?.data;
-        if (Array.isArray(seasonAnime)) {
-          const popularSeason = seasonAnime.filter(a => a.score >= this.minRating);
-          console.log(`🔍 Found ${popularSeason.length} popular seasonal TV anime (score >= ${this.minRating})`);
-          
-          for (const item of popularSeason) {
-            const { data: exist } = await supabase
-              .from('anime')
-              .select('id')
-              .eq('mal_id', item.mal_id)
-              .maybeSingle();
 
-            if (!exist) {
-              const genres = item.genres?.map(g => g.name) || [];
-              const studios = item.studios?.map(s => s.name) || [];
-              const posterUrl = item.images?.jpg?.large_image_url || item.images?.webp?.large_image_url || null;
-
-              const insertPayload = {
-                title: item.title_english || item.title,
-                title_english: item.title_english || null,
-                title_romaji: item.title,
-                title_japanese: item.title_japanese || null,
-                title_synonyms: item.title_synonyms || [],
-                mal_id: item.mal_id,
-                description: item.synopsis || null,
-                poster_url: posterUrl,
-                rating: item.score || null,
-                year: item.year || item.aired?.prop?.from?.year || new Date().getFullYear(),
-                status: 'ongoing',
-                type: 'TV',
-                genres,
-                studios,
-                total_episodes: item.episodes || null,
-                age_rating: item.rating || null,
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-              };
-
-              await supabase.from('anime').insert(insertPayload);
-              results.added++;
-              console.log(`✨ Auto-imported new season anime: "${insertPayload.title}" (MAL ID: ${item.mal_id}, Rating: ${item.score})`);
-            }
-          }
-        }
-      } catch (seasonErr) {
-        console.error('⚠️ Failed to fetch current season releases:', seasonErr.message);
-      }
 
     } catch (err) {
       console.error('❌ New Anime Sync Scheduler error:', err.message);

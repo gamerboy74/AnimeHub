@@ -1,8 +1,14 @@
 {
   "episodeScheduler": {
-    "lastRun": null,
-    "lastResults": null,
-    "scrapedThisHour": 50,
-    "rateLimitReset": 1780134713126
+    "lastRun": "2026-05-31T03:33:15.414Z",
+    "lastResults": {
+      "checked": 0,
+      "found": 0,
+      "failed": 0,
+      "skipped": 0,
+      "details": []
+    },
+    "scrapedThisHour": 47,
+    "rateLimitReset": 1780139420047
   }
 }
