@@ -9,8 +9,10 @@ import { SanjiAnimeScraperService } from "../scrapers/sanjianime.js";
 import { AnimeSugeScraperService } from "../scrapers/animesuge.js";
 import { CinevoScraperService } from "../scrapers/cinevo.js";
 import { mergeVideoServers } from "../scrapers/manager.js";
+import { requireAdmin } from "../middleware/auth.js";
 
 const router = express.Router();
+router.use(requireAdmin);
 
 // Single episode scraping endpoint
 router.post("/api/scrape-episode", async (req, res) => {

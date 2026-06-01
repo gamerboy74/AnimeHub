@@ -3,8 +3,10 @@
  * Route-level permission checks and navigation protection
  */
 
+import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
-import { useCurrentUser } from '../../hooks/auth/selectors';
+import { useCurrentUser, useAuthLoading } from '../../hooks/auth/selectors';
+import { useAuthContext } from '../../contexts/auth/AuthContext';
 import { useAdmin } from '../../hooks/admin';
 import { getRouteMetadata } from '../metadata';
 
@@ -17,10 +19,17 @@ export interface NavigationGuard {
 /**
  * Authentication guard - checks if user is authenticated
  */
-export function useAuthGuard(path: string): { canAccess: boolean; redirect?: JSX.Element } {
+export function useAuthGuard(path: string): { canAccess: boolean; redirect?: React.ReactElement } {
   const user = useCurrentUser();
+  const loading = useAuthLoading();
+  const { isInitialized } = useAuthContext();
   const metadata = getRouteMetadata(path);
   const location = useLocation();
+
+  if (loading || !isInitialized) {
+    // Still initializing auth session, hold off on redirection decisions
+    return { canAccess: true };
+  }
 
   if (metadata?.requiresAuth && !user) {
     // Store intended destination for redirect after login
@@ -37,7 +46,7 @@ export function useAuthGuard(path: string): { canAccess: boolean; redirect?: JSX
 /**
  * Admin guard - checks if user is admin
  */
-export function useAdminGuard(path: string): { canAccess: boolean; redirect?: JSX.Element } {
+export function useAdminGuard(path: string): { canAccess: boolean; redirect?: React.ReactElement } {
   const user = useCurrentUser();
   const { isAdmin, loading } = useAdmin();
   const metadata = getRouteMetadata(path);
@@ -61,7 +70,7 @@ export function useAdminGuard(path: string): { canAccess: boolean; redirect?: JS
 /**
  * Combined guard hook
  */
-export function useRouteGuard(path: string, params?: Record<string, string>) {
+export function useRouteGuard(path: string, _params?: Record<string, string>) {
   const authGuard = useAuthGuard(path);
   const adminGuard = useAdminGuard(path);
 

@@ -2,23 +2,60 @@ import express from "express";
 import { supabase } from "../config/supabase.js";
 import { scrapeAndSaveEpisode } from "../scrapers/manager.js";
 import { productionScheduler } from "../services/production-scheduler.js";
-import { episodeQueue } from "../services/bull-queue.js";
+import { episodeQueue, redisClient } from "../services/bull-queue.js";
 import stateManager from "../services/state-manager.js";
+import { getScraperConfigs, saveScraperConfigs } from "../utils/scraper-config.js";
+
+import { requireAdmin } from "../middleware/auth.js";
 
 const router = express.Router();
+router.use(requireAdmin);
 
 // ─── Production Scheduler API endpoints ───────────────────────────────────────────
 router.get('/api/scheduler/status', async (req, res) => {
   try {
+    if (!redisClient.isOpen) {
+      return res.json({
+        success: true,
+        enabled: productionScheduler.enabled,
+        running: false,
+        lastRun: null,
+        nextRun: null,
+        checkIntervalHours: 6,
+        maxConcurrent: 4,
+        rateLimit: 30,
+        scrapedThisHour: 0,
+        lastResults: null,
+        redisOffline: true,
+        queue: { waiting: 0, active: 0, completed: 0, failed: 0, delayed: 0, paused: 0, stats: {} }
+      });
+    }
     const status = await productionScheduler.getStatus();
     res.json({ success: true, ...status });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    console.warn('⚠️ Fallback status triggered:', err.message);
+    res.json({
+      success: true,
+      enabled: productionScheduler.enabled,
+      running: false,
+      lastRun: null,
+      nextRun: null,
+      checkIntervalHours: 6,
+      maxConcurrent: 4,
+      rateLimit: 30,
+      scrapedThisHour: 0,
+      lastResults: null,
+      redisOffline: true,
+      queue: { waiting: 0, active: 0, completed: 0, failed: 0, delayed: 0, paused: 0, stats: {} }
+    });
   }
 });
 
 router.post('/api/scheduler/run', async (req, res) => {
   try {
+    if (!redisClient.isOpen) {
+      return res.status(503).json({ success: false, error: 'Redis is offline. Cannot trigger scheduler queue.' });
+    }
     const isLocked = await stateManager.isLocked();
     if (isLocked) {
       return res.status(409).json({ success: false, error: 'Scheduler is already running' });
@@ -53,27 +90,118 @@ router.post('/api/scheduler/toggle', (req, res) => {
 
 router.get('/api/scheduler/queue/stats', async (req, res) => {
   try {
+    if (!redisClient.isOpen) {
+      return res.json({
+        success: true,
+        redisOffline: true,
+        queue: { waiting: 0, active: 0, completed: 0, failed: 0, delayed: 0, paused: 0 },
+        scrapers: {}
+      });
+    }
     const counts = await episodeQueue.getJobCounts();
     const stats = await stateManager.getAllScraperStats();
     res.json({ success: true, queue: counts, scrapers: stats });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    console.warn('⚠️ Fallback stats triggered:', err.message);
+    res.json({
+      success: true,
+      redisOffline: true,
+      queue: { waiting: 0, active: 0, completed: 0, failed: 0, delayed: 0, paused: 0 },
+      scrapers: {}
+    });
   }
 });
 
 router.get('/api/scheduler/rate-limit', async (req, res) => {
   try {
+    if (!redisClient.isOpen) {
+      return res.json({
+        success: true,
+        redisOffline: true,
+        used: 0,
+        limit: 30,
+        remaining: 30,
+        resetIn: 0
+      });
+    }
     const status = await stateManager.getRateLimitStatus(30);
     res.json({ success: true, ...status });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    res.json({
+      success: true,
+      redisOffline: true,
+      used: 0,
+      limit: 30,
+      remaining: 30,
+      resetIn: 0
+    });
   }
 });
 
 router.post('/api/scheduler/reset-rate-limit', async (req, res) => {
   try {
+    if (!redisClient.isOpen) {
+      return res.status(503).json({ success: false, error: 'Redis is offline. Cannot reset rate limit.' });
+    }
     await stateManager.resetRateLimit();
     res.json({ success: true, message: 'Rate limit reset' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.get('/api/scheduler/logs', async (req, res) => {
+  try {
+    if (!redisClient.isOpen) {
+      return res.json({
+        success: true,
+        redisOffline: true,
+        logs: [{ timestamp: new Date().toISOString(), level: 'warn', message: 'Queue system is offline (Redis server disconnected).' }]
+      });
+    }
+    const logs = await stateManager.getLogs();
+    res.json({ success: true, logs });
+  } catch (err) {
+    res.json({
+      success: true,
+      redisOffline: true,
+      logs: [{ timestamp: new Date().toISOString(), level: 'warn', message: 'Queue system is offline (Redis error).' }]
+    });
+  }
+});
+
+router.post('/api/scheduler/reset-metrics', async (req, res) => {
+  try {
+    if (!redisClient.isOpen) {
+      return res.status(503).json({ success: false, error: 'Redis is offline. Cannot reset metrics.' });
+    }
+    await stateManager.clearScraperStats();
+    await stateManager.clearLogs();
+    await stateManager.addLog('info', 'Pipeline metrics and system logs reset by admin.');
+    res.json({ success: true, message: 'Pipeline metrics reset successfully!' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Scrapers dynamic pipeline configuration
+router.get('/api/scheduler/scrapers', async (req, res) => {
+  try {
+    const configs = await getScraperConfigs();
+    res.json({ success: true, scrapers: configs });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.post('/api/scheduler/scrapers', async (req, res) => {
+  try {
+    const { scrapers } = req.body;
+    if (!scrapers) {
+      return res.status(400).json({ success: false, error: 'scrapers array required' });
+    }
+    const updated = await saveScraperConfigs(scrapers);
+    res.json({ success: true, scrapers: updated, message: 'Scrapers configuration saved successfully!' });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

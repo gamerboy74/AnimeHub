@@ -267,7 +267,7 @@ export class AnimeSugeScraperService {
           if (exactMatch) break;
         }
 
-        finalMatch = exactMatch || reorderMatch || coreMatch;
+        finalMatch = exactMatch || reorderMatch || (coreMatchScore >= 0.65 ? coreMatch : null);
         if (finalMatch) {
           return finalMatch;
         }

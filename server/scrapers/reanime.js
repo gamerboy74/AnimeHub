@@ -208,15 +208,29 @@ export class ReAnimeScraperService {
       let matchedLink = null;
       let bestScore = -1;
       for (const link of animeLinks) {
-        const resultSeason = extractSeasonNumber(inputUrl);
-        const resultSeasonNum = extractSeasonNumber(link.text);
+        // link.text contains noisy multi-line content (ratings, episode counts, etc.)
+        // Extract just the actual title: the last non-empty, non-numeric, non-type line
+        const rawLines = (link.text || '').split(/\n/).map(l => l.trim()).filter(Boolean);
+        const typeKeywords = new Set(['TV', 'MOVIE', 'ONA', 'OVA', 'SPECIAL', 'MUSIC']);
+        const titleLine = rawLines.reverse().find(l =>
+          l.length > 1 &&
+          !/^\d+$/.test(l) &&
+          !/^\d+mm$/.test(l) &&
+          !/^[\d\s\/]+$/.test(l) &&
+          !typeKeywords.has(l.toUpperCase()) &&
+          !l.includes('·') &&
+          !['ADD TO LIST', 'Watching', 'Planning', 'Completed', 'Paused', 'Dropped', 'PG-13', 'R', 'G'].includes(l)
+        ) || rawLines[rawLines.length - 1] || link.text;
+
+        const resultSeasonNum = extractSeasonNumber(titleLine);
         if (targetSeason !== resultSeasonNum) {
-          console.log(`   ⏭️ Skipping result "${link.text}" (Season ${resultSeasonNum}) - mismatch with target (Season ${targetSeason})`);
+          const displayText = titleLine.slice(0, 60);
+          console.log(`   ⏭️ Skipping result "${displayText}" (Season ${resultSeasonNum}) - mismatch with target (Season ${targetSeason})`);
           continue;
         }
 
-        const textClean = cleanStr(link.text);
-        const textCore = getCoreTitle(link.text);
+        const textClean = cleanStr(titleLine);
+        const textCore = getCoreTitle(titleLine);
 
         // Guard: only allow "target contains result" if result is ≥80% as long (prevents "Link Click" matching "Link Click: Bridon Arc")
         const isCleanMatch = textClean && (textClean.includes(targetClean) || (targetClean.includes(textClean) && textClean.length / targetClean.length >= 0.8));
@@ -227,9 +241,8 @@ export class ReAnimeScraperService {
           const containsBonus = (textClean.includes(targetClean) || targetClean.includes(textClean)) ? 0.05 : 0;
           const cleanBonus = isCleanMatch ? 0.1 : 0;
           const score = lenRatio + containsBonus + cleanBonus;
-          const displayLogText = (link.text || '').replace(/\s+/g, ' ').trim();
-          const truncatedText = displayLogText.length > 80 ? displayLogText.slice(0, 77) + "..." : displayLogText;
-          console.log(`🎯 Candidate match: "${truncatedText}" -> ${link.href} (score: ${score.toFixed(2)})`);
+          const truncatedTitle = titleLine.length > 60 ? titleLine.slice(0, 57) + "..." : titleLine;
+          console.log(`🎯 Candidate match: "${truncatedTitle}" -> ${link.href} (score: ${score.toFixed(2)})`);
           if (score > bestScore) {
             matchedLink = link.href;
             bestScore = score;
@@ -237,8 +250,8 @@ export class ReAnimeScraperService {
         }
       }
 
-      if (!matchedLink) {
-        throw new Error(`Could not find a secure search result matching "${inputUrl}" (Season ${targetSeason}) on Re:ANIME.`);
+      if (!matchedLink || bestScore < 0.65) {
+        throw new Error(`Could not find a secure search result matching "${inputUrl}" (Season ${targetSeason}) on Re:ANIME (best score: ${bestScore === -1 ? 'none' : bestScore.toFixed(2)}).`);
       }
 
       // If the match is already a watch URL, parse, set params, and return
@@ -294,24 +307,52 @@ export class ReAnimeScraperService {
   }
 
   static async launchManualBypass() {
-    console.log("\n⚠️ Headless Cloudflare bypass failed. Launching headful verification browser...");
-    console.log("🚨 A Chrome window will open on your desktop. Please solve the CAPTCHA there!");
+    console.log("\n⚠️ Headless Cloudflare bypass failed. Attempting to connect to Chrome via CDP on port 9222...");
     
     let browser;
+    let isCDP = false;
     try {
-      browser = await chromium.launch({
-        headless: false,
-        channel: "chrome",
-        args: ["--no-sandbox", "--disable-setuid-sandbox"]
-      });
+      try {
+        browser = await chromium.connectOverCDP("http://127.0.0.1:9222");
+        isCDP = true;
+        console.log("✅ Connected successfully to Chrome via CDP!");
+      } catch (cdpErr) {
+        console.log("⚠️ CDP connection failed (Chrome is likely not running on port 9222). Falling back to headful browser launch...");
+        browser = await chromium.launch({
+          headless: false,
+          channel: "chrome",
+          args: ["--no-sandbox", "--disable-setuid-sandbox"]
+        });
+      }
       
-      const context = await browser.newContext({
-        viewport: { width: 1280, height: 720 },
-        userAgent: this.USER_AGENT
-      });
+      let context;
+      let page;
       
-      const page = await context.newPage();
+      if (isCDP) {
+        const contexts = browser.contexts();
+        if (contexts.length === 0) {
+          throw new Error("No active browser contexts found in the running Chrome instance.");
+        }
+        context = contexts[0];
+        const pages = context.pages();
+        page = pages.length > 0 ? pages[0] : await context.newPage();
+      } else {
+        context = await browser.newContext({
+          viewport: { width: 1280, height: 720 },
+          userAgent: this.USER_AGENT
+        });
+        page = await context.newPage();
+        console.log("🚨 A Chrome window will open on your desktop. Please solve the CAPTCHA there!");
+      }
+      
+      console.log(`🌐 Navigating to Re:ANIME home page: ${this.BASE_URL}...`);
       await page.goto(this.BASE_URL, { waitUntil: "domcontentloaded", timeout: 45000 });
+      
+      if (isCDP) {
+        console.log("\n👀 Please look at your open Chrome window!");
+        console.log("👉 If there is a Cloudflare 'Verify you are human' checkbox, please click it.");
+      }
+      console.log("👉 Waiting for page to fully load after verification...");
       
       // Poll and check if Turnstile is solved
       let solved = false;

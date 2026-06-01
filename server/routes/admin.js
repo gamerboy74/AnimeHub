@@ -4,11 +4,15 @@ import { supabase } from "../config/supabase.js";
 import { cacheGet, cacheSet, cacheInvalidateAnime, cacheMiddleware } from "../services/cache.js";
 import { NineAnimeScraperService } from "../scrapers/nineanime.js";
 import { formatDuration } from "../scheduler.js";
+import { requireAdmin } from "../middleware/auth.js";
 
 const router = express.Router();
 
+// Secure all /api/admin/* endpoints
+router.use("/api/admin", requireAdmin);
+
 // Add scraped episode to database endpoint
-router.post("/api/add-scraped-episode", async (req, res) => {
+router.post("/api/add-scraped-episode", requireAdmin, async (req, res) => {
   try {
     console.log("💾 API: Adding scraped episode to database...");
 
@@ -262,7 +266,7 @@ router.put("/api/admin/anime-requests/:id", async (req, res) => {
 });
 
 // Start large anime scraping job
-router.post("/api/start-large-scrape", async (req, res) => {
+router.post("/api/start-large-scrape", requireAdmin, async (req, res) => {
   try {
     console.log("🎬 API: Starting large anime scraping job...");
 
@@ -350,6 +354,7 @@ router.post("/api/start-large-scrape", async (req, res) => {
 // Get scraping progress
 router.get(
   "/api/scraping-progress/:animeId",
+  requireAdmin,
   cacheMiddleware(3_000),
   async (req, res) => {
     try {
@@ -419,7 +424,7 @@ router.get(
 );
 
 // Scrape a single chunk
-router.post("/api/scrape-chunk", async (req, res) => {
+router.post("/api/scrape-chunk", requireAdmin, async (req, res) => {
   try {
     console.log("🎬 API: Scraping chunk...");
 

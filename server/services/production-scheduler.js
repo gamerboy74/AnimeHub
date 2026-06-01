@@ -7,7 +7,7 @@ import axios from 'axios';
 export class ProductionScheduler {
   constructor() {
     const t = (k, d) => (process.env[k] || '').trim() || d;
-    
+
     this.enabled = t('SCHEDULER_ENABLED', 'true') === 'true';
     this.episodeCheckIntervalMs = parseInt(t('SCHEDULER_EPISODE_CHECK_INTERVAL_HOURS', '6')) * 60 * 60 * 1000;
     this.metadataSyncIntervalMs = parseInt(t('SCHEDULER_NEW_ANIME_CHECK_INTERVAL_HOURS', '24')) * 60 * 60 * 1000;
@@ -16,6 +16,7 @@ export class ProductionScheduler {
 
     this.episodeTimer = null;
     this.metadataTimer = null;
+    this.workerRegistered = false;
     this.running = {
       episodes: false,
       metadata: false,
@@ -53,10 +54,16 @@ export class ProductionScheduler {
    * Register Bull worker (4 concurrent workers)
    */
   async registerWorker() {
+    if (this.workerRegistered) {
+      console.log('👷 Episode worker already registered, skipping duplicate registration');
+      return;
+    }
+
     episodeQueue.process(4, async (job) => {
       return episodeWorker.processJob(job);
     });
 
+    this.workerRegistered = true;
     console.log('👷 Episode worker registered (4 concurrent)');
   }
 
@@ -184,7 +191,7 @@ export class ProductionScheduler {
       const scrapedMap = new Map();
       for (const ep of existingEpisodes || []) {
         if (!scrapedMap.has(ep.anime_id)) scrapedMap.set(ep.anime_id, new Set());
-        
+
         const serversCount = Array.isArray(ep.video_servers) ? ep.video_servers.length : 0;
         const lastScrapedMs = ep.created_at ? new Date(ep.created_at).getTime() : 0;
         const isCooldownActive = (nowMs - lastScrapedMs) < cooldownMs;
@@ -233,7 +240,7 @@ export class ProductionScheduler {
         // For ongoing anime:
         // - If we already have scraped episodes, only check the single next one (startEp)
         // - If we have 0 scraped episodes, check at most startEp + 1 to catch double-episode premiers
-        const endEp = anime.status === 'ongoing' 
+        const endEp = anime.status === 'ongoing'
           ? (scrapedEps.size > 0 ? startEp : startEp + 1)
           : (anime.total_episodes || startEp + 10);
 

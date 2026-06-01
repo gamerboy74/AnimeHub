@@ -1,0 +1,42 @@
+[
+  {
+    "id": "animesuge",
+    "name": "AnimeSuge",
+    "enabled": true,
+    "priority": 1,
+    "timeout": 45000,
+    "delay": 2000
+  },
+  {
+    "id": "reanime",
+    "name": "Re:ANIME",
+    "enabled": true,
+    "priority": 2,
+    "timeout": 40000,
+    "delay": 2000
+  },
+  {
+    "id": "cinevo",
+    "name": "Cinevo",
+    "enabled": true,
+    "priority": 3,
+    "timeout": 45000,
+    "delay": 2000
+  },
+  {
+    "id": "sanjianime",
+    "name": "SanjiAnime",
+    "enabled": true,
+    "priority": 4,
+    "timeout": 40000,
+    "delay": 2000
+  },
+  {
+    "id": "nineanime",
+    "name": "NineAnime",
+    "enabled": true,
+    "priority": 5,
+    "timeout": 45000,
+    "delay": 2000
+  }
+]

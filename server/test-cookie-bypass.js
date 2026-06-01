@@ -1,3 +1,14 @@
+/**
+ * Step 1: Re-authenticate via Chrome CDP
+ * Close all currently open Google Chrome windows on your computer.
+ * Open PowerShell and start Chrome in debugging mode:
+ * powershell
+ * Start-Process "C:\Program Files\Google\Chrome\Application\chrome.exe" -ArgumentList "--remote-debugging-port=9222 --user-data-dir=C:\Users\gboy3\chrome-dev-profile"
+ * Run the session synchronizer script:
+ * bash
+ * node test-cookie-bypass.js
+ */
+
 import { chromium } from "playwright";
 import fs from "fs";
 import { join, dirname } from "path";

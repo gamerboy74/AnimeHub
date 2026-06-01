@@ -3,48 +3,48 @@
   "storageState": {
     "cookies": [
       {
-        "name": "NID",
-        "value": "531=PRWgV8EH9-0w8r8MEZSuAdeowBCXDMrGgGk0X8QYhU6-ZgnFoswk7sGloyLl1bwxi4J6DKTIASnbgj3yJqjD2c4vIKwPvx7ihC8rYSQx0GaeUbwpLicOozWvzGKW0RV14vvLQeExf07fqT5WJ5KQpukXF4Kbd4_Adl8DnRVQX8kYowg_rzzonWsp0K_8AG3-FYfj6ps",
-        "domain": ".google.com",
-        "path": "/",
-        "expires": 1796024868.403498,
-        "httpOnly": true,
-        "secure": true,
-        "sameSite": "None"
-      },
-      {
         "name": "APP_LOCALE",
         "value": "en",
         "domain": "reanime.to",
         "path": "/",
-        "expires": 1814794820.502949,
+        "expires": 1814857343.869128,
         "httpOnly": false,
         "secure": false,
         "sameSite": "Lax"
       },
       {
-        "name": "cf_clearance",
-        "value": "MbJoUSndEYrF.A02QH_kaZv1D0qfZMEGJG_a5v5RzJI-1780234664-1.2.1.1-W2.d7tqQ0Jh6lnXDjWcRBZUNtOnds185vkl8LE.GZ54DN7V_II_TiEdq2RVose6wF7i4VW5KA3yQkhpsZ0jywrYL0Kv6RHHq2PorxXHIfRcfqcbFZkkioINbVr49JqPS3ITGUF_bxk4Lk6xJMSQ5oMzkx7uM8cJ58LiujB7BGTfPofb3lE1lPlMIuZrg0cDTvH.Igmvgr8bIdWMrZ12ROSWoy6XCsXRs_xgUA2bODy5ukRNawYjfBpm0IxZNJYewWYiB4aOL76wZM4jLqryVYRji612oFFP6Fyjk4CKzuwvHf3rYmBBq.XlRLHXxe15xiNvzlX9jGsT2GgupIBWe80uCW4jnTEhvG2sb0gSBYHxSjSfYpiqkQlASjIiClD3SfON2Gu5QnrWgV2qpg2oZK.iQXjsj6MAQUQSy.exjAOI",
-        "domain": ".reanime.to",
+        "name": "NID",
+        "value": "531=FqVmGqi4lVHb9LGDI8SPKW5JN8txUOmS-jhahUq4ETgb8KeHGa7RHZxGrxjRe4qzQnA3otpXPawDo4BhjeLe0EsIopiNwt3HHqxmI2sHpS_d6KLUB7e-t3vrdGo3fO2LbvGG7LbNy8Qiw5aIdiYAwWQC55ifIrL_oyaUm3LLfj-8UV4bYMWpV8zX5Fm0Dntb_8Eh04c",
+        "domain": ".google.com",
         "path": "/",
-        "expires": 1811770665.091568,
+        "expires": 1796024869.710435,
         "httpOnly": true,
         "secure": true,
-        "sameSite": "None",
-        "partitionKey": "https://reanime.to",
-        "_crHasCrossSiteAncestor": false
+        "sameSite": "None"
       },
       {
         "name": "cf_clearance",
-        "value": "0xm7pI7GpUAfs_3Xrzsxw7FiwsjrpKxf6T.PgeDX2wM-1780234744-1.2.1.1-5qa6ZfWLCYrfhEZxq5vpEpCymILUx0DTRSS.me2Ut57II_bkd8I0ycIyLTjaMWCeMdy8mghUUWINdTS.8TZTPxWDBeQHl3IQ7jVlNUy9.Ge5ow3H2aF1UZ3jE9mRwVhJt7Eyw51dJtPAxSQ66iuzXZz.k.1cqVEtKkvLW4uR7vnZ.jV6sHFckh1t9rygXC241gXxCJp22Ij_Z1o9rbajFPFsLxXOKaIrUB91y.HfeRErmwZBu143ZC9TMwcrJXhSUVXboecDpjt3ap2P9BIPYD6.fG1hzJ8YQiMI2g8iPLF6CikhfC14RJ.JUNXvRyLdI5eFNYnLNUBGoDb__ZCNGA",
+        "value": "iU4sHkeaTfUv.446d2DgtQ7FKmsIsEyC082.SQ4einY-1780296765-1.2.1.1-tgfvRMa6cpTscEV9uJhme9.gl5kX_nTSay5UAgBDzcsoxQEI26vLeh5QcX7U171E4IESqr1Un5S5XBdIWAGi1x6rHtHKbdOP46m6MGOCs90weY5paO_PPmADeG9icvYtGbntUi5.5Y.nyxJJgCBICVthR2RPt_rCxeNTuUZuubXKxmHcIRNHAV2xA.2IiqaIubCZa2dK8AfTLm0DWX_2E4pVNa6PZ.5vfc9wukOW2BH5Pbs0zMvtAiyK1g26je2KzQBNdmeX1vg_StrHoyD2uZKYwwxcp5aLfhvBntt_UJaqbvHG6Qo0x61XVK4JNOryQSTHxxujIN.2aNIT.lqhHQ",
         "domain": ".flixcloud.cc",
         "path": "/",
-        "expires": 1811770745.158192,
+        "expires": 1811832766.566162,
         "httpOnly": true,
         "secure": true,
         "sameSite": "None",
         "partitionKey": "https://reanime.to",
         "_crHasCrossSiteAncestor": true
+      },
+      {
+        "name": "cf_clearance",
+        "value": "YbgveZsDW8GSADOWlKrcz0e80hsA6rADTft4YyFS8.8-1780297136-1.2.1.1-rPOgAmwgiHXSk_yNM0x4NAYH5Mm4ydXbdYEL2d4Cl8yHDIMzC59GbEfJi8v6sSKA0buAARbikBksjzJYnrOM3w2ASBK1Wn6GiT24ZTAOKPftIB943NOhJgykWv0WazJeR8zMJ3lsxKG2FUmqdGtheI8L_hFPNOwy4ZhyxdZAsf2E2RlknkVUTuUT7k97zYNBAifA3PHnLHFVBR7qF01bztl7ZjGCNuMmXbv_U.HmmRE87zshtI.P15ybyYgFsIKccrRVeMJplHybq3WGw_YzyGYygwLJj50txbDdM.uA2emHod0dbobUKdoqf.DRNxNgp07LWhUbxSkZDBNB9z981cw7igpvO0_FUWBJ6WnysbXgjPitA44Qn5ONCtHD6aMp8fdP393nAkbaqt8M.ans1_Xs.z.lOAos7Kwn19oxmts",
+        "domain": ".reanime.to",
+        "path": "/",
+        "expires": 1811833136.764713,
+        "httpOnly": true,
+        "secure": true,
+        "sameSite": "None",
+        "partitionKey": "https://reanime.to",
+        "_crHasCrossSiteAncestor": false
       }
     ],
     "origins": [
@@ -57,7 +57,7 @@
           },
           {
             "name": "project_r_prefs",
-            "value": "{\"autoPlay\":true,\"skipIntro\":false,\"skipOutro\":false,\"autoNext\":true,\"defaultLang\":\"japanese\",\"syncPercentage\":80}"
+            "value": "{\"autoPlay\":true,\"skipIntro\":false,\"skipOutro\":false,\"autoNext\":true,\"defaultLang\":\"english\",\"syncPercentage\":80}"
           },
           {
             "name": "mode-watcher-mode",

@@ -1,5 +1,6 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { AnimeService } from '../../services/anime';
+import type { Tables } from '../../lib/database/supabase';
 
 interface LiveSearchResult {
   id: string;
@@ -33,14 +34,14 @@ export function useLiveSearch(query: string, minLength: number = 2) {
         const searchResults = await AnimeService.searchAnime(query, { limit: 8 });
         
         // Transform results to match our interface
-        const transformedResults = searchResults.map(anime => ({
+        const transformedResults = (searchResults as Tables<'anime'>[]).map(anime => ({
           id: anime.id,
           title: anime.title,
-          poster_url: anime.poster_url,
-          year: anime.year,
-          rating: anime.rating,
-          genres: anime.genres,
-          status: anime.status
+          poster_url: anime.poster_url ?? undefined,
+          year: anime.year ?? undefined,
+          rating: anime.rating ?? undefined,
+          genres: anime.genres ?? undefined,
+          status: anime.status ?? undefined
         }));
         
         setResults(transformedResults);

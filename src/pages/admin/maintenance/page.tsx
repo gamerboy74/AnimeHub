@@ -3,6 +3,38 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '../../../lib/database/supabase';
 import { SparkleLoadingSpinner } from '../../../components/base/LoadingSpinner';
 
+// ─── Session-storage keys for persisting scrape state across tab switches / refreshes ───
+const SS_SCRAPE_STATUS = 'maintenance:scrapingStatus';
+const SS_SCRAPE_ALL_ID = 'maintenance:scrapingAllAnimeId';
+const SS_SCRAPE_ALL_MSG = 'maintenance:scrapeAllProgressMsg';
+
+/** Read + parse a sessionStorage JSON value, falling back to `fallback` on any error. */
+function readSession<T>(key: string, fallback: T): T {
+  try {
+    const raw = sessionStorage.getItem(key);
+    return raw !== null ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * Restore scrapingStatus from sessionStorage.  
+ * Any entry whose status is 'scraping' is marked as 'error' with an
+ * "Interrupted" message — the HTTP request died when the page reloaded,
+ * so we can't continue it, but we at least tell the user what happened.
+ */
+function restoreScrapingStatus(): Record<string, { status: 'idle' | 'scraping' | 'success' | 'error'; message?: string }> {
+  const saved = readSession<Record<string, { status: string; message?: string }>>(SS_SCRAPE_STATUS, {});
+  const out: Record<string, { status: 'idle' | 'scraping' | 'success' | 'error'; message?: string }> = {};
+  for (const [id, entry] of Object.entries(saved)) {
+    out[id] = entry.status === 'scraping'
+      ? { status: 'error', message: 'Interrupted — page was reloaded while scraping. Click Auto-Scrape to retry.' }
+      : (entry as any);
+  }
+  return out;
+}
+
 interface EpisodeServer {
   name: string;
   url: string;
@@ -29,6 +61,8 @@ interface Episode {
 export default function AdminMaintenance() {
   const [scanning, setScanning] = useState(false);
   const [scanResults, setScanResults] = useState<Episode[] | null>(null);
+  // FIX #5: surface scan errors to the user instead of silently swallowing them
+  const [scanError, setScanError] = useState<string | null>(null);
 
   // Stats summary
   const [stats, setStats] = useState({
@@ -37,6 +71,14 @@ export default function AdminMaintenance() {
     missingUrl: 0,
     missingServers: 0,
   });
+
+  // FIX #12: single source of truth for "bad URL" checks — handles null, empty, and legacy 'null' string
+  const isBadUrl = (url: string | null | undefined): boolean =>
+    !url || url.trim() === '' || url === 'null';
+
+  // FIX #12: same for servers
+  const isBadServers = (servers: EpisodeServer[] | null | undefined): boolean =>
+    !servers || !Array.isArray(servers) || servers.length === 0;
 
   const isUpcomingEpisode = (ep: Episode): boolean => {
     if (ep.anime?.status?.toLowerCase() !== 'ongoing') return false;
@@ -59,9 +101,7 @@ export default function AdminMaintenance() {
       title === `ep ${ep.episode_number}` ||
       /^\s*episode\s*\d+\s*$/i.test(title);
 
-    const hasNoUrl = !ep.video_url || ep.video_url === 'null' || ep.video_url.trim() === '';
-
-    if (!airDateStr && isGeneric && hasNoUrl) {
+    if (!airDateStr && isGeneric && isBadUrl(ep.video_url)) {
       return true;
     }
 
@@ -83,28 +123,78 @@ export default function AdminMaintenance() {
   const [savingEdit, setSavingEdit] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
 
-  // Scraper status tracking per episode id
+  // ─── Scraper live-status — persisted to sessionStorage so tab-switches
+  // and soft refreshes restore the last known state automatically. ───────────
   const [scrapingStatus, setScrapingStatus] = useState<Record<string, {
     status: 'idle' | 'scraping' | 'success' | 'error';
     message?: string;
-  }>>({});
+  }>>(() => restoreScrapingStatus());
 
-  // Batch Scrape All states
-  const [scrapingAllAnimeId, setScrapingAllAnimeId] = useState<string | null>(null);
+  // Batch Scrape All states — also persisted so the accordion stays open
+  // and the progress message survives a quick tab-switch.
+  const [scrapingAllAnimeId, setScrapingAllAnimeId] = useState<string | null>(
+    // On restore, if a batch was mid-run it's now dead — reset to null so the
+    // Scrape All button is re-enabled and the user can re-trigger the batch.
+    () => null
+  );
   const [scrapeAllProgressMsg, setScrapeAllProgressMsg] = useState('');
 
+  // Write scraping state to sessionStorage whenever it changes so it
+  // survives tab-switches (component unmount/remount) and refreshes.
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(SS_SCRAPE_STATUS, JSON.stringify(scrapingStatus));
+    } catch { /* quota exceeded — safe to ignore */ }
+  }, [scrapingStatus]);
 
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(SS_SCRAPE_ALL_ID, JSON.stringify(scrapingAllAnimeId));
+    } catch { /* quota exceeded — safe to ignore */ }
+  }, [scrapingAllAnimeId]);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(SS_SCRAPE_ALL_MSG, JSON.stringify(scrapeAllProgressMsg));
+    } catch { /* quota exceeded — safe to ignore */ }
+  }, [scrapeAllProgressMsg]);
+
+  // FIX #13: Escape key closes the Quick Edit modal
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && editingEpisode) closeEditModal();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [editingEpisode]);
+
+  // Clear persisted scraping state when a full Refresh Scan is triggered so
+  // old status badges from a previous session don't confuse the new scan.
+  const clearPersistedScrapeState = () => {
+    try {
+      sessionStorage.removeItem(SS_SCRAPE_STATUS);
+      sessionStorage.removeItem(SS_SCRAPE_ALL_ID);
+      sessionStorage.removeItem(SS_SCRAPE_ALL_MSG);
+    } catch { /* ignore */ }
+    setScrapingStatus({});
+    setScrapingAllAnimeId(null);
+    setScrapeAllProgressMsg('');
+  };
 
   useEffect(() => {
     // Perform initial automatic scan on mount
     handleScanDatabase();
   }, []);
 
+
   const handleScanDatabase = async () => {
     try {
       setScanning(true);
       setScanResults(null);
+      setScanError(null);
       setExpandedAnime(null);
+      // Clear stale scraping badges so a fresh scan starts with a clean slate
+      clearPersistedScrapeState();
 
       // Fetch stats count, incomplete episodes, and catalog anime list concurrently
       const [countResult, episodesResult, animeListResult] = await Promise.all([
@@ -183,16 +273,14 @@ export default function AdminMaintenance() {
 
       const combinedEpisodes = [...typedEpisodes, ...virtualEpisodes];
 
-      // Filter for incomplete episodes (including all virtual ones, but excluding upcoming/unreleased ones)
+      // FIX #12: use centralised helpers for consistency
       const incomplete = combinedEpisodes.filter(ep => {
-        const hasNoUrl = !ep.video_url || ep.video_url.trim() === '' || ep.video_url === 'null';
-        const hasNoServers = !ep.video_servers || !Array.isArray(ep.video_servers) || ep.video_servers.length === 0;
-        const isProblem = hasNoUrl || hasNoServers;
+        const isProblem = isBadUrl(ep.video_url) || isBadServers(ep.video_servers);
         return isProblem && !isUpcomingEpisode(ep);
       });
 
-      const missingUrlCount = incomplete.filter(ep => !ep.video_url || ep.video_url.trim() === '' || ep.video_url === 'null').length;
-      const missingServersCount = incomplete.filter(ep => !ep.video_servers || !Array.isArray(ep.video_servers) || ep.video_servers.length === 0).length;
+      const missingUrlCount = incomplete.filter(ep => isBadUrl(ep.video_url)).length;
+      const missingServersCount = incomplete.filter(ep => isBadServers(ep.video_servers)).length;
 
       setScanResults(incomplete);
       setStats({
@@ -203,6 +291,8 @@ export default function AdminMaintenance() {
       });
     } catch (err) {
       console.error('Maintenance Scan failed:', err);
+      // FIX #5: surface the error to the user
+      setScanError(err instanceof Error ? err.message : 'Database scan failed. Please try again.');
     } finally {
       setScanning(false);
     }
@@ -224,16 +314,13 @@ export default function AdminMaintenance() {
       });
     }
 
-    // 2. Filter by issue type
+    // 2. Filter by issue type — FIX #12: use centralised helpers
     if (filterType === 'missing_url') {
-      filtered = filtered.filter(ep => !ep.video_url || ep.video_url.trim() === '');
+      filtered = filtered.filter(ep => isBadUrl(ep.video_url));
     } else if (filterType === 'missing_servers') {
-      filtered = filtered.filter(ep => !ep.video_servers || ep.video_servers.length === 0);
+      filtered = filtered.filter(ep => isBadServers(ep.video_servers));
     } else if (filterType === 'both_missing') {
-      filtered = filtered.filter(ep =>
-        (!ep.video_url || ep.video_url.trim() === '') &&
-        (!ep.video_servers || ep.video_servers.length === 0)
-      );
+      filtered = filtered.filter(ep => isBadUrl(ep.video_url) && isBadServers(ep.video_servers));
     }
 
     // 3. Filter by anime release status
@@ -380,22 +467,21 @@ export default function AdminMaintenance() {
 
       const updateList = (list: Episode[]) =>
         list.map(ep => ep.id === editingEpisode.id || ep.id === resultData.id ? updatedEpisode : ep)
-          .filter(ep => {
-            const hasNoUrl = !ep.video_url || ep.video_url.trim() === '';
-            const hasNoServers = !ep.video_servers || ep.video_servers.length === 0;
-            return hasNoUrl || hasNoServers;
-          });
+          .filter(ep => isBadUrl(ep.video_url) || isBadServers(ep.video_servers)); // FIX #12
 
       setScanResults(prev => prev ? updateList(prev) : null);
 
-      // Recompute stats
+      // FIX #11: only decrement counters based on the pre-edit state of the episode,
+      // not just whether the new payload is filled — prevents over-decrementing.
       setStats(prev => {
-        const newTotalIncomplete = Math.max(0, prev.totalIncomplete - (updatedEpisode.video_url && updatedEpisode.video_servers ? 1 : 0));
+        const wasNoUrl = isBadUrl(editingEpisode.video_url);
+        const wasNoServers = isBadServers(editingEpisode.video_servers);
+        const isNowFixed = !isBadUrl(updatedEpisode.video_url) && !isBadServers(updatedEpisode.video_servers);
         return {
           ...prev,
-          totalIncomplete: newTotalIncomplete,
-          missingUrl: Math.max(0, prev.missingUrl - (payload.video_url ? 1 : 0)),
-          missingServers: Math.max(0, prev.missingServers - (payload.video_servers ? 1 : 0))
+          totalIncomplete: Math.max(0, prev.totalIncomplete - (isNowFixed ? 1 : 0)),
+          missingUrl: Math.max(0, prev.missingUrl - (wasNoUrl && !isBadUrl(updatedEpisode.video_url) ? 1 : 0)),
+          missingServers: Math.max(0, prev.missingServers - (wasNoServers && !isBadServers(updatedEpisode.video_servers) ? 1 : 0)),
         };
       });
 
@@ -444,23 +530,37 @@ export default function AdminMaintenance() {
           video_servers: data.episode.video_servers
         };
 
+        // FIX #1: only decrement totalIncomplete if the episode is FULLY fixed
+        const wasNoUrl = isBadUrl(ep.video_url);
+        const wasNoServers = isBadServers(ep.video_servers);
+        const isNowFixed = !isBadUrl(updated.video_url) && !isBadServers(updated.video_servers);
+
+        setStats(prev => ({
+          ...prev,
+          totalIncomplete: Math.max(0, prev.totalIncomplete - (isNowFixed ? 1 : 0)),
+          missingUrl: Math.max(0, prev.missingUrl - (wasNoUrl && !isBadUrl(updated.video_url) ? 1 : 0)),
+          missingServers: Math.max(0, prev.missingServers - (wasNoServers && !isBadServers(updated.video_servers) ? 1 : 0)),
+        }));
+
+        // FIX #8: brief success flash (1.2 s) before the card vanishes so the user
+        // gets visual reward feedback instead of the card abruptly disappearing.
+        await new Promise(r => setTimeout(r, 1200));
+
         const updateList = (list: Episode[]) =>
           list.map(item => item.id === epId ? updated : item)
-            .filter(item => {
-              const hasNoUrl = !item.video_url || item.video_url.trim() === '';
-              const hasNoServers = !item.video_servers || item.video_servers.length === 0;
-              return hasNoUrl || hasNoServers;
-            });
+            .filter(item => isBadUrl(item.video_url) || isBadServers(item.video_servers)); // FIX #12
 
         setScanResults(prev => prev ? updateList(prev) : null);
 
-        // Adjust stats
-        setStats(prev => ({
-          ...prev,
-          totalIncomplete: Math.max(0, prev.totalIncomplete - 1),
-          missingUrl: Math.max(0, prev.missingUrl - (data.episode.video_url ? 1 : 0)),
-          missingServers: Math.max(0, prev.missingServers - (data.episode.video_servers ? 1 : 0))
-        }));
+        // FIX #2: clean up scrapingStatus for the removed episode to prevent stale
+        // status messages from reappearing if the same ep ID shows up after a re-scan.
+        setScrapingStatus(prev => {
+          const next = { ...prev };
+          delete next[epId];
+          // Also clean up the real ID in case a virtual -> real mapping happened
+          if (data.episode.id !== epId) delete next[data.episode.id];
+          return next;
+        });
 
       } else {
         setScrapingStatus(prev => ({
@@ -559,306 +659,333 @@ export default function AdminMaintenance() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.2 }}
         >
-              {/* Stats Grid */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-                {[
-                  { label: 'Total Checked', val: stats.totalChecked, icon: 'ri-bookmark-3-line', color: 'text-blue-600', bg: 'bg-white/80 border-slate-200 shadow-md' },
-                  { label: 'Incomplete Episodes', val: stats.totalIncomplete, icon: 'ri-error-warning-line', color: 'text-rose-600', bg: 'bg-white/80 border-slate-200 shadow-md' },
-                  { label: 'Missing Primary URLs', val: stats.missingUrl, icon: 'ri-link-unlink-m', color: 'text-amber-600', bg: 'bg-white/80 border-slate-200 shadow-md' },
-                  { label: 'Missing Server Slots', val: stats.missingServers, icon: 'ri-server-fill', color: 'text-cyan-600', bg: 'bg-white/80 border-slate-200 shadow-md' }
-                ].map((card, idx) => (
-                  <div key={idx} className={`border rounded-2xl p-5 backdrop-blur-sm relative overflow-hidden group transition-all duration-200 ${card.bg}`}>
-                    <div className="absolute -right-4 -bottom-4 text-slate-200/30 text-6xl group-hover:scale-110 transition-transform duration-300">
-                      <i className={card.icon}></i>
-                    </div>
-                    <div className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                      <i className={`${card.icon} ${card.color} text-sm`}></i>
-                      {card.label}
-                    </div>
-                    <div className="text-3xl font-extrabold text-slate-800 tracking-tight">{card.val}</div>
-                  </div>
-                ))}
+          {/* FIX #5: Scan error banner */}
+          {scanError && (
+            <div className="mb-6 bg-rose-50 border border-rose-200 text-rose-700 rounded-2xl px-5 py-4 flex items-start gap-3 shadow-sm">
+              <i className="ri-error-warning-fill text-xl flex-shrink-0 mt-0.5"></i>
+              <div>
+                <div className="font-bold text-sm">Scan Failed</div>
+                <div className="text-xs mt-0.5 text-rose-600">{scanError}</div>
+              </div>
+              <button
+                onClick={handleScanDatabase}
+                className="ml-auto px-3 py-1.5 bg-rose-100 hover:bg-rose-200 border border-rose-300 rounded-lg text-xs font-bold text-rose-700 transition-colors flex-shrink-0"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+          {/* Stats Grid */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+            {[
+              { label: 'Total Checked', val: stats.totalChecked, icon: 'ri-bookmark-3-line', color: 'text-blue-600', bg: 'bg-white/80 border-slate-200 shadow-md' },
+              { label: 'Incomplete Episodes', val: stats.totalIncomplete, icon: 'ri-error-warning-line', color: 'text-rose-600', bg: 'bg-white/80 border-slate-200 shadow-md' },
+              { label: 'Missing Primary URLs', val: stats.missingUrl, icon: 'ri-link-unlink-m', color: 'text-amber-600', bg: 'bg-white/80 border-slate-200 shadow-md' },
+              { label: 'Missing Server Slots', val: stats.missingServers, icon: 'ri-server-fill', color: 'text-cyan-600', bg: 'bg-white/80 border-slate-200 shadow-md' }
+            ].map((card, idx) => (
+              <div key={idx} className={`border rounded-2xl p-5 backdrop-blur-sm relative overflow-hidden group transition-all duration-200 ${card.bg}`}>
+                <div className="absolute -right-4 -bottom-4 text-slate-200/30 text-6xl group-hover:scale-110 transition-transform duration-300">
+                  <i className={card.icon}></i>
+                </div>
+                <div className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <i className={`${card.icon} ${card.color} text-sm`}></i>
+                  {card.label}
+                </div>
+                <div className="text-3xl font-extrabold text-slate-800 tracking-tight">{card.val}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Filters Controls Panel */}
+          <div className="bg-white/80 border border-white/20 backdrop-blur-sm rounded-2xl p-5 mb-8 shadow-lg">
+            <div className="flex items-center gap-2 mb-4">
+              <i className="ri-filter-2-line text-blue-600 text-lg"></i>
+              <h3 className="font-bold text-sm text-slate-700 uppercase tracking-wide">Filter Stream Problems</h3>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Search Input */}
+              <div className="relative">
+                <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                  <i className="ri-search-2-line text-base"></i>
+                </span>
+                <input
+                  type="text"
+                  placeholder="Search anime title..."
+                  value={searchTerm}
+                  onChange={e => setSearchTerm(e.target.value)}
+                  className="w-full bg-white border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-colors"
+                />
               </div>
 
-              {/* Filters Controls Panel */}
-              <div className="bg-white/80 border border-white/20 backdrop-blur-sm rounded-2xl p-5 mb-8 shadow-lg">
-                <div className="flex items-center gap-2 mb-4">
-                  <i className="ri-filter-2-line text-blue-600 text-lg"></i>
-                  <h3 className="font-bold text-sm text-slate-700 uppercase tracking-wide">Filter Stream Problems</h3>
-                </div>
+              {/* Filter by Problem Type */}
+              <select
+                value={filterType}
+                onChange={e => setFilterType(e.target.value as any)}
+                className="bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 cursor-pointer transition-colors"
+              >
+                <option value="all">All Stream Problems</option>
+                <option value="missing_url">Missing Primary Video URL</option>
+                <option value="missing_servers">Empty Video Server List</option>
+                <option value="both_missing">Complete Stream Info Missing</option>
+              </select>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {/* Search Input */}
-                  <div className="relative">
-                    <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                      <i className="ri-search-2-line text-base"></i>
-                    </span>
-                    <input
-                      type="text"
-                      placeholder="Search anime title..."
-                      value={searchTerm}
-                      onChange={e => setSearchTerm(e.target.value)}
-                      className="w-full bg-white border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-colors"
-                    />
-                  </div>
+              {/* Filter by Release Status */}
+              <select
+                value={filterStatus}
+                onChange={e => setFilterStatus(e.target.value as any)}
+                className="bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 cursor-pointer transition-colors"
+              >
+                <option value="all">All Anime Statuses</option>
+                <option value="ongoing">Ongoing Anime</option>
+                <option value="completed">Completed Anime</option>
+              </select>
 
-                  {/* Filter by Problem Type */}
-                  <select
-                    value={filterType}
-                    onChange={e => setFilterType(e.target.value as any)}
-                    className="bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 cursor-pointer transition-colors"
-                  >
-                    <option value="all">All Stream Problems</option>
-                    <option value="missing_url">Missing Primary Video URL</option>
-                    <option value="missing_servers">Empty Video Server List</option>
-                    <option value="both_missing">Complete Stream Info Missing</option>
-                  </select>
+              {/* Sort Results */}
+              <select
+                value={sortBy}
+                onChange={e => setSortBy(e.target.value as any)}
+                className="bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 cursor-pointer transition-colors"
+              >
+                <option value="problems_desc">Most Problematic Anime First</option>
+                <option value="ep_asc">Episode Number: Low to High</option>
+                <option value="ep_desc">Episode Number: High to Low</option>
+              </select>
+            </div>
+          </div>
 
-                  {/* Filter by Release Status */}
-                  <select
-                    value={filterStatus}
-                    onChange={e => setFilterStatus(e.target.value as any)}
-                    className="bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 cursor-pointer transition-colors"
-                  >
-                    <option value="all">All Anime Statuses</option>
-                    <option value="ongoing">Ongoing Anime</option>
-                    <option value="completed">Completed Anime</option>
-                  </select>
-
-                  {/* Sort Results */}
-                  <select
-                    value={sortBy}
-                    onChange={e => setSortBy(e.target.value as any)}
-                    className="bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 cursor-pointer transition-colors"
-                  >
-                    <option value="problems_desc">Most Problematic Anime First</option>
-                    <option value="ep_asc">Episode Number: Low to High</option>
-                    <option value="ep_desc">Episode Number: High to Low</option>
-                  </select>
-                </div>
+          {/* Results Stream Area */}
+          {scanning ? (
+            <div className="flex justify-center items-center py-20">
+              <SparkleLoadingSpinner size="lg" text="Scanning Supabase tables for stream integrity..." />
+            </div>
+          ) : groupedResults.length === 0 ? (
+            <div className="text-center py-16 bg-white/80 border border-slate-200 rounded-2xl backdrop-blur-sm shadow-md">
+              <div className="w-16 h-16 mx-auto mb-4 bg-emerald-50 rounded-full flex items-center justify-center border border-emerald-100 text-emerald-600">
+                <i className="ri-checkbox-circle-fill text-3xl"></i>
+              </div>
+              <h3 className="text-lg font-bold text-slate-800">Catalog Stream Integrity 100% Secure!</h3>
+              <p className="text-slate-500 text-sm max-w-md mx-auto mt-2 px-4">
+                All scanned episodes have primary streaming URLs and correctly structured video server configurations.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between px-1">
+                <span className="text-xs uppercase font-extrabold text-slate-400 tracking-wider">
+                  Problematic Catalog ({groupedResults.length} Anime, {stats.totalIncomplete} Episodes)
+                </span>
               </div>
 
-              {/* Results Stream Area */}
-              {scanning ? (
-                <div className="flex justify-center items-center py-20">
-                  <SparkleLoadingSpinner size="lg" text="Scanning Supabase tables for stream integrity..." />
-                </div>
-              ) : groupedResults.length === 0 ? (
-                <div className="text-center py-16 bg-white/80 border border-slate-200 rounded-2xl backdrop-blur-sm shadow-md">
-                  <div className="w-16 h-16 mx-auto mb-4 bg-emerald-50 rounded-full flex items-center justify-center border border-emerald-100 text-emerald-600">
-                    <i className="ri-checkbox-circle-fill text-3xl"></i>
-                  </div>
-                  <h3 className="text-lg font-bold text-slate-800">Catalog Stream Integrity 100% Secure!</h3>
-                  <p className="text-slate-500 text-sm max-w-md mx-auto mt-2 px-4">
-                    All scanned episodes have primary streaming URLs and correctly structured video server configurations.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between px-1">
-                    <span className="text-xs uppercase font-extrabold text-slate-400 tracking-wider">
-                      Problematic Catalog ({groupedResults.length} Anime, {stats.totalIncomplete} Episodes)
-                    </span>
-                  </div>
-
-                  {groupedResults.map((group) => {
-                    const isExpanded = expandedAnime === group.animeId;
-                    return (
-                      <div
-                        key={group.animeId}
-                        className="bg-white/80 hover:bg-white border border-slate-200/80 rounded-2xl overflow-hidden transition-all duration-200 shadow-sm"
-                      >
-                        {/* Accordion Trigger Header */}
-                        <div
-                          onClick={() => setExpandedAnime(isExpanded ? null : group.animeId)}
-                          className="px-6 py-4 flex items-center justify-between gap-4 cursor-pointer select-none"
-                        >
-                          <div className="flex items-center gap-4 min-w-0">
-                            {group.posterUrl ? (
-                              <img
-                                src={group.posterUrl}
-                                alt=""
-                                className="w-10 h-14 object-cover rounded-xl shadow-md border border-slate-200/60 flex-shrink-0"
-                                width={40}
-                                height={56}
-                                loading="lazy"
-                              />
-                            ) : (
-                              <div className="w-10 h-14 bg-slate-100 rounded-xl flex items-center justify-center flex-shrink-0 border border-slate-200 text-slate-400">
-                                <i className="ri-film-line text-lg"></i>
-                              </div>
-                            )}
-                            <div className="min-w-0">
-                              <h3 className="font-semibold text-slate-800 hover:text-slate-900 transition-colors truncate text-base">
-                                {group.animeTitle}
-                              </h3>
-                              <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                                <span className="bg-rose-50 text-rose-600 border border-rose-200 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider">
-                                  {group.episodes.length} episodes broken
-                                </span>
-                                <span className="bg-slate-100 text-slate-600 border border-slate-200 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase">
-                                  {group.status}
-                                </span>
-                              </div>
-                            </div>
+              {groupedResults.map((group) => {
+                const isExpanded = expandedAnime === group.animeId;
+                return (
+                  <div
+                    key={group.animeId}
+                    className="bg-white/80 hover:bg-white border border-slate-200/80 rounded-2xl overflow-hidden transition-all duration-200 shadow-sm"
+                  >
+                    {/* Accordion Trigger Header */}
+                    <div
+                      onClick={() => setExpandedAnime(isExpanded ? null : group.animeId)}
+                      className="px-6 py-4 flex items-center justify-between gap-4 cursor-pointer select-none"
+                    >
+                      <div className="flex items-center gap-4 min-w-0">
+                        {group.posterUrl ? (
+                          <img
+                            src={group.posterUrl}
+                            alt=""
+                            className="w-10 h-14 object-cover rounded-xl shadow-md border border-slate-200/60 flex-shrink-0"
+                            width={40}
+                            height={56}
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div className="w-10 h-14 bg-slate-100 rounded-xl flex items-center justify-center flex-shrink-0 border border-slate-200 text-slate-400">
+                            <i className="ri-film-line text-lg"></i>
                           </div>
-
-                          <div className="flex items-center gap-3">
-                            <button
-                              onClick={e => {
-                                e.stopPropagation();
-                                handleScrapeAllForAnime(group.animeId, group.episodes);
-                              }}
-                              disabled={scrapingAllAnimeId !== null}
-                              className="px-3.5 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-xs font-semibold shadow-md flex items-center gap-1.5 disabled:opacity-50 transition-all hover:-translate-y-0.5"
-                            >
-                              {scrapingAllAnimeId === group.animeId ? (
-                                <>
-                                  <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                                  <span>{scrapeAllProgressMsg}</span>
-                                </>
-                              ) : (
-                                <>
-                                  <i className="ri-play-list-add-line"></i>
-                                  <span>Scrape All ({group.episodes.length})</span>
-                                </>
-                              )}
-                            </button>
-
-                            <a
-                              href={`/admin/anime?id=${group.animeId}`}
-                              onClick={e => e.stopPropagation()}
-                              className="px-3.5 py-1.5 bg-blue-50 text-blue-600 border border-blue-200/60 rounded-xl text-xs font-semibold hover:bg-blue-100 transition-colors flex items-center gap-1.5"
-                            >
-                              <i className="ri-external-link-line"></i>
-                              Manage
-                            </a>
-                            <div className="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400">
-                              <i className={`text-xl transition-transform duration-200 ${isExpanded ? 'ri-arrow-up-s-line' : 'ri-arrow-down-s-line'}`}></i>
-                            </div>
+                        )}
+                        <div className="min-w-0">
+                          <h3 className="font-semibold text-slate-800 hover:text-slate-900 transition-colors truncate text-base">
+                            {group.animeTitle}
+                          </h3>
+                          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                            <span className="bg-rose-50 text-rose-600 border border-rose-200 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider">
+                              {group.episodes.length} episodes broken
+                            </span>
+                            <span className="bg-slate-100 text-slate-600 border border-slate-200 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase">
+                              {group.status}
+                            </span>
                           </div>
                         </div>
-
-                        {/* Accordion Dropdown Content */}
-                        <AnimatePresence initial={false}>
-                          {isExpanded && (
-                            <motion.div
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: 'auto', opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              transition={{ duration: 0.25, ease: 'easeInOut' }}
-                              className="border-t border-slate-150 bg-slate-50/50"
-                            >
-                              <div className="px-6 py-4 space-y-3">
-                                {group.episodes.map((ep) => {
-                                  const isScraping = scrapingStatus[ep.id]?.status === 'scraping';
-                                  const noUrl = !ep.video_url || ep.video_url.trim() === '';
-                                  const noServers = !ep.video_servers || ep.video_servers.length === 0;
-
-                                  return (
-                                    <div
-                                      key={ep.id}
-                                      className="bg-white border border-slate-150 hover:border-slate-200 rounded-xl p-4 flex flex-col md:flex-row justify-between md:items-center gap-4 transition-all"
-                                    >
-                                      {/* Episode details */}
-                                      <div className="space-y-1">
-                                        <div className="text-sm font-bold text-slate-700">
-                                          <span className="text-blue-600 font-extrabold mr-2">EP {ep.episode_number}</span>
-                                          {ep.title || `Episode ${ep.episode_number}`}
-                                        </div>
-
-                                        {/* Scraper Status */}
-                                        {scrapingStatus[ep.id] && (
-                                          <div className={`text-xs font-semibold ${scrapingStatus[ep.id].status === 'success' ? 'text-green-600' :
-                                              scrapingStatus[ep.id].status === 'error' ? 'text-rose-600' :
-                                                'text-amber-600 animate-pulse'
-                                            } flex items-center gap-1.5`}>
-                                            {scrapingStatus[ep.id].status === 'scraping' && <i className="ri-loader-4-line animate-spin text-sm"></i>}
-                                            {scrapingStatus[ep.id].status === 'success' && <i className="ri-checkbox-circle-line text-sm"></i>}
-                                            {scrapingStatus[ep.id].status === 'error' && <i className="ri-error-warning-line text-sm"></i>}
-                                            <span>{scrapingStatus[ep.id].message}</span>
-                                          </div>
-                                        )}
-
-                                        <div className="flex flex-wrap gap-2 pt-1">
-                                          {isUpcomingEpisode(ep) ? (
-                                            <span className="bg-slate-100 text-slate-500 border border-slate-200 px-2.5 py-0.5 rounded-lg text-[10px] font-bold flex items-center gap-1">
-                                              <i className="ri-calendar-todo-line text-blue-500"></i>
-                                              Upcoming / Unreleased
-                                            </span>
-                                          ) : (
-                                            <>
-                                              {noUrl && (
-                                                <span className="bg-rose-50 text-rose-600 px-2.5 py-0.5 rounded-lg text-[10px] font-bold border border-rose-200 flex items-center gap-1">
-                                                  <i className="ri-link-unlink"></i>
-                                                  Missing Primary URL
-                                                </span>
-                                              )}
-                                              {noServers && (
-                                                <span className="bg-amber-50 text-amber-600 px-2.5 py-0.5 rounded-lg text-[10px] font-bold border border-amber-200 flex items-center gap-1">
-                                                  <i className="ri-server-line"></i>
-                                                  No Video Servers
-                                                </span>
-                                              )}
-                                            </>
-                                          )}
-                                          {!noServers && (
-                                            <span className="bg-blue-50 text-blue-600 px-2.5 py-0.5 rounded-lg text-[10px] font-bold border border-blue-200">
-                                              {ep.video_servers?.length} servers loaded
-                                            </span>
-                                          )}
-                                        </div>
-                                      </div>
-
-                                      {/* Action Buttons */}
-                                      <div className="flex items-center gap-3">
-                                        <button
-                                          onClick={() => openEditModal(ep)}
-                                          disabled={isScraping}
-                                          className="px-3.5 py-2 bg-slate-50 hover:bg-slate-100 text-slate-600 hover:text-slate-800 rounded-xl text-xs font-bold transition-all border border-slate-200 flex items-center gap-1"
-                                          title="Edit streams manually"
-                                        >
-                                          <i className="ri-edit-line"></i>
-                                          Quick Edit
-                                        </button>
-
-                                        <button
-                                          onClick={() => triggerAutoScrape(ep)}
-                                          disabled={isScraping}
-                                          className="px-4 py-2 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm disabled:opacity-50"
-                                          title={isUpcomingEpisode(ep) ? "Scrape upcoming episode anyway" : "Run all scrapers sequentially to repair streams"}
-                                        >
-                                          {isScraping ? (
-                                            <>
-                                              <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                                              <span>Scraping...</span>
-                                            </>
-                                          ) : isUpcomingEpisode(ep) ? (
-                                            <>
-                                              <i className="ri-time-line text-blue-300"></i>
-                                              <span>Force Scrape</span>
-                                            </>
-                                          ) : (
-                                            <>
-                                              <i className="ri-play-line animate-pulse"></i>
-                                              <span>Auto-Scrape</span>
-                                            </>
-                                          )}
-                                        </button>
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
                       </div>
-                    );
-                  })}
-                </div>
-              )}
-            </motion.div>
+
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={e => {
+                            e.stopPropagation();
+                            handleScrapeAllForAnime(group.animeId, group.episodes);
+                          }}
+                          disabled={scrapingAllAnimeId !== null}
+                          // FIX #4: explain to the user WHY the button is disabled on other cards
+                          title={
+                            scrapingAllAnimeId !== null && scrapingAllAnimeId !== group.animeId
+                              ? `A batch scrape is already running for another anime \u2014 please wait for it to finish.`
+                              : `Auto-scrape all ${group.episodes.length} broken episodes sequentially`
+                          }
+                          className="px-3.5 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-xs font-semibold shadow-md flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:-translate-y-0.5"
+                        >
+                          {scrapingAllAnimeId === group.animeId ? (
+                            <>
+                              <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                              <span>{scrapeAllProgressMsg}</span>
+                            </>
+                          ) : (
+                            <>
+                              <i className="ri-play-list-add-line"></i>
+                              <span>Scrape All ({group.episodes.length})</span>
+                            </>
+                          )}
+                        </button>
+
+                        <a
+                          href={`/admin/anime?id=${group.animeId}`}
+                          onClick={e => e.stopPropagation()}
+                          className="px-3.5 py-1.5 bg-blue-50 text-blue-600 border border-blue-200/60 rounded-xl text-xs font-semibold hover:bg-blue-100 transition-colors flex items-center gap-1.5"
+                        >
+                          <i className="ri-external-link-line"></i>
+                          Manage
+                        </a>
+                        <div className="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400">
+                          <i className={`text-xl transition-transform duration-200 ${isExpanded ? 'ri-arrow-up-s-line' : 'ri-arrow-down-s-line'}`}></i>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Accordion Dropdown Content */}
+                    <AnimatePresence initial={false}>
+                      {isExpanded && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: 'auto', opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.25, ease: 'easeInOut' }}
+                          className="border-t border-slate-150 bg-slate-50/50"
+                        >
+                          <div className="px-6 py-4 space-y-3">
+                            {group.episodes.map((ep) => {
+                              const isScraping = scrapingStatus[ep.id]?.status === 'scraping';
+                              // FIX #10: cache isUpcomingEpisode — it does date parsing, no need to call twice per row
+                              const isUpcoming = isUpcomingEpisode(ep);
+                              // FIX #12: use centralised helpers
+                              const noUrl = isBadUrl(ep.video_url);
+                              const noServers = isBadServers(ep.video_servers);
+
+                              return (
+                                <div
+                                  key={ep.id}
+                                  className="bg-white border border-slate-150 hover:border-slate-200 rounded-xl p-4 flex flex-col md:flex-row justify-between md:items-center gap-4 transition-all"
+                                >
+                                  {/* Episode details */}
+                                  <div className="space-y-1">
+                                    <div className="text-sm font-bold text-slate-700">
+                                      <span className="text-blue-600 font-extrabold mr-2">EP {ep.episode_number}</span>
+                                      {ep.title || `Episode ${ep.episode_number}`}
+                                    </div>
+
+                                    {/* Scraper Status */}
+                                    {scrapingStatus[ep.id] && (
+                                      <div className={`text-xs font-semibold ${
+                                        scrapingStatus[ep.id].status === 'success' ? 'text-green-600' :
+                                        scrapingStatus[ep.id].status === 'error' ? 'text-rose-600' :
+                                        'text-amber-600 animate-pulse'
+                                      } flex items-center gap-1.5`}>
+                                        {scrapingStatus[ep.id].status === 'scraping' && <i className="ri-loader-4-line animate-spin text-sm"></i>}
+                                        {scrapingStatus[ep.id].status === 'success' && <i className="ri-checkbox-circle-line text-sm"></i>}
+                                        {scrapingStatus[ep.id].status === 'error' && <i className="ri-error-warning-line text-sm"></i>}
+                                        <span>{scrapingStatus[ep.id].message}</span>
+                                      </div>
+                                    )}
+
+                                    <div className="flex flex-wrap gap-2 pt-1">
+                                      {isUpcoming ? ( // FIX #10: use cached value
+                                        <span className="bg-slate-100 text-slate-500 border border-slate-200 px-2.5 py-0.5 rounded-lg text-[10px] font-bold flex items-center gap-1">
+                                          <i className="ri-calendar-todo-line text-blue-500"></i>
+                                          Upcoming / Unreleased
+                                        </span>
+                                      ) : (
+                                        <>
+                                          {noUrl && (
+                                            <span className="bg-rose-50 text-rose-600 px-2.5 py-0.5 rounded-lg text-[10px] font-bold border border-rose-200 flex items-center gap-1">
+                                              <i className="ri-link-unlink"></i>
+                                              Missing Primary URL
+                                            </span>
+                                          )}
+                                          {noServers && (
+                                            <span className="bg-amber-50 text-amber-600 px-2.5 py-0.5 rounded-lg text-[10px] font-bold border border-amber-200 flex items-center gap-1">
+                                              <i className="ri-server-line"></i>
+                                              No Video Servers
+                                            </span>
+                                          )}
+                                        </>
+                                      )}
+                                      {!noServers && (
+                                        <span className="bg-blue-50 text-blue-600 px-2.5 py-0.5 rounded-lg text-[10px] font-bold border border-blue-200">
+                                          {ep.video_servers?.length} servers loaded
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {/* Action Buttons */}
+                                  <div className="flex items-center gap-3">
+                                    <button
+                                      onClick={() => openEditModal(ep)}
+                                      disabled={isScraping}
+                                      className="px-3.5 py-2 bg-slate-50 hover:bg-slate-100 text-slate-600 hover:text-slate-800 rounded-xl text-xs font-bold transition-all border border-slate-200 flex items-center gap-1"
+                                      title="Edit streams manually"
+                                    >
+                                      <i className="ri-edit-line"></i>
+                                      Quick Edit
+                                    </button>
+
+                                    <button
+                                      onClick={() => triggerAutoScrape(ep)}
+                                      disabled={isScraping}
+                                      className="px-4 py-2 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+                                      // FIX #10: use cached isUpcoming
+                                      title={isUpcoming ? "Scrape upcoming episode anyway" : "Run all scrapers sequentially to repair streams"}
+                                    >
+                                      {isScraping ? (
+                                        <>
+                                          <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                          <span>Scraping...</span>
+                                        </>
+                                      ) : isUpcoming ? ( // FIX #10: use cached isUpcoming
+                                        <>
+                                          <i className="ri-time-line text-blue-300"></i>
+                                          <span>Force Scrape</span>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <i className="ri-play-line animate-pulse"></i>
+                                          <span>Auto-Scrape</span>
+                                        </>
+                                      )}
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </motion.div>
       </div>
 
       {/* Quick Edit Dialog Modal Overlay */}
@@ -891,6 +1018,13 @@ export default function AdminMaintenance() {
 
               {/* Modal Body */}
               <div className="p-6 space-y-6 max-h-[60vh] overflow-y-auto">
+                {/* FIX #9: warn user if this episode is currently being auto-scraped */}
+                {editingEpisode && scrapingStatus[editingEpisode.id]?.status === 'scraping' && (
+                  <div className="bg-amber-50 border border-amber-200 text-amber-700 rounded-xl p-3 text-xs flex items-center gap-2">
+                    <div className="w-3.5 h-3.5 border-2 border-amber-500 border-t-transparent rounded-full animate-spin flex-shrink-0"></div>
+                    <span><strong>Auto-scrape in progress</strong> for this episode. Saving manual edits now may conflict with the scraper result. Consider waiting for it to finish.</span>
+                  </div>
+                )}
                 {editError && (
                   <div className="bg-rose-50 border border-rose-200 text-rose-600 rounded-xl p-3 text-xs flex items-center gap-2">
                     <i className="ri-error-warning-line text-sm"></i>

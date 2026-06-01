@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 
 export function useLocalStorage<T>(key: string, initialValue: T) {
   // Get from local storage then parse stored json or return initialValue
@@ -28,7 +28,7 @@ export function useLocalStorage<T>(key: string, initialValue: T) {
 }
 
 export function useWatchlist() {
-  const [watchlist, setWatchlist] = useLocalStorage('watchlist', []);
+  const [watchlist, setWatchlist] = useLocalStorage<any[]>('watchlist', []);
   
   const addToWatchlist = (anime: any) => {
     const animeData = {
@@ -55,7 +55,7 @@ export function useWatchlist() {
 }
 
 export function useFavorites() {
-  const [favorites, setFavorites] = useLocalStorage('favorites', []);
+  const [favorites, setFavorites] = useLocalStorage<any[]>('favorites', []);
   
   const addToFavorites = (anime: any) => {
     const animeData = {
@@ -82,10 +82,10 @@ export function useFavorites() {
 }
 
 export function useWatchProgress() {
-  const [watchProgress, setWatchProgress] = useLocalStorage('watchProgress', {});
+  const [watchProgress, setWatchProgress] = useLocalStorage<Record<string, number>>('watchProgress', {});
   
   const updateProgress = (animeId: string | number, episodes: number) => {
-    setWatchProgress((prev: any) => ({
+    setWatchProgress((prev) => ({
       ...prev,
       [animeId]: episodes
     }));

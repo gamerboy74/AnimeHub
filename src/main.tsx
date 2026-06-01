@@ -10,6 +10,60 @@ import { queryClient } from './utils/query';
 // Error tracking is auto-initialized on module load
 import './utils/monitoring/errorTracking';
 
+// Global Fetch Interceptor to dynamically inject Supabase session JWT
+const originalFetch = window.fetch;
+window.fetch = async function (input, init) {
+  let url = '';
+  if (typeof input === 'string') {
+    url = input;
+  } else if (input instanceof URL) {
+    url = input.href;
+  } else if (input instanceof Request) {
+    url = input.url;
+  }
+
+  const isProtectedApi =
+    url.includes('/api/admin') ||
+    url.includes('/api/scheduler') ||
+    url.includes('/api/scrape') ||
+    url.includes('/api/add-scraped-episode') ||
+    url.includes('/api/start-large-scrape') ||
+    url.includes('/api/scraping-progress');
+
+  const isPublicProxy = url.includes('/api/image-proxy') || url.includes('/api/stream-proxy');
+
+  if (isProtectedApi && !isPublicProxy) {
+    try {
+      const { supabase } = await import('./lib/database/supabase');
+      const { data: { session } } = await supabase.auth.getSession();
+
+      if (session?.access_token) {
+        if (input instanceof Request) {
+          const newHeaders = new Headers(input.headers);
+          if (!newHeaders.has('Authorization')) {
+            newHeaders.set('Authorization', `Bearer ${session.access_token}`);
+          }
+          const newRequest = new Request(input, {
+            headers: newHeaders
+          });
+          return originalFetch.call(window, newRequest, init);
+        } else {
+          init = init || {};
+          const headers = new Headers(init.headers);
+          if (!headers.has('Authorization')) {
+            headers.set('Authorization', `Bearer ${session.access_token}`);
+          }
+          init.headers = headers;
+        }
+      }
+    } catch (err) {
+      console.error('Failed to inject Auth token in fetch:', err);
+    }
+  }
+
+  return originalFetch.call(window, input, init);
+};
+
 // Filter out browser extension errors (non-critical, safe to ignore)
 function shouldIgnoreError(error: ErrorEvent | PromiseRejectionEvent): boolean {
   const message = error instanceof ErrorEvent 

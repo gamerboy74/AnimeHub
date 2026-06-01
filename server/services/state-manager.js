@@ -1,4 +1,5 @@
 import { redisClient } from './bull-queue.js';
+import { supabase } from '../config/supabase.js';
 
 export class StateManager {
   constructor() {
@@ -7,6 +8,8 @@ export class StateManager {
     this.SCRAPER_STATS_PREFIX = 'scraper:stats:';
     this.RATE_LIMIT_TTL = 3600; // 1 hour
     this.LOCK_TTL = 300; // 5 minutes
+    this.LOGS_KEY = 'scheduler:logs';
+    this.CONSECUTIVE_FAILURES_PREFIX = 'scraper:consecutive_failures:';
   }
 
   /**
@@ -81,6 +84,10 @@ export class StateManager {
     await redisClient.hIncrBy(key, 'success', 1);
     await redisClient.hIncrBy(key, 'totalMs', responseTimeMs);
     await redisClient.expire(key, 86400); // Keep for 24h
+
+    // Reset consecutive failures
+    const consecutiveKey = `${this.CONSECUTIVE_FAILURES_PREFIX}${scraperName}`;
+    await redisClient.set(consecutiveKey, '0');
   }
 
   /**
@@ -91,6 +98,53 @@ export class StateManager {
     await redisClient.hIncrBy(key, 'failure', 1);
     await redisClient.hIncrBy(key, `error:${errorType}`, 1);
     await redisClient.expire(key, 86400);
+
+    // Track consecutive failures
+    const consecutiveKey = `${this.CONSECUTIVE_FAILURES_PREFIX}${scraperName}`;
+    const consecutiveFailures = await redisClient.incr(consecutiveKey);
+    await redisClient.expire(consecutiveKey, 86400);
+
+    if (consecutiveFailures >= 5) {
+      // Reset the failure counter so we don't trigger repeatedly
+      await redisClient.set(consecutiveKey, '0');
+
+      // Log the consecutive failures warning without automatically disabling it
+      const displayName = scraperName.toUpperCase();
+      await this.addLog(
+        'warn',
+        `${displayName} detected 5 consecutive failures/blocks (auto-disabling bypassed).`
+      );
+    }
+
+    return consecutiveFailures;
+  }
+
+  /**
+   * Add a system log entry
+   */
+  async addLog(level, message) {
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      level, // 'success' | 'warn' | 'error' | 'info'
+      message,
+    };
+    await redisClient.lPush(this.LOGS_KEY, JSON.stringify(logEntry));
+    await redisClient.lTrim(this.LOGS_KEY, 0, 99); // Keep last 100 logs
+  }
+
+  /**
+   * Get recent system log entries
+   */
+  async getLogs() {
+    const logs = await redisClient.lRange(this.LOGS_KEY, 0, -1);
+    return logs.map(l => JSON.parse(l));
+  }
+
+  /**
+   * Clear system log entries
+   */
+  async clearLogs() {
+    await redisClient.del(this.LOGS_KEY);
   }
 
   /**
@@ -100,14 +154,21 @@ export class StateManager {
     const key = `${this.SCRAPER_STATS_PREFIX}${scraperName}`;
     const stats = await redisClient.hGetAll(key);
     if (Object.keys(stats).length === 0) {
-      return { success: 0, failure: 0, totalMs: 0 };
+      return { success: 0, failure: 0, totalMs: 0, successRate: 100 };
     }
+
+    const success = parseInt(stats.success || '0');
+    const failure = parseInt(stats.failure || '0');
+    const total = success + failure;
+    const successRate = total > 0 ? Math.round((success / total) * 100) : 100;
+
     return {
-      success: parseInt(stats.success || '0'),
-      failure: parseInt(stats.failure || '0'),
+      success,
+      failure,
       totalMs: parseInt(stats.totalMs || '0'),
+      successRate,
       avgResponseTime: Math.round(
-        parseInt(stats.totalMs || '0') / Math.max(1, parseInt(stats.success || '1'))
+        parseInt(stats.totalMs || '0') / Math.max(1, success)
       ),
       errors: Object.entries(stats)
         .filter(([k]) => k.startsWith('error:'))
@@ -118,7 +179,7 @@ export class StateManager {
   /**
    * Get all scraper stats
    */
-  async getAllScraperStats(scrapers = ['gogoanime', 'nineanime', 'animesuge', 'reanime']) {
+  async getAllScraperStats(scrapers = ['cinevo', 'animesuge', 'sanjianime', 'reanime', 'nineanime']) {
     const results = {};
     for (const scraper of scrapers) {
       results[scraper] = await this.getScraperStats(scraper);
@@ -140,6 +201,11 @@ export class StateManager {
     const keys = await redisClient.keys(`${this.SCRAPER_STATS_PREFIX}*`);
     if (keys.length > 0) {
       await redisClient.del(keys);
+    }
+    // Also reset consecutive failure keys
+    const consecutiveKeys = await redisClient.keys(`${this.CONSECUTIVE_FAILURES_PREFIX}*`);
+    if (consecutiveKeys.length > 0) {
+      await redisClient.del(consecutiveKeys);
     }
   }
 }
