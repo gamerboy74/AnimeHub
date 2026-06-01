@@ -3,7 +3,6 @@ import { Suspense, lazy } from 'react'
 import { AppRoutes } from './router/index'
 import { AuthProvider } from './contexts/auth/AuthContext'
 import { NavigationProvider } from './contexts/navigation/NavigationContext'
-import Layout from './components/layout/MainLayout'
 import { SparkleLoadingSpinner } from './components/base/LoadingSpinner'
 
 // Lazy load PerformanceMonitor to improve initial FCP
@@ -23,11 +22,9 @@ function App() {
     <AuthProvider>
       <BrowserRouter basename={import.meta.env.BASE_URL || '/'}>
         <NavigationProvider>
-          <Layout>
-            <Suspense fallback={<LoadingFallback />}>
-              <AppRoutes />
-            </Suspense>
-          </Layout>
+          <Suspense fallback={<LoadingFallback />}>
+            <AppRoutes />
+          </Suspense>
           {/* Performance Monitor - lazy loaded to improve FCP */}
           <Suspense fallback={null}>
             <PerformanceMonitor 

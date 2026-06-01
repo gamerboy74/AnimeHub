@@ -34,7 +34,7 @@ A modern, full-featured anime streaming platform built with React, TypeScript, V
 
 3. **Set up database:**
    - Open Supabase SQL Editor
-   - Run the entire contents of `supabase-database-backup.sql`
+   - Run the entire contents of `migrations/supabase-database-backup.sql`
    - Create storage buckets in Supabase Dashboard > Storage:
      - `anime-posters` (public)
      - `anime-banners` (public)
@@ -55,17 +55,18 @@ A modern, full-featured anime streaming platform built with React, TypeScript, V
 
 ```
 animehub/
-├── src/                    # Source code
-│   ├── components/        # React components
+├── src/                    # React frontend source code
+│   ├── components/        # React components (base, layout, feature, etc.)
 │   ├── pages/             # Page components
 │   ├── services/          # API services
 │   ├── hooks/             # Custom React hooks
 │   ├── utils/             # Utility functions
 │   └── router/            # Routing configuration
+├── server/                # Express backend production server (index.js, routes, etc.)
+├── migrations/            # Database SQL migrations and database schema backups
+├── docs/                  # Project documentation and guides
 ├── public/                # Static assets
-├── scripts/               # Build and utility scripts
-├── server-backend.js      # Express backend server
-├── supabase-database-backup.sql  # Complete database schema
+├── scripts/               # Build, scraper, and backfill scripts
 └── vite.config.ts        # Vite configuration
 ```
 
@@ -83,7 +84,7 @@ animehub/
 
 ## 🗄️ Database
 
-The complete database schema is in `supabase-database-backup.sql`. This file includes:
+The complete database schema is in `migrations/supabase-database-backup.sql`. This file includes:
 - All tables (anime, episodes, users, progress, favorites, watchlist, reviews, etc.)
 - Indexes for performance
 - RLS policies for security

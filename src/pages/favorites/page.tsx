@@ -10,7 +10,6 @@ import { useCurrentUser } from '../../hooks/auth/selectors';
 
 export default function FavoritesPage() {
   const [sortBy, setSortBy] = useState('addedAt');
-  const [showToast, setShowToast] = useState<string | null>(null);
   const navigate = useNavigate();
   const user = useCurrentUser();
   const { favorites, loading, error } = useFavorites();
@@ -20,11 +19,6 @@ export default function FavoritesPage() {
     navigate('/');
     return null;
   }
-
-  const showToastMessage = (message: string) => {
-    setShowToast(message);
-    setTimeout(() => setShowToast(null), 3000);
-  };
 
 
   const sortedFavorites = useMemo(() => {
@@ -230,14 +224,14 @@ export default function FavoritesPage() {
                 
                 <div className="flex flex-wrap gap-3">
                   {Object.entries(
-                    favorites.reduce((acc: any, anime) => {
+                    favorites.reduce((acc: Record<string, number>, anime) => {
                       anime.genres.forEach((genre: string) => {
                         acc[genre] = (acc[genre] || 0) + 1;
                       });
                       return acc;
-                    }, {})
+                    }, {} as Record<string, number>)
                   )
-                    .sort(([,a], [,b]) => (b as number) - (a as number))
+                    .sort(([, a], [, b]) => b - a)
                     .slice(0, 10)
                     .map(([genre, count]) => (
                       <span
@@ -257,18 +251,6 @@ export default function FavoritesPage() {
         </div>
       </main>
 
-      {/* Toast Notification */}
-      {showToast && (
-        <motion.div
-          initial={{ opacity: 0, y: 50 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: 50 }}
-          className="fixed bottom-6 right-6 bg-teal-600 text-white px-8 py-4 rounded-xl shadow-2xl z-50 flex items-center gap-3 backdrop-blur-sm"
-        >
-          <i className="ri-check-line text-lg"></i>
-          <span className="font-medium">{showToast}</span>
-        </motion.div>
-      )}
     </>
   );
 }

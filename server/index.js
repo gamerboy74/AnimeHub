@@ -147,11 +147,14 @@ app.get("/health-old", (req, res) => {
 });
 
 // Register Modular Routers
-app.use(resolverRouter);
-app.use(schedulerRouter);
-app.use(scrapersRouter);
-app.use(animeRouter);
-app.use(adminRouter);
+// NOTE: Public routers (anime, resolver) MUST come before admin-protected routers
+// (scrapers, scheduler) because those apply requireAdmin globally via router.use(),
+// which would intercept and block all requests — including public ones — if registered first.
+app.use(resolverRouter);  // Public: stream resolver endpoints
+app.use(animeRouter);     // Public: /api/anime/* browsing endpoints
+app.use(adminRouter);     // Admin: /api/admin/* management endpoints
+app.use(schedulerRouter); // Admin-only: scheduler requires admin token for all routes
+app.use(scrapersRouter);  // Admin-only: scrapers require admin token for all routes
 
 // Error handling middleware (must be after all routes)
 app.use(errorHandler);
