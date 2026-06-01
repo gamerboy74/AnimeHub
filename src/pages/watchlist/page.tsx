@@ -2,13 +2,11 @@
 import { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Link, useNavigate } from 'react-router-dom';
-import Navbar from '../../components/feature/Navbar';
 import AnimeCard from '../../components/feature/AnimeCard';
 import Button from '../../components/base/Button';
 import { SparkleLoadingSpinner } from '../../components/base/LoadingSpinner';
 import { useWatchlist } from '../../hooks/user/watchlist';
 import { useCurrentUser } from '../../hooks/auth/selectors';
-import Footer from '../../components/feature/Footer';
 
 export default function WatchlistPage() {
   const [sortBy, setSortBy] = useState('added');
@@ -94,8 +92,7 @@ export default function WatchlistPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-green-50 via-yellow-50 to-pink-50">
-      <Navbar />
+    <>
       
       <main className="w-full px-4 sm:px-6 lg:px-8 py-8">
         <div className="max-w-7xl mx-auto">
@@ -337,7 +334,6 @@ export default function WatchlistPage() {
       </main>
 
       {/* Footer */}
-<Footer />
-    </div>
+    </>
   );
 }

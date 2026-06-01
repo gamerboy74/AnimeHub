@@ -2,7 +2,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import Navbar from '../../components/feature/Navbar';
+import { VideoPlayerError } from '../../components/common/ErrorFallbacks';
 import AnimeCard from '../../components/feature/AnimeCard';
 import Button from '../../components/base/Button';
 import SmartVideoPlayer from '../../components/player/SmartVideoPlayer';
@@ -12,8 +12,6 @@ import { useAnimeById, useSimilarAnime } from '../../hooks/useAnime';
 import { useCurrentUser } from '../../hooks/auth/selectors';
 import type { VideoSource } from '../../services/media/video';
 import ErrorBoundary from '../../components/common/ErrorBoundary';
-import { VideoPlayerError } from '../../components/common/ErrorFallbacks';
-import Footer from '../../components/feature/Footer';
 
 export default function PlayerPage() {
   const { animeId, episode } = useParams<{ animeId: string; episode: string }>();
@@ -303,39 +301,28 @@ export default function PlayerPage() {
 
   if (animeLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-green-50 via-yellow-50 to-pink-50">
-        <Navbar />
-        <div className="flex items-center justify-center min-h-[60vh]">
-          <div className="text-center">
-            <SparkleLoadingSpinner size="xl" text="Loading anime..." />
-          </div>
-        </div>
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <SparkleLoadingSpinner size="xl" text="Loading anime..." />
       </div>
     );
   }
 
   if (!anime) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-green-50 via-yellow-50 to-pink-50">
-        <Navbar />
-        <div className="flex items-center justify-center min-h-[60vh]">
-          <div className="text-center">
-            <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl p-16 max-w-md mx-auto border border-white/50">
-              <i className="ri-error-warning-line text-7xl text-teal-300 mb-6"></i>
-              <h2 className="text-2xl font-bold text-teal-800 mb-4">Anime not found</h2>
-              <Link to="/anime">
-                <Button size="lg">Browse Anime</Button>
-              </Link>
-            </div>
-          </div>
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl p-16 max-w-md mx-auto border border-white/50 text-center">
+          <i className="ri-error-warning-line text-7xl text-teal-300 mb-6"></i>
+          <h2 className="text-2xl font-bold text-teal-800 mb-4">Anime not found</h2>
+          <Link to="/anime">
+            <Button size="lg">Browse Anime</Button>
+          </Link>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-green-50 via-yellow-50 to-pink-50">
-      <Navbar />
+    <>
       
       <main className="w-full px-4 sm:px-6 lg:px-8 py-8">
         <div className="max-w-7xl mx-auto">
@@ -628,9 +615,6 @@ export default function PlayerPage() {
           </motion.section>
         </div>
       </main>
-
-      {/* Footer */}
-      <Footer />
-    </div>
+    </>
   );
 }

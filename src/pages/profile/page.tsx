@@ -2,8 +2,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Link } from 'react-router-dom';
-import Navbar from '../../components/feature/Navbar';
-import Footer from '../../components/feature/Footer';
 import Button from '../../components/base/Button';
 import Input from '../../components/base/Input';
 import { SparkleLoadingSpinner } from '../../components/base/LoadingSpinner';
@@ -205,11 +203,8 @@ export default function ProfilePage() {
   // Loading state
   if (loading || authLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-green-50 via-yellow-50 to-pink-50">
-        <Navbar />
-        <div className="flex items-center justify-center min-h-[60vh]">
-          <SparkleLoadingSpinner size="lg" text="Loading your profile..." />
-        </div>
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <SparkleLoadingSpinner size="lg" text="Loading your profile..." />
       </div>
     );
   }
@@ -237,8 +232,7 @@ export default function ProfilePage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-green-50 via-yellow-50 to-pink-50">
-      <Navbar />
+    <>
       
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Profile Header */}
@@ -746,8 +740,6 @@ export default function ProfilePage() {
           </motion.div>
         )}
       </AnimatePresence>
-
-      <Footer />
-    </div>
+    </>
   );
 }

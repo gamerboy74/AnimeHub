@@ -1,7 +1,6 @@
 import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { useMemo, useState, useEffect, useCallback, memo } from 'react';
-import Navbar from '../../components/feature/Navbar';
 import HeroCarousel from '../../components/feature/HeroCarousel';
 import AnimeCard from '../../components/feature/AnimeCard';
 import VirtualizedGrid from '../../components/feature/VirtualizedGrid';
@@ -10,7 +9,6 @@ import { useTrendingAnime, usePopularAnime, useRecentAnime, useContinueWatching 
 import { useCurrentUser } from '../../hooks/auth/selectors';
 import ErrorBoundary from '../../components/common/ErrorBoundary';
 import { SectionError, ContentError } from '../../components/common/ErrorFallbacks';
-import Footer from '../../components/feature/Footer';
 import { getProxiedImageUrl, getDirectImageUrl } from '../../utils/media/imageProxy';
 
 // Interfaces for type safety
@@ -428,9 +426,8 @@ export default function Home() {
   });
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-green-50 via-yellow-50 to-pink-50">
-      <Navbar />
-
+    <>
+ 
       <main className="w-full px-4 sm:px-6 lg:px-8 py-8">
         <div className="max-w-7xl mx-auto">
           {/* Hero Section */}
@@ -652,9 +649,6 @@ export default function Home() {
           </ErrorBoundary>
         </div>
       </main>
-
-      {/* Footer */}
-      <Footer />
-    </div>
+    </>
   );
 }

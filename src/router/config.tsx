@@ -3,6 +3,7 @@ import { lazy } from 'react';
 import type { RouteObject } from 'react-router-dom';
 import ProtectedRoute from '../components/auth/ProtectedRoute';
 const AdminLayout = lazy(() => import('../pages/admin/AdminLayout'));
+const MainLayout = lazy(() => import('../components/layout/MainLayout'));
 import { RouteWrapper } from './components/RouteWrapper';
 
 const HomePage = lazy(() => import('../pages/home'));
@@ -31,63 +32,69 @@ const AdminMaintenance = lazy(() => import('../pages/admin/maintenance/page'));
 const routes: RouteObject[] = [
   {
     path: '/',
-    element: <RouteWrapper path="/"><HomePage /></RouteWrapper>
-  },
-  {
-    path: '/anime',
-    element: <RouteWrapper path="/anime"><AnimePage /></RouteWrapper>
-  },
-  {
-    path: '/anime/:id',
-    element: <RouteWrapper path="/anime/:id"><AnimeDetailPage /></RouteWrapper>
-  },
-  {
-    path: '/player/:animeId/:episode',
-    element: <RouteWrapper path="/player/:animeId/:episode"><PlayerPage /></RouteWrapper>
-  },
-  {
-    path: '/watchlist',
-    element: (
-      <RouteWrapper path="/watchlist">
-        <ProtectedRoute>
-          <WatchlistPage />
-        </ProtectedRoute>
-      </RouteWrapper>
-    )
-  },
-  {
-    path: '/profile',
-    element: (
-      <RouteWrapper path="/profile">
-        <ProtectedRoute>
-          <ProfilePage />
-        </ProtectedRoute>
-      </RouteWrapper>
-    )
-  },
-  {
-    path: '/search',
-    element: <RouteWrapper path="/search"><SearchPage /></RouteWrapper>
-  },
-  {
-    path: '/settings',
-    element: (
-      <RouteWrapper path="/settings">
-        <ProtectedRoute>
-          <SettingsPage />
-        </ProtectedRoute>
-      </RouteWrapper>
-    )
-  },
-  {
-    path: '/favorites',
-    element: (
-      <RouteWrapper path="/favorites">
-        <ProtectedRoute>
-          <FavoritesPage />
-        </ProtectedRoute>
-      </RouteWrapper>
-    )
+    element: <MainLayout />,
+    children: [
+      {
+        index: true,
+        element: <RouteWrapper path="/"><HomePage /></RouteWrapper>
+      },
+      {
+        path: 'anime',
+        element: <RouteWrapper path="/anime"><AnimePage /></RouteWrapper>
+      },
+      {
+        path: 'anime/:id',
+        element: <RouteWrapper path="/anime/:id"><AnimeDetailPage /></RouteWrapper>
+      },
+      {
+        path: 'player/:animeId/:episode',
+        element: <RouteWrapper path="/player/:animeId/:episode"><PlayerPage /></RouteWrapper>
+      },
+      {
+        path: 'watchlist',
+        element: (
+          <RouteWrapper path="/watchlist">
+            <ProtectedRoute>
+              <WatchlistPage />
+            </ProtectedRoute>
+          </RouteWrapper>
+        )
+      },
+      {
+        path: 'profile',
+        element: (
+          <RouteWrapper path="/profile">
+            <ProtectedRoute>
+              <ProfilePage />
+            </ProtectedRoute>
+          </RouteWrapper>
+        )
+      },
+      {
+        path: 'search',
+        element: <RouteWrapper path="/search"><SearchPage /></RouteWrapper>
+      },
+      {
+        path: 'settings',
+        element: (
+          <RouteWrapper path="/settings">
+            <ProtectedRoute>
+              <SettingsPage />
+            </ProtectedRoute>
+          </RouteWrapper>
+        )
+      },
+      {
+        path: 'favorites',
+        element: (
+          <RouteWrapper path="/favorites">
+            <ProtectedRoute>
+              <FavoritesPage />
+            </ProtectedRoute>
+          </RouteWrapper>
+        )
+      }
+    ]
   },
   {
     path: '/login',

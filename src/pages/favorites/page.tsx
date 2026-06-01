@@ -2,13 +2,11 @@
 import { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import Navbar from '../../components/feature/Navbar';
 import AnimeCard from '../../components/feature/AnimeCard';
 import Button from '../../components/base/Button';
 import { SparkleLoadingSpinner } from '../../components/base/LoadingSpinner';
 import { useFavorites } from '../../hooks/user/favorites';
 import { useCurrentUser } from '../../hooks/auth/selectors';
-import Footer from '../../components/feature/Footer';
 
 export default function FavoritesPage() {
   const [sortBy, setSortBy] = useState('addedAt');
@@ -69,8 +67,7 @@ export default function FavoritesPage() {
   });
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-green-50 via-yellow-50 to-pink-50">
-      <Navbar />
+    <>
       
       <main className="w-full px-4 sm:px-6 lg:px-8 py-8">
         <div className="max-w-7xl mx-auto">
@@ -260,9 +257,6 @@ export default function FavoritesPage() {
         </div>
       </main>
 
-      {/* Footer */}
-      <Footer />
-
       {/* Toast Notification */}
       {showToast && (
         <motion.div
@@ -275,6 +269,6 @@ export default function FavoritesPage() {
           <span className="font-medium">{showToast}</span>
         </motion.div>
       )}
-    </div>
+    </>
   );
 }

@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useTransition, Suspense } from 'react';
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import Navbar from '../../components/feature/Navbar';
 import AnimeCard from '../../components/feature/AnimeCard';
 import { LazyTrailerSection, LazyRelatedAnime, LazyAnimeCharacters } from '../../components/lazy';
 import ReviewSection from '../../components/feature/ReviewSection';
@@ -18,7 +17,6 @@ import { generatePlayerUrl } from '../../utils/media/player';
 import { getProxiedImageUrl, getDirectImageUrl } from '../../utils/media/imageProxy';
 import ErrorBoundary from '../../components/common/ErrorBoundary';
 import { SectionError, ContentError } from '../../components/common/ErrorFallbacks';
-import Footer from '../../components/feature/Footer';
 import { prefetchOnHover } from '../../router/helpers/prefetch';
 
 
@@ -282,11 +280,8 @@ export default function AnimeDetailPage() {
   // Loading state
   if (animeLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-green-50 via-yellow-50 to-pink-50">
-        <Navbar />
-        <div className="flex items-center justify-center min-h-[60vh]">
-          <SparkleLoadingSpinner size="xl" text="Loading anime details..." />
-        </div>
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <SparkleLoadingSpinner size="xl" text="Loading anime details..." />
       </div>
     );
   }
@@ -294,20 +289,17 @@ export default function AnimeDetailPage() {
   // Error state
   if (animeError || !anime) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-green-50 via-yellow-50 to-pink-50">
-        <Navbar />
-        <div className="flex items-center justify-center min-h-[60vh]">
-          <div className="text-center">
-            <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl p-16 max-w-md mx-auto border border-white/50">
-              <i className="ri-error-warning-line text-7xl text-teal-300 mb-6" aria-hidden="true" />
-              <h2 className="text-2xl font-bold text-teal-800 mb-4">Anime not found</h2>
-              <p className="text-teal-600 mb-6 text-lg">The anime you're looking for doesn't exist.</p>
-              <Link to="/anime">
-                <Button size="lg" aria-label="Browse anime">
-                  Browse Anime
-                </Button>
-              </Link>
-            </div>
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="text-center">
+          <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl p-16 max-w-md mx-auto border border-white/50">
+            <i className="ri-error-warning-line text-7xl text-teal-300 mb-6" aria-hidden="true" />
+            <h2 className="text-2xl font-bold text-teal-800 mb-4">Anime not found</h2>
+            <p className="text-teal-600 mb-6 text-lg">The anime you're looking for doesn't exist.</p>
+            <Link to="/anime">
+              <Button size="lg" aria-label="Browse anime">
+                Browse Anime
+              </Button>
+            </Link>
           </div>
         </div>
       </div>
@@ -315,8 +307,7 @@ export default function AnimeDetailPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-green-50 via-yellow-50 to-pink-50">
-      <Navbar />
+    <>
 
       {/* Hero Section */}
       <div className="relative">
@@ -848,10 +839,6 @@ export default function AnimeDetailPage() {
           </motion.section>
         </div>
       </main>
-    
-      <Footer />
-
-      
       {/* Toast Notification */}
       {showToast && (
         <motion.div
@@ -866,6 +853,6 @@ export default function AnimeDetailPage() {
           <span className="font-medium">{showToast}</span>
         </motion.div>
       )}
-    </div>
+    </>
   );
 }
