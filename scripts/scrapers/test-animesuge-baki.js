@@ -1,7 +1,7 @@
 import { chromium } from 'playwright-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import dotenv from 'dotenv';
-import { extractSeasonNumber } from '../server/utils/seasonExtractor.js';
+import { extractSeasonNumber } from '../../server/utils/seasonExtractor.js';
 
 dotenv.config();
 chromium.use(StealthPlugin());

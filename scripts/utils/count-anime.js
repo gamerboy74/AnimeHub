@@ -1,4 +1,4 @@
-import { supabase } from "./index.js";
+import { supabase } from "../../server/index.js";
 
 async function count() {
   const { count, error } = await supabase

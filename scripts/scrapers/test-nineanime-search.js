@@ -5,9 +5,9 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-dotenv.config({ path: join(__dirname, "..", ".env") });
+dotenv.config({ path: join(__dirname, "..", "..", ".env") });
 
-import { NineAnimeScraperService } from '../server/scrapers/nineanime.js';
+import { NineAnimeScraperService } from '../../server/scrapers/nineanime.js';
 
 // Setup basic in-memory caching mocks for backend environment in standalone script
 global.cacheGet = async () => null;

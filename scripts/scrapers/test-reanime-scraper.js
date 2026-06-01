@@ -1,5 +1,5 @@
-import { ReAnimeScraperService } from "./scrapers/reanime.js";
-import { closeBrowser } from "./services/queue.js";
+import { ReAnimeScraperService } from "../../server/scrapers/reanime.js";
+import { closeBrowser } from "../../server/services/queue.js";
 
 async function runTest() {
   console.log("🚀 Testing updated Re:ANIME scraper with Cloudflare persistence & Turnstile auto-solve...");

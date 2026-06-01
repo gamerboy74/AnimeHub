@@ -6,7 +6,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // Load dotenv
-dotenv.config({ path: join(__dirname, "..", ".env") });
+dotenv.config({ path: join(__dirname, "..", "..", ".env") });
 
 // Mock the required index.js functions before importing the scraper
 import { chromium } from 'playwright-extra';
@@ -24,20 +24,21 @@ async function getBrowser() {
   return sharedBrowser;
 }
 
-// Inject getBrowser into the global context or import mock module
+// Inject getBrowser into the global context
 global.getBrowser = getBrowser;
 
 // Now import the service dynamically
-import { AnimeSugeScraperService } from '../server/scrapers/animesuge.js';
+import { AnimeSugeScraperService } from '../../server/scrapers/animesuge.js';
 
 async function runServiceTest() {
-  console.log('🚀 Running AnimeSugeScraperService integration test...');
+  console.log('🚀 Running AnimeSugeScraperService integration test for Fairy Tail: Phoenix Priestess...');
   try {
-    const animeUrl = 'Wistoria: Wand and Sword Season 2';
-    const result = await AnimeSugeScraperService.scrapeAnimeEpisode(animeUrl, 1, {
-      timeout: 35000,
-      retries: 1,
-      lang: 'dub'
+    const animeTitle = 'Fairy Tail: Phoenix Priestess';
+    const result = await AnimeSugeScraperService.scrapeAnimeEpisode(animeTitle, 1, {
+      timeout: 45000,
+      retries: 2,
+      lang: 'sub',
+      dbAnimeId: '7ff0c7a5-3309-4e6a-9b13-7ad257d4756e'
     });
 
     console.log('\n🎉 TEST RESULT SUMMARY:');

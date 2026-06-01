@@ -6,7 +6,7 @@
  * Run: node server/scrapers/test-cinevo-service.js
  */
 
-import { CinevoScraperService } from "./cinevo.js";
+import { CinevoScraperService } from "../../server/scrapers/cinevo.js";
 
 async function run() {
   console.log("═".repeat(60));

@@ -5,9 +5,9 @@ import { fileURLToPath } from 'url';
 // Load .env from project root
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = join(__filename, '..');
-dotenv.config({ path: join(__dirname, '..', '.env') });
+dotenv.config({ path: join(__dirname, '..', '..', '.env') });
 
-import { NineAnimeScraperService } from '../server/index.js';
+import { NineAnimeScraperService } from '../../server/index.js';
 
 (async () => {
   try {

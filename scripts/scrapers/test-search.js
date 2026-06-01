@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-dotenv.config({ path: join(__dirname, "..", ".env") });
+dotenv.config({ path: join(__dirname, "..", "..", ".env") });
 
 import { chromium } from 'playwright-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
@@ -24,7 +24,7 @@ async function getBrowser() {
 
 global.getBrowser = getBrowser;
 
-import { AnimeSugeScraperService } from '../server/scrapers/animesuge.js';
+import { AnimeSugeScraperService } from '../../server/scrapers/animesuge.js';
 
 async function testSearch() {
   const browser = await getBrowser();

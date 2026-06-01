@@ -1,4 +1,4 @@
-import { extractSeasonNumber } from '../server/utils/seasonExtractor.js';
+import { extractSeasonNumber } from '../../server/utils/seasonExtractor.js';
 
 const testCases = [
   { title: "Overlord", expected: 1 },
