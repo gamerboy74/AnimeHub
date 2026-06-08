@@ -52,6 +52,18 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const redis = null; // Redis disabled
 
+// Normalize double slashes in request paths
+app.use((req, res, next) => {
+  const qIndex = req.url.indexOf('?');
+  let path = qIndex !== -1 ? req.url.slice(0, qIndex) : req.url;
+  const query = qIndex !== -1 ? req.url.slice(qIndex) : '';
+  if (path.includes('//')) {
+    path = path.replace(/\/+/g, '/');
+    req.url = path + query;
+  }
+  next();
+});
+
 // Global Middlewares
 app.use(requestIdMiddleware); // Request ID for error correlation
 app.use(helmet(getHelmetConfig())); // Enhanced security headers

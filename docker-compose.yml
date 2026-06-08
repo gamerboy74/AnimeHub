@@ -59,6 +59,18 @@ services:
     networks:
       - animehub-network
 
+  # Cloudflare Tunnel
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: animehub-tunnel
+    command: tunnel --no-autoupdate --url http://server:3001
+    depends_on:
+      server:
+        condition: service_healthy
+    networks:
+      - animehub-network
+    restart: unless-stopped
+
 volumes:
   redis_data:
     driver: local
