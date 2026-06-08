@@ -46,8 +46,7 @@ desktop.ini
 *.temp
 .cache/
 
-# Docker
-.dockerignore
+# Docker (intentionally NOT ignoring .dockerignore — it should be committed)
 
 # Debug
 .vscode/

@@ -1,0 +1,46 @@
+# Node
+node_modules/
+npm-debug.log*
+
+# Build artifacts
+out/
+dist/
+build/
+*.tsbuildinfo
+
+# Frontend source (not needed in server container)
+src/
+public/
+index.html
+vite.config.ts
+tailwind.config.ts
+postcss.config.ts
+tsconfig*.json
+auto-imports.d.ts
+
+# Git / Editor
+.git/
+.gitignore
+.vscode/
+.idea/
+
+# Env files (injected via docker-compose, not baked in)
+.env
+.env.*
+
+# Scripts / tests (not needed at runtime)
+scripts/
+scratch/
+tests/
+docs/
+migrations/
+supabase/
+
+# Misc
+*.log
+.DS_Store
+Thumbs.db
+performance-report.json
+render.yaml
+vercel.json
+README.md
