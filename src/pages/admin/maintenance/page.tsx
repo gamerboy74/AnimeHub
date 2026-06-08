@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '../../../lib/database/supabase';
 import { SparkleLoadingSpinner } from '../../../components/base/LoadingSpinner';
+import { apiClient } from '../../../utils/api/client';
+
 
 // ─── Session-storage keys for persisting scrape state across tab switches / refreshes ───
 const SS_SCRAPE_STATUS = 'maintenance:scrapingStatus';
@@ -55,6 +57,7 @@ interface Episode {
     title_english: string | null;
     poster_url: string | null;
     status: string;
+    scraper_urls?: Record<string, any> | null;
   } | null;
 }
 
@@ -113,6 +116,7 @@ export default function AdminMaintenance() {
   const [filterType, setFilterType] = useState<'all' | 'missing_url' | 'missing_servers' | 'both_missing'>('all');
   const [filterStatus, setFilterStatus] = useState<'all' | 'ongoing' | 'completed'>('all');
   const [sortBy, setSortBy] = useState<'problems_desc' | 'ep_asc' | 'ep_desc'>('problems_desc');
+  const [onlyLessServers, setOnlyLessServers] = useState(false);
   const [expandedAnime, setExpandedAnime] = useState<string | null>(null);
 
   // Edit Modal State
@@ -216,7 +220,8 @@ export default function AdminMaintenance() {
               title,
               title_english,
               poster_url,
-              status
+              status,
+              scraper_urls
             )
           `)
           .or('video_url.is.null,video_servers.is.null,video_servers.eq.[]')
@@ -232,6 +237,7 @@ export default function AdminMaintenance() {
             status,
             type,
             total_episodes,
+            scraper_urls,
             episodes (
               id
             )
@@ -266,9 +272,49 @@ export default function AdminMaintenance() {
             title: a.title,
             title_english: a.title_english,
             poster_url: a.poster_url,
-            status: a.status
+            status: a.status,
+            scraper_urls: a.scraper_urls
           }
         });
+      });
+
+      // Construct virtual stubs for anime that have less than 2 scraper URLs (but do have episodes)
+      const missingScrapersAnime = (animeList || []).filter((a: any) => {
+        const scraperUrls = a.scraper_urls;
+        const scraperUrlsCount = scraperUrls && typeof scraperUrls === 'object' && !Array.isArray(scraperUrls)
+          ? Object.keys(scraperUrls).length
+          : 0;
+        return scraperUrlsCount < 2 && a.episodes && a.episodes.length > 0;
+      });
+
+      missingScrapersAnime.forEach(a => {
+        const totalEpCount = a.total_episodes || 1;
+        for (let epNum = 1; epNum <= totalEpCount; epNum++) {
+          const existsInTyped = typedEpisodes.some(te => te.anime_id === a.id && te.episode_number === epNum);
+          const existsInVirtual = virtualEpisodes.some(ve => ve.anime_id === a.id && ve.episode_number === epNum);
+
+          if (!existsInTyped && !existsInVirtual) {
+            virtualEpisodes.push({
+              id: `virtual-${a.id}-scrapers-${epNum}`,
+              episode_number: epNum,
+              title: `Episode ${epNum}`,
+              video_url: 'placeholder',
+              video_servers: [
+                { name: 'Placeholder 1', url: 'placeholder', lang: 'sub' },
+                { name: 'Placeholder 2', url: 'placeholder', lang: 'sub' }
+              ],
+              anime_id: a.id,
+              anime: {
+                id: a.id,
+                title: a.title,
+                title_english: a.title_english,
+                poster_url: a.poster_url,
+                status: a.status,
+                scraper_urls: a.scraper_urls
+              }
+            });
+          }
+        }
       });
 
       const combinedEpisodes = [...typedEpisodes, ...virtualEpisodes];
@@ -276,7 +322,15 @@ export default function AdminMaintenance() {
       // FIX #12: use centralised helpers for consistency
       const incomplete = combinedEpisodes.filter(ep => {
         const isProblem = isBadUrl(ep.video_url) || isBadServers(ep.video_servers);
-        return isProblem && !isUpcomingEpisode(ep);
+
+        // Also flag as incomplete if the anime has less than 2 scraper URLs
+        const scraperUrls = ep.anime?.scraper_urls;
+        const scraperUrlsCount = scraperUrls && typeof scraperUrls === 'object' && !Array.isArray(scraperUrls)
+          ? Object.keys(scraperUrls).length
+          : 0;
+        const isScraperProblem = scraperUrlsCount < 2;
+
+        return (isProblem || isScraperProblem) && !isUpcomingEpisode(ep);
       });
 
       const missingUrlCount = incomplete.filter(ep => isBadUrl(ep.video_url)).length;
@@ -326,6 +380,27 @@ export default function AdminMaintenance() {
     // 3. Filter by anime release status
     if (filterStatus !== 'all') {
       filtered = filtered.filter(ep => ep.anime?.status?.toLowerCase() === filterStatus);
+    }
+
+    // 4. Filter by having less than 2 scraper / server URLs if active
+    if (onlyLessServers) {
+      filtered = filtered.filter(ep => {
+        // Safe check for scraper URLs count (JSON/object or null)
+        const scraperUrls = ep.anime?.scraper_urls;
+        const scraperUrlsCount = scraperUrls && typeof scraperUrls === 'object' && !Array.isArray(scraperUrls)
+          ? Object.keys(scraperUrls).length
+          : 0;
+
+        // Safe check for video servers count (JSONB array or null/empty)
+        const serverUrlsCount = Array.isArray(ep.video_servers)
+          ? ep.video_servers.length
+          : 0;
+
+        return scraperUrlsCount < 2 || serverUrlsCount < 2;
+      });
+    } else {
+      // If the toggle is OFF, we ONLY show episodes that are actually broken (missing URL or servers)
+      filtered = filtered.filter(ep => isBadUrl(ep.video_url) || isBadServers(ep.video_servers));
     }
 
     // Group by Anime
@@ -503,17 +578,10 @@ export default function AdminMaintenance() {
         [epId]: { status: 'scraping', message: 'Triggering sequential scrapers...' }
       }));
 
-      const BACKEND_URL = import.meta.env.DEV ? '' : (import.meta.env.VITE_BACKEND_URL || '');
-      const response = await fetch(`${BACKEND_URL}/api/admin/maintenance/scrape-sequential`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          animeId: ep.anime_id,
-          episodeNumber: ep.episode_number
-        })
+      const data = await apiClient.post('/api/admin/maintenance/scrape-sequential', {
+        animeId: ep.anime_id,
+        episodeNumber: ep.episode_number
       });
-
-      const data = await response.json();
 
       if (data.success && data.episode) {
         setScrapingStatus(prev => ({
@@ -611,32 +679,38 @@ export default function AdminMaintenance() {
   const groupedResults = getFilteredAndGroupedResults();
 
   return (
-    <div className="relative min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 text-slate-800 font-sans overflow-x-hidden">
+    <div className="relative min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 text-slate-800 font-sans overflow-x-hidden pb-16">
       {/* Background Grid Pattern */}
-      <div className="absolute inset-0 bg-[url('data:image/svg+xml,%3Csvg%20width%3D%2260%22%20height%3D%2260%22%20viewBox%3D%220%200%2060%2060%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%3E%3Cg%20fill%3D%22none%22%20fill-rule%3D%22evenodd%22%3E%3Cg%20fill%3D%22%239C92AC%22%20fill-opacity%3D%220.05%22%3E%3Ccircle%20cx%3D%2230%22%20cy%3D%2230%22%20r%3D%222%22/%3E%3C/g%3E%3C/g%3E%3C/svg%3E')] opacity-40"></div>
+      <div className="absolute inset-0 bg-[url('data:image/svg+xml,%3Csvg%20width%3D%2260%22%20height%3D%2260%22%20viewBox%3D%220%200%2060%2060%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%3E%3Cg%20fill%3D%22none%22%20fill-rule%3D%22evenodd%22%3E%3Cg%20fill%3D%22%239C92AC%22%20fill-opacity%3D%220.05%22%3E%3Ccircle%20cx%3D%2230%22%20cy%3D%2230%22%20r%3D%222%22/%3E%3C/g%3E%3C/g%3E%3C/svg%3E')] opacity-40 pointer-events-none"></div>
+
+      {/* Ambient Glowing Orbs */}
+      <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-gradient-to-br from-blue-400/20 to-purple-400/20 blur-[120px] pointer-events-none animate-pulse duration-[6000ms]"></div>
+      <div className="absolute bottom-[-10%] right-[-10%] w-[45%] h-[45%] rounded-full bg-gradient-to-br from-indigo-400/15 to-rose-400/15 blur-[120px] pointer-events-none animate-pulse duration-[8000ms]"></div>
 
       <div className="relative z-10 container mx-auto px-4 py-8 max-w-7xl">
-
         {/* Page Title & Controls */}
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 mb-8 border-b border-slate-200 pb-6">
+        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 mb-8 border-b border-slate-200/60 pb-6">
           <div>
-            <div className="flex items-center gap-3.5 mb-1.5">
-              <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-blue-700 rounded-xl flex items-center justify-center shadow-lg">
-                <i className="ri-shield-flash-line text-white text-xl"></i>
+            <div className="flex items-center gap-3.5 mb-2">
+              <div className="w-12 h-12 bg-gradient-to-tr from-blue-600 via-indigo-600 to-indigo-700 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-500/20 hover:scale-105 transition-transform">
+                <i className="ri-shield-flash-fill text-white text-2xl animate-pulse"></i>
               </div>
-              <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                Database Integrity & Maintenance
-              </h1>
+              <div>
+                <h1 className="text-3xl sm:text-4xl font-black bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 bg-clip-text text-transparent tracking-tight">
+                  Integrity & Maintenance
+                </h1>
+                <p className="text-slate-500 text-xs font-mono tracking-widest uppercase mt-0.5">Database Diagnostic Panel</p>
+              </div>
             </div>
-            <p className="text-slate-600 text-base">
-              Isolate broken stream links, find missing episode servers, and invoke sequence scraping in one click.
+            <p className="text-slate-600 text-sm sm:text-base max-w-2xl font-medium mt-1">
+              Isolate broken stream links, find missing episode servers, and invoke automated multi-pipeline sequence scraping in one click.
             </p>
           </div>
 
           <button
             onClick={handleScanDatabase}
             disabled={scanning}
-            className="px-5 py-3 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-xl text-sm font-semibold transition-all duration-200 shadow-md hover:shadow-lg flex items-center gap-2 hover:-translate-y-0.5"
+            className="px-6 py-3.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800 text-white rounded-2xl text-sm font-extrabold transition-all duration-300 shadow-md hover:shadow-lg hover:shadow-blue-500/20 flex items-center gap-2.5 hover:-translate-y-0.5 active:translate-y-0 disabled:opacity-50"
           >
             {scanning ? (
               <>
@@ -646,22 +720,20 @@ export default function AdminMaintenance() {
             ) : (
               <>
                 <i className="ri-radar-line text-base animate-pulse"></i>
-                <span>Refresh Scan</span>
+                <span>Refresh Diagnostics</span>
               </>
             )}
           </button>
         </div>
-
-
 
         <motion.div
           initial={{ opacity: 0, y: 15 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.2 }}
         >
-          {/* FIX #5: Scan error banner */}
+          {/* Scan error banner */}
           {scanError && (
-            <div className="mb-6 bg-rose-50 border border-rose-200 text-rose-700 rounded-2xl px-5 py-4 flex items-start gap-3 shadow-sm">
+            <div className="mb-6 bg-rose-50 border border-rose-200 text-rose-700 rounded-3xl px-5 py-4 flex items-start gap-3 shadow-md">
               <i className="ri-error-warning-fill text-xl flex-shrink-0 mt-0.5"></i>
               <div>
                 <div className="font-bold text-sm">Scan Failed</div>
@@ -669,41 +741,52 @@ export default function AdminMaintenance() {
               </div>
               <button
                 onClick={handleScanDatabase}
-                className="ml-auto px-3 py-1.5 bg-rose-100 hover:bg-rose-200 border border-rose-300 rounded-lg text-xs font-bold text-rose-700 transition-colors flex-shrink-0"
+                className="ml-auto px-3.5 py-1.5 bg-rose-100 hover:bg-rose-200 border border-rose-300 rounded-xl text-xs font-bold text-rose-700 transition-colors flex-shrink-0"
               >
                 Retry
               </button>
             </div>
           )}
+
           {/* Stats Grid */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
             {[
-              { label: 'Total Checked', val: stats.totalChecked, icon: 'ri-bookmark-3-line', color: 'text-blue-600', bg: 'bg-white/80 border-slate-200 shadow-md' },
-              { label: 'Incomplete Episodes', val: stats.totalIncomplete, icon: 'ri-error-warning-line', color: 'text-rose-600', bg: 'bg-white/80 border-slate-200 shadow-md' },
-              { label: 'Missing Primary URLs', val: stats.missingUrl, icon: 'ri-link-unlink-m', color: 'text-amber-600', bg: 'bg-white/80 border-slate-200 shadow-md' },
-              { label: 'Missing Server Slots', val: stats.missingServers, icon: 'ri-server-fill', color: 'text-cyan-600', bg: 'bg-white/80 border-slate-200 shadow-md' }
+              { label: 'Total Checked', val: stats.totalChecked, icon: 'ri-bookmark-3-line', color: 'from-blue-500 to-indigo-600 shadow-blue-500/10' },
+              { label: 'Incomplete Episodes', val: stats.totalIncomplete, icon: 'ri-error-warning-line', color: 'from-rose-500 to-pink-600 shadow-rose-500/10' },
+              { label: 'Missing Primary URLs', val: stats.missingUrl, icon: 'ri-link-unlink-m', color: 'from-amber-500 to-orange-600 shadow-amber-500/10' },
+              { label: 'Missing Server Slots', val: stats.missingServers, icon: 'ri-server-fill', color: 'from-cyan-500 to-blue-600 shadow-cyan-500/10' }
             ].map((card, idx) => (
-              <div key={idx} className={`border rounded-2xl p-5 backdrop-blur-sm relative overflow-hidden group transition-all duration-200 ${card.bg}`}>
-                <div className="absolute -right-4 -bottom-4 text-slate-200/30 text-6xl group-hover:scale-110 transition-transform duration-300">
+              <div key={idx} className="bg-white/65 backdrop-blur-md border border-white/45 rounded-3xl p-5 shadow-lg shadow-slate-100/50 hover:shadow-xl hover:border-slate-350 transition-all duration-300 hover:scale-[1.03] active:scale-[0.97] group relative overflow-hidden flex flex-col justify-between">
+                <div className="absolute -right-4 -bottom-4 text-slate-100 group-hover:text-slate-200/50 text-7xl group-hover:scale-110 transition-all duration-500 pointer-events-none select-none">
                   <i className={card.icon}></i>
                 </div>
-                <div className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                  <i className={`${card.icon} ${card.color} text-sm`}></i>
-                  {card.label}
+                <div>
+                  <div className="text-[10px] font-extrabold uppercase tracking-widest text-slate-500 mb-3 flex items-center gap-1.5">
+                    <div className={`w-6 h-6 rounded-lg bg-gradient-to-br ${card.color} text-white flex items-center justify-center shadow-md`}>
+                      <i className={`${card.icon} text-xs`}></i>
+                    </div>
+                    {card.label}
+                  </div>
+                  <div className="text-3xl font-black font-mono tracking-tight text-slate-800 mt-2">{card.val.toLocaleString()}</div>
                 </div>
-                <div className="text-3xl font-extrabold text-slate-800 tracking-tight">{card.val}</div>
+                <div className="w-full h-1 bg-slate-100 rounded-full overflow-hidden mt-4">
+                  <div className={`h-full bg-gradient-to-r ${card.color}`} style={{ width: card.val > 0 ? '100%' : '0%' }}></div>
+                </div>
               </div>
             ))}
           </div>
 
           {/* Filters Controls Panel */}
-          <div className="bg-white/80 border border-white/20 backdrop-blur-sm rounded-2xl p-5 mb-8 shadow-lg">
-            <div className="flex items-center gap-2 mb-4">
-              <i className="ri-filter-2-line text-blue-600 text-lg"></i>
-              <h3 className="font-bold text-sm text-slate-700 uppercase tracking-wide">Filter Stream Problems</h3>
+          <div className="bg-white/60 border border-white/40 backdrop-blur-md rounded-3xl p-6 mb-8 shadow-xl shadow-slate-100/30">
+            <div className="flex items-center justify-between gap-4 mb-5 pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <i className="ri-equalizer-line text-blue-600 text-lg"></i>
+                <h3 className="font-extrabold text-sm text-slate-800 uppercase tracking-wider">Integrity Filters</h3>
+              </div>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest bg-slate-100/80 px-2.5 py-1 rounded-full border border-slate-200/50">Diagnostic Tools</span>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               {/* Search Input */}
               <div className="relative">
                 <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
@@ -714,43 +797,81 @@ export default function AdminMaintenance() {
                   placeholder="Search anime title..."
                   value={searchTerm}
                   onChange={e => setSearchTerm(e.target.value)}
-                  className="w-full bg-white border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-colors"
+                  className="w-full bg-white/70 border border-slate-200 rounded-2xl pl-10 pr-4 py-3 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100/60 transition-all shadow-sm font-semibold"
                 />
               </div>
 
               {/* Filter by Problem Type */}
-              <select
-                value={filterType}
-                onChange={e => setFilterType(e.target.value as any)}
-                className="bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 cursor-pointer transition-colors"
-              >
-                <option value="all">All Stream Problems</option>
-                <option value="missing_url">Missing Primary Video URL</option>
-                <option value="missing_servers">Empty Video Server List</option>
-                <option value="both_missing">Complete Stream Info Missing</option>
-              </select>
+              <div className="relative">
+                <select
+                  value={filterType}
+                  onChange={e => setFilterType(e.target.value as any)}
+                  className="w-full bg-white/70 border border-slate-200 rounded-2xl px-4 py-3 text-sm text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100/60 cursor-pointer transition-all shadow-sm appearance-none font-semibold"
+                >
+                  <option value="all">All Stream Problems</option>
+                  <option value="missing_url">Missing Primary Video URL</option>
+                  <option value="missing_servers">Empty Video Server List</option>
+                  <option value="both_missing">Complete Stream Info Missing</option>
+                </select>
+                <div className="absolute inset-y-0 right-0 pr-3.5 flex items-center pointer-events-none text-slate-400">
+                  <i className="ri-arrow-down-s-line text-lg"></i>
+                </div>
+              </div>
 
               {/* Filter by Release Status */}
-              <select
-                value={filterStatus}
-                onChange={e => setFilterStatus(e.target.value as any)}
-                className="bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 cursor-pointer transition-colors"
-              >
-                <option value="all">All Anime Statuses</option>
-                <option value="ongoing">Ongoing Anime</option>
-                <option value="completed">Completed Anime</option>
-              </select>
+              <div className="relative">
+                <select
+                  value={filterStatus}
+                  onChange={e => setFilterStatus(e.target.value as any)}
+                  className="w-full bg-white/70 border border-slate-200 rounded-2xl px-4 py-3 text-sm text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100/60 cursor-pointer transition-all shadow-sm appearance-none font-semibold"
+                >
+                  <option value="all">All Anime Statuses</option>
+                  <option value="ongoing">Ongoing Anime</option>
+                  <option value="completed">Completed Anime</option>
+                </select>
+                <div className="absolute inset-y-0 right-0 pr-3.5 flex items-center pointer-events-none text-slate-400">
+                  <i className="ri-arrow-down-s-line text-lg"></i>
+                </div>
+              </div>
 
               {/* Sort Results */}
-              <select
-                value={sortBy}
-                onChange={e => setSortBy(e.target.value as any)}
-                className="bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 cursor-pointer transition-colors"
+              <div className="relative">
+                <select
+                  value={sortBy}
+                  onChange={e => setSortBy(e.target.value as any)}
+                  className="w-full bg-white/70 border border-slate-200 rounded-2xl px-4 py-3 text-sm text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100/60 cursor-pointer transition-all shadow-sm appearance-none font-semibold"
+                >
+                  <option value="problems_desc">Most Problematic Anime First</option>
+                  <option value="ep_asc">Episode Number: Low to High</option>
+                  <option value="ep_desc">Episode Number: High to Low</option>
+                </select>
+                <div className="absolute inset-y-0 right-0 pr-3.5 flex items-center pointer-events-none text-slate-400">
+                  <i className="ri-arrow-down-s-line text-lg"></i>
+                </div>
+              </div>
+            </div>
+
+            {/* Integrity Diagnostics Toggles */}
+            <div className="mt-5 pt-4 border-t border-slate-100/80 flex flex-wrap gap-6 items-center animate-in fade-in duration-300">
+              <div
+                onClick={() => setOnlyLessServers(prev => !prev)}
+                className={`flex items-center gap-3.5 px-4 py-2.5 rounded-2xl border transition-all duration-300 cursor-pointer select-none group shadow-sm ${onlyLessServers
+                  ? 'bg-rose-50 border-rose-200 text-rose-700 shadow-rose-500/5'
+                  : 'bg-slate-50 border-slate-200 hover:bg-slate-100 text-slate-600 hover:text-slate-800'
+                  }`}
               >
-                <option value="problems_desc">Most Problematic Anime First</option>
-                <option value="ep_asc">Episode Number: Low to High</option>
-                <option value="ep_desc">Episode Number: High to Low</option>
-              </select>
+                <button
+                  type="button"
+                  id="only-less-servers-toggle"
+                  className={`relative w-9 h-5.5 rounded-full transition-colors duration-300 focus:outline-none flex-shrink-0 ${onlyLessServers ? 'bg-rose-600' : 'bg-slate-300'}`}
+                >
+                  <span className={`absolute top-0.5 left-0.5 w-4.5 h-4.5 bg-white rounded-full shadow transition-transform duration-300 ${onlyLessServers ? 'translate-x-3.5' : 'translate-x-0'}`} />
+                </button>
+                <span className="text-xs sm:text-sm font-extrabold flex items-center gap-2">
+                  <i className={`ri-shield-cross-line text-base ${onlyLessServers ? 'text-rose-500 animate-pulse' : 'text-slate-400'}`}></i>
+                  Show only Anime with &lt; 2 Scraper/Server URLs
+                </span>
+              </div>
             </div>
           </div>
 
@@ -760,19 +881,19 @@ export default function AdminMaintenance() {
               <SparkleLoadingSpinner size="lg" text="Scanning Supabase tables for stream integrity..." />
             </div>
           ) : groupedResults.length === 0 ? (
-            <div className="text-center py-16 bg-white/80 border border-slate-200 rounded-2xl backdrop-blur-sm shadow-md">
-              <div className="w-16 h-16 mx-auto mb-4 bg-emerald-50 rounded-full flex items-center justify-center border border-emerald-100 text-emerald-600">
+            <div className="text-center py-16 bg-white/60 border border-white/40 rounded-3xl backdrop-blur-md shadow-xl max-w-2xl mx-auto animate-in zoom-in-95 duration-350">
+              <div className="w-16 h-16 mx-auto mb-4 bg-emerald-50 rounded-full flex items-center justify-center border border-emerald-100 text-emerald-600 shadow-inner animate-bounce">
                 <i className="ri-checkbox-circle-fill text-3xl"></i>
               </div>
-              <h3 className="text-lg font-bold text-slate-800">Catalog Stream Integrity 100% Secure!</h3>
-              <p className="text-slate-500 text-sm max-w-md mx-auto mt-2 px-4">
-                All scanned episodes have primary streaming URLs and correctly structured video server configurations.
+              <h3 className="text-xl font-black text-slate-800">Catalog Integrity 100% Secure!</h3>
+              <p className="text-slate-500 text-sm max-w-sm mx-auto mt-2 px-4 leading-relaxed font-medium">
+                No problematic streams detected. All scanned episodes contain valid primary streaming links and modular server routes.
               </p>
             </div>
           ) : (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between px-1">
-                <span className="text-xs uppercase font-extrabold text-slate-400 tracking-wider">
+            <div className="space-y-5">
+              <div className="flex items-center justify-between px-1.5">
+                <span className="text-xs uppercase font-black text-slate-400 tracking-widest font-mono">
                   Problematic Catalog ({groupedResults.length} Anime, {stats.totalIncomplete} Episodes)
                 </span>
               </div>
@@ -782,67 +903,74 @@ export default function AdminMaintenance() {
                 return (
                   <div
                     key={group.animeId}
-                    className="bg-white/80 hover:bg-white border border-slate-200/80 rounded-2xl overflow-hidden transition-all duration-200 shadow-sm"
+                    className={`bg-white/60 hover:bg-white/80 border border-white/50 backdrop-blur-md rounded-3xl overflow-hidden transition-all duration-350 shadow-md hover:shadow-xl hover:scale-[1.005] hover:border-blue-200/60 ${isExpanded ? 'ring-2 ring-blue-500/10' : ''
+                      }`}
                   >
                     {/* Accordion Trigger Header */}
                     <div
                       onClick={() => setExpandedAnime(isExpanded ? null : group.animeId)}
-                      className="px-6 py-4 flex items-center justify-between gap-4 cursor-pointer select-none"
+                      className="px-6 py-4 flex flex-col md:flex-row md:items-center justify-between gap-5 cursor-pointer select-none"
                     >
-                      <div className="flex items-center gap-4 min-w-0">
+                      <div className="flex items-center gap-4 min-w-0 flex-1">
                         {group.posterUrl ? (
                           <img
                             src={group.posterUrl}
                             alt=""
-                            className="w-10 h-14 object-cover rounded-xl shadow-md border border-slate-200/60 flex-shrink-0"
-                            width={40}
-                            height={56}
+                            className="w-12 h-16 object-cover rounded-2xl shadow-lg border border-slate-200/60 flex-shrink-0 hover:scale-105 transition-transform"
+                            width={48}
+                            height={64}
                             loading="lazy"
                           />
                         ) : (
-                          <div className="w-10 h-14 bg-slate-100 rounded-xl flex items-center justify-center flex-shrink-0 border border-slate-200 text-slate-400">
-                            <i className="ri-film-line text-lg"></i>
+                          <div className="w-12 h-16 bg-slate-100 rounded-2xl flex items-center justify-center flex-shrink-0 border border-slate-200 text-slate-400">
+                            <i className="ri-film-line text-xl"></i>
                           </div>
                         )}
-                        <div className="min-w-0">
-                          <h3 className="font-semibold text-slate-800 hover:text-slate-900 transition-colors truncate text-base">
+                        <div className="min-w-0 flex-1">
+                          <h3 className="font-extrabold text-slate-800 hover:text-blue-600 transition-colors truncate text-base tracking-wide uppercase">
                             {group.animeTitle}
                           </h3>
-                          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                            <span className="bg-rose-50 text-rose-600 border border-rose-200 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider">
+                          <div className="flex items-center gap-2.5 mt-2 flex-wrap">
+                            <span className="bg-rose-50 text-rose-600 border border-rose-200/80 px-2.5 py-0.5 rounded-xl text-[10px] font-black uppercase tracking-wider shadow-sm flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping"></span>
                               {group.episodes.length} episodes broken
                             </span>
-                            <span className="bg-slate-100 text-slate-600 border border-slate-200 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase">
+                            <span className="bg-slate-100 text-slate-500 border border-slate-200 px-2.5 py-0.5 rounded-xl text-[10px] font-black uppercase tracking-wide">
                               {group.status}
                             </span>
+                            {group.episodes[0]?.anime?.scraper_urls && (
+                              <span className="bg-blue-50 text-blue-600 border border-blue-200/50 px-2.5 py-0.5 rounded-xl text-[10px] font-black uppercase tracking-wide flex items-center gap-1">
+                                <i className="ri-links-fill text-[11px]"></i>
+                                {Object.keys(group.episodes[0].anime.scraper_urls).length} Scrapers
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-3 self-end md:self-center">
                         <button
                           onClick={e => {
                             e.stopPropagation();
                             handleScrapeAllForAnime(group.animeId, group.episodes);
                           }}
                           disabled={scrapingAllAnimeId !== null}
-                          // FIX #4: explain to the user WHY the button is disabled on other cards
                           title={
                             scrapingAllAnimeId !== null && scrapingAllAnimeId !== group.animeId
                               ? `A batch scrape is already running for another anime \u2014 please wait for it to finish.`
                               : `Auto-scrape all ${group.episodes.length} broken episodes sequentially`
                           }
-                          className="px-3.5 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-xs font-semibold shadow-md flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:-translate-y-0.5"
+                          className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-2xl text-xs font-extrabold shadow-md flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:scale-105 active:scale-95"
                         >
                           {scrapingAllAnimeId === group.animeId ? (
                             <>
-                              <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                              <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
                               <span>{scrapeAllProgressMsg}</span>
                             </>
                           ) : (
                             <>
-                              <i className="ri-play-list-add-line"></i>
-                              <span>Scrape All ({group.episodes.length})</span>
+                              <i className="ri-play-list-add-line text-sm"></i>
+                              <span>Auto-Repair All ({group.episodes.length})</span>
                             </>
                           )}
                         </button>
@@ -850,13 +978,13 @@ export default function AdminMaintenance() {
                         <a
                           href={`/admin/anime?id=${group.animeId}`}
                           onClick={e => e.stopPropagation()}
-                          className="px-3.5 py-1.5 bg-blue-50 text-blue-600 border border-blue-200/60 rounded-xl text-xs font-semibold hover:bg-blue-100 transition-colors flex items-center gap-1.5"
+                          className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 rounded-2xl text-xs font-extrabold shadow-sm transition-all hover:scale-105 active:scale-95 flex items-center gap-1.5"
                         >
                           <i className="ri-external-link-line"></i>
                           Manage
                         </a>
-                        <div className="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400">
-                          <i className={`text-xl transition-transform duration-200 ${isExpanded ? 'ri-arrow-up-s-line' : 'ri-arrow-down-s-line'}`}></i>
+                        <div className={`w-8 h-8 rounded-xl hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-700 transition-all ${isExpanded ? 'bg-slate-100 text-blue-500' : ''}`}>
+                          <i className={`text-xl transition-transform duration-300 ${isExpanded ? 'ri-arrow-up-s-line' : 'ri-arrow-down-s-line'}`}></i>
                         </div>
                       </div>
                     </div>
@@ -869,59 +997,56 @@ export default function AdminMaintenance() {
                           animate={{ height: 'auto', opacity: 1 }}
                           exit={{ height: 0, opacity: 0 }}
                           transition={{ duration: 0.25, ease: 'easeInOut' }}
-                          className="border-t border-slate-150 bg-slate-50/50"
+                          className="border-t border-slate-100 bg-slate-50/40 backdrop-blur-sm"
                         >
-                          <div className="px-6 py-4 space-y-3">
+                          <div className="px-6 py-5 space-y-3.5">
                             {group.episodes.map((ep) => {
                               const isScraping = scrapingStatus[ep.id]?.status === 'scraping';
-                              // FIX #10: cache isUpcomingEpisode — it does date parsing, no need to call twice per row
                               const isUpcoming = isUpcomingEpisode(ep);
-                              // FIX #12: use centralised helpers
                               const noUrl = isBadUrl(ep.video_url);
                               const noServers = isBadServers(ep.video_servers);
 
                               return (
                                 <div
                                   key={ep.id}
-                                  className="bg-white border border-slate-150 hover:border-slate-200 rounded-xl p-4 flex flex-col md:flex-row justify-between md:items-center gap-4 transition-all"
+                                  className="bg-white/80 border border-slate-100 hover:border-slate-200/80 rounded-2xl p-4 flex flex-col md:flex-row justify-between md:items-center gap-4 transition-all hover:scale-[1.01] hover:shadow-md shadow-sm"
                                 >
                                   {/* Episode details */}
-                                  <div className="space-y-1">
-                                    <div className="text-sm font-bold text-slate-700">
-                                      <span className="text-blue-600 font-extrabold mr-2">EP {ep.episode_number}</span>
+                                  <div className="space-y-1.5">
+                                    <div className="text-sm font-extrabold text-slate-800">
+                                      <span className="text-blue-600 font-black mr-2 font-mono tracking-tight">EP {ep.episode_number}</span>
                                       {ep.title || `Episode ${ep.episode_number}`}
                                     </div>
 
                                     {/* Scraper Status */}
                                     {scrapingStatus[ep.id] && (
-                                      <div className={`text-xs font-semibold ${
-                                        scrapingStatus[ep.id].status === 'success' ? 'text-green-600' :
+                                      <div className={`text-xs font-extrabold ${scrapingStatus[ep.id].status === 'success' ? 'text-green-600' :
                                         scrapingStatus[ep.id].status === 'error' ? 'text-rose-600' :
-                                        'text-amber-600 animate-pulse'
-                                      } flex items-center gap-1.5`}>
+                                          'text-amber-600 animate-pulse'
+                                        } flex items-center gap-1.5`}>
                                         {scrapingStatus[ep.id].status === 'scraping' && <i className="ri-loader-4-line animate-spin text-sm"></i>}
-                                        {scrapingStatus[ep.id].status === 'success' && <i className="ri-checkbox-circle-line text-sm"></i>}
-                                        {scrapingStatus[ep.id].status === 'error' && <i className="ri-error-warning-line text-sm"></i>}
+                                        {scrapingStatus[ep.id].status === 'success' && <i className="ri-checkbox-circle-fill text-sm"></i>}
+                                        {scrapingStatus[ep.id].status === 'error' && <i className="ri-error-warning-fill text-sm"></i>}
                                         <span>{scrapingStatus[ep.id].message}</span>
                                       </div>
                                     )}
 
-                                    <div className="flex flex-wrap gap-2 pt-1">
-                                      {isUpcoming ? ( // FIX #10: use cached value
-                                        <span className="bg-slate-100 text-slate-500 border border-slate-200 px-2.5 py-0.5 rounded-lg text-[10px] font-bold flex items-center gap-1">
-                                          <i className="ri-calendar-todo-line text-blue-500"></i>
+                                    <div className="flex flex-wrap gap-2.5 pt-1">
+                                      {isUpcoming ? (
+                                        <span className="bg-slate-50 text-slate-500 border border-slate-200 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center gap-1">
+                                          <i className="ri-calendar-todo-fill text-indigo-500"></i>
                                           Upcoming / Unreleased
                                         </span>
                                       ) : (
                                         <>
                                           {noUrl && (
-                                            <span className="bg-rose-50 text-rose-600 px-2.5 py-0.5 rounded-lg text-[10px] font-bold border border-rose-200 flex items-center gap-1">
+                                            <span className="bg-rose-50 text-rose-600 px-2.5 py-0.5 rounded-lg text-[10px] font-black border border-rose-200/80 flex items-center gap-1">
                                               <i className="ri-link-unlink"></i>
                                               Missing Primary URL
                                             </span>
                                           )}
                                           {noServers && (
-                                            <span className="bg-amber-50 text-amber-600 px-2.5 py-0.5 rounded-lg text-[10px] font-bold border border-amber-200 flex items-center gap-1">
+                                            <span className="bg-amber-50 text-amber-600 px-2.5 py-0.5 rounded-lg text-[10px] font-black border border-amber-200/80 flex items-center gap-1">
                                               <i className="ri-server-line"></i>
                                               No Video Servers
                                             </span>
@@ -929,7 +1054,8 @@ export default function AdminMaintenance() {
                                         </>
                                       )}
                                       {!noServers && (
-                                        <span className="bg-blue-50 text-blue-600 px-2.5 py-0.5 rounded-lg text-[10px] font-bold border border-blue-200">
+                                        <span className="bg-blue-50 text-blue-600 px-2.5 py-0.5 rounded-lg text-[10px] font-black border border-blue-200/60 flex items-center gap-1.5">
+                                          <i className="ri-server-fill text-xs text-blue-500"></i>
                                           {ep.video_servers?.length} servers loaded
                                         </span>
                                       )}
@@ -941,18 +1067,17 @@ export default function AdminMaintenance() {
                                     <button
                                       onClick={() => openEditModal(ep)}
                                       disabled={isScraping}
-                                      className="px-3.5 py-2 bg-slate-50 hover:bg-slate-100 text-slate-600 hover:text-slate-800 rounded-xl text-xs font-bold transition-all border border-slate-200 flex items-center gap-1"
+                                      className="px-4 py-2.5 bg-slate-50 hover:bg-slate-100 text-slate-600 hover:text-slate-800 rounded-2xl text-xs font-extrabold transition-all border border-slate-200 flex items-center gap-1.5"
                                       title="Edit streams manually"
                                     >
-                                      <i className="ri-edit-line"></i>
+                                      <i className="ri-edit-2-line text-sm text-slate-500"></i>
                                       Quick Edit
                                     </button>
 
                                     <button
                                       onClick={() => triggerAutoScrape(ep)}
                                       disabled={isScraping}
-                                      className="px-4 py-2 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm disabled:opacity-50"
-                                      // FIX #10: use cached isUpcoming
+                                      className="px-4 py-2.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800 text-white rounded-2xl text-xs font-extrabold transition-all flex items-center gap-1.5 shadow disabled:opacity-50 hover:scale-105 active:scale-95"
                                       title={isUpcoming ? "Scrape upcoming episode anyway" : "Run all scrapers sequentially to repair streams"}
                                     >
                                       {isScraping ? (
@@ -960,15 +1085,15 @@ export default function AdminMaintenance() {
                                           <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
                                           <span>Scraping...</span>
                                         </>
-                                      ) : isUpcoming ? ( // FIX #10: use cached isUpcoming
+                                      ) : isUpcoming ? (
                                         <>
-                                          <i className="ri-time-line text-blue-300"></i>
+                                          <i className="ri-time-line text-blue-200"></i>
                                           <span>Force Scrape</span>
                                         </>
                                       ) : (
                                         <>
-                                          <i className="ri-play-line animate-pulse"></i>
-                                          <span>Auto-Scrape</span>
+                                          <i className="ri-play-fill text-sm"></i>
+                                          <span>Auto-Repair</span>
                                         </>
                                       )}
                                     </button>
@@ -991,50 +1116,49 @@ export default function AdminMaintenance() {
       {/* Quick Edit Dialog Modal Overlay */}
       <AnimatePresence>
         {editingEpisode && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-md">
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white border border-slate-200 w-full max-w-2xl rounded-2xl overflow-hidden shadow-2xl relative text-slate-800"
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white/95 backdrop-blur-md border border-white/50 w-full max-w-2xl rounded-[32px] overflow-hidden shadow-[0_32px_64px_-16px_rgba(0,0,0,0.2)] relative text-slate-800"
             >
               {/* Modal Header */}
-              <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+              <div className="px-6 py-5 bg-slate-50/80 border-b border-slate-200/60 flex justify-between items-center relative z-10">
                 <div>
-                  <h3 className="font-bold text-lg text-slate-800">
+                  <h3 className="font-black text-lg text-slate-800 tracking-wide uppercase">
                     Quick Edit Stream: EP {editingEpisode.episode_number}
                   </h3>
-                  <p className="text-slate-500 text-xs truncate max-w-md">
+                  <p className="text-blue-600 font-extrabold text-xs truncate max-w-md mt-0.5">
                     {editingEpisode.anime?.title}
                   </p>
                 </div>
                 <button
                   onClick={closeEditModal}
-                  className="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-600 transition-colors"
+                  className="w-9 h-9 rounded-xl hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-700 transition-colors border border-transparent hover:border-slate-200"
                 >
-                  <i className="ri-close-line text-xl"></i>
+                  <i className="ri-close-line text-2xl"></i>
                 </button>
               </div>
 
               {/* Modal Body */}
-              <div className="p-6 space-y-6 max-h-[60vh] overflow-y-auto">
-                {/* FIX #9: warn user if this episode is currently being auto-scraped */}
+              <div className="p-6 space-y-6 max-h-[60vh] overflow-y-auto relative z-10">
                 {editingEpisode && scrapingStatus[editingEpisode.id]?.status === 'scraping' && (
-                  <div className="bg-amber-50 border border-amber-200 text-amber-700 rounded-xl p-3 text-xs flex items-center gap-2">
-                    <div className="w-3.5 h-3.5 border-2 border-amber-500 border-t-transparent rounded-full animate-spin flex-shrink-0"></div>
-                    <span><strong>Auto-scrape in progress</strong> for this episode. Saving manual edits now may conflict with the scraper result. Consider waiting for it to finish.</span>
+                  <div className="bg-amber-50 border border-amber-200/80 text-amber-700 rounded-2xl p-4 text-xs flex items-center gap-3 shadow-inner">
+                    <div className="w-4 h-4 border-2 border-amber-600 border-t-transparent rounded-full animate-spin flex-shrink-0"></div>
+                    <span className="font-semibold"><strong>Auto-scrape in progress</strong> for this episode. Saving manual edits now may conflict with the scraper result. Consider waiting for it to finish.</span>
                   </div>
                 )}
                 {editError && (
-                  <div className="bg-rose-50 border border-rose-200 text-rose-600 rounded-xl p-3 text-xs flex items-center gap-2">
-                    <i className="ri-error-warning-line text-sm"></i>
-                    <span>{editError}</span>
+                  <div className="bg-rose-50 border border-rose-200 text-rose-600 rounded-2xl p-4 text-xs flex items-center gap-2">
+                    <i className="ri-error-warning-fill text-lg"></i>
+                    <span className="font-semibold">{editError}</span>
                   </div>
                 )}
 
                 {/* Title */}
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">
+                <div className="space-y-2">
+                  <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest font-mono">
                     Episode Custom Title
                   </label>
                   <input
@@ -1042,13 +1166,13 @@ export default function AdminMaintenance() {
                     value={editTitle}
                     onChange={e => setEditTitle(e.target.value)}
                     placeholder={`Episode ${editingEpisode.episode_number}`}
-                    className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    className="w-full bg-white border border-slate-200 rounded-2xl px-4 py-3 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100/60 transition-all font-semibold shadow-sm"
                   />
                 </div>
 
                 {/* Primary Video URL */}
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">
+                <div className="space-y-2">
+                  <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest font-mono">
                     Primary Video Stream URL
                   </label>
                   <input
@@ -1056,64 +1180,64 @@ export default function AdminMaintenance() {
                     value={editVideoUrl}
                     onChange={e => setEditVideoUrl(e.target.value)}
                     placeholder="Enter direct video source URL (.mp4, .m3u8, etc.)"
-                    className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    className="w-full bg-white border border-slate-200 rounded-2xl px-4 py-3 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100/60 transition-all font-semibold shadow-sm"
                   />
                 </div>
 
                 {/* Servers Array slots */}
-                <div className="space-y-3">
+                <div className="space-y-4">
                   <div className="flex justify-between items-center">
-                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">
+                    <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest font-mono">
                       Video Servers Slots list ({editServers.length})
                     </label>
                     <button
                       type="button"
                       onClick={addServerRow}
-                      className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 rounded-lg text-xs font-semibold transition-all flex items-center gap-1"
+                      className="px-3.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200/50 rounded-xl text-xs font-extrabold transition-all hover:scale-105 active:scale-95 flex items-center gap-1 shadow-sm"
                     >
-                      <i className="ri-add-fill"></i> Add Server
+                      <i className="ri-add-fill text-base"></i> Add Server
                     </button>
                   </div>
 
                   {editServers.length === 0 ? (
-                    <div className="text-center py-6 bg-slate-50 rounded-xl border border-slate-200 text-slate-400 text-xs">
+                    <div className="text-center py-8 bg-slate-50/50 rounded-2xl border border-slate-200/60 text-slate-450 text-xs font-medium leading-relaxed">
                       No server entries configured yet. Click "Add Server" to manually insert source links.
                     </div>
                   ) : (
-                    <div className="space-y-3">
+                    <div className="space-y-4">
                       {editServers.map((srv, idx) => (
-                        <div key={idx} className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex gap-3 items-end relative group">
+                        <div key={idx} className="bg-slate-50/60 backdrop-blur-sm border border-slate-200 rounded-2xl p-4 flex flex-col sm:flex-row gap-4 items-end relative shadow-inner">
                           {/* Name Input */}
-                          <div className="flex-1 space-y-1">
-                            <label className="text-[10px] font-bold text-slate-500 uppercase">Server Name</label>
+                          <div className="w-full sm:flex-1 space-y-1.5">
+                            <label className="text-[9px] font-black text-slate-500 uppercase tracking-wider">Server Name</label>
                             <input
                               type="text"
                               value={srv.name}
                               onChange={e => handleServerChange(idx, 'name', e.target.value)}
                               placeholder="e.g. Gogo HLS"
-                              className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-blue-500"
+                              className="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 font-semibold shadow-sm"
                             />
                           </div>
 
                           {/* URL Input */}
-                          <div className="flex-[2] space-y-1">
-                            <label className="text-[10px] font-bold text-slate-500 uppercase">Iframe/Playable Stream URL</label>
+                          <div className="w-full sm:flex-[2] space-y-1.5">
+                            <label className="text-[9px] font-black text-slate-500 uppercase tracking-wider">Iframe/Playable Stream URL</label>
                             <input
                               type="text"
                               value={srv.url}
                               onChange={e => handleServerChange(idx, 'url', e.target.value)}
                               placeholder="Embed watch link or direct HLS source"
-                              className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-blue-500"
+                              className="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 font-semibold shadow-sm"
                             />
                           </div>
 
                           {/* Language Selection */}
-                          <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-slate-500 uppercase">Language</label>
+                          <div className="w-full sm:w-auto space-y-1.5">
+                            <label className="text-[9px] font-black text-slate-500 uppercase tracking-wider block">Language</label>
                             <select
                               value={srv.lang}
                               onChange={e => handleServerChange(idx, 'lang', e.target.value)}
-                              className="bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-800 focus:outline-none cursor-pointer"
+                              className="w-full sm:w-auto bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-blue-500 cursor-pointer font-bold shadow-sm"
                             >
                               <option value="sub">Sub</option>
                               <option value="dub">Dub</option>
@@ -1125,10 +1249,10 @@ export default function AdminMaintenance() {
                           <button
                             type="button"
                             onClick={() => removeServerRow(idx)}
-                            className="w-8 h-8 rounded-lg bg-rose-50 border border-rose-200 hover:bg-rose-100 text-rose-600 flex items-center justify-center flex-shrink-0"
+                            className="w-9 h-9 rounded-xl bg-rose-50 border border-rose-200 hover:bg-rose-100 text-rose-600 flex items-center justify-center flex-shrink-0 transition-colors shadow-sm"
                             title="Remove server"
                           >
-                            <i className="ri-delete-bin-line text-sm"></i>
+                            <i className="ri-delete-bin-line text-base"></i>
                           </button>
                         </div>
                       ))}
@@ -1138,11 +1262,11 @@ export default function AdminMaintenance() {
               </div>
 
               {/* Modal Footer */}
-              <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex justify-end gap-3">
+              <div className="px-6 py-4 bg-slate-50/80 border-t border-slate-200/60 flex justify-end gap-3 relative z-10">
                 <button
                   onClick={closeEditModal}
                   disabled={savingEdit}
-                  className="px-4 py-2 bg-white hover:bg-slate-100 border border-slate-200 rounded-xl text-sm font-semibold text-slate-600 transition-colors"
+                  className="px-5 py-2.5 bg-white hover:bg-slate-50 border border-slate-200 rounded-2xl text-sm font-extrabold text-slate-600 hover:text-slate-855 transition-all shadow-sm hover:scale-105 active:scale-95"
                 >
                   Cancel
                 </button>
@@ -1150,7 +1274,7 @@ export default function AdminMaintenance() {
                 <button
                   onClick={saveQuickEdit}
                   disabled={savingEdit}
-                  className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-semibold rounded-xl text-sm transition-all flex items-center gap-1.5 shadow"
+                  className="px-6 py-2.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800 text-white font-extrabold rounded-2xl text-sm transition-all flex items-center gap-1.5 shadow shadow-blue-500/10 hover:scale-105 active:scale-95"
                 >
                   {savingEdit ? (
                     <>

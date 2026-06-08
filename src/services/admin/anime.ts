@@ -1,10 +1,9 @@
 import { supabase } from '../../lib/database/supabase'
 import type { Tables } from '../../lib/database/supabase'
+import { apiClient } from '../../utils/api/client'
 
 type Anime = Tables<'anime'>
 type Episode = Tables<'episodes'>
-
-const API_BASE = import.meta.env.DEV ? '' : (import.meta.env.VITE_BACKEND_URL || '')
 
 export interface CreateAnimeData {
   title: string
@@ -139,12 +138,7 @@ export class AdminAnimeService {
   // Create new anime (via server to bypass RLS)
   static async createAnime(animeData: CreateAnimeData): Promise<Anime | null> {
     try {
-      const res = await fetch(`${API_BASE}/api/admin/anime`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(animeData)
-      })
-      const json = await res.json()
+      const json = await apiClient.post<{ success: boolean; data: Anime; error?: string }>('/api/admin/anime', animeData)
       if (!json.success) throw new Error(json.error || 'Failed to create anime')
       return json.data
     } catch (err) {
@@ -156,12 +150,7 @@ export class AdminAnimeService {
   // Update anime (via server to bypass RLS)
   static async updateAnime(animeId: string, updates: UpdateAnimeData): Promise<Anime | null> {
     try {
-      const res = await fetch(`${API_BASE}/api/admin/anime/${animeId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updates)
-      })
-      const json = await res.json()
+      const json = await apiClient.put<{ success: boolean; data: Anime; error?: string }>(`/api/admin/anime/${animeId}`, updates)
       if (!json.success) throw new Error(json.error || 'Failed to update anime')
       return json.data
     } catch (err) {
@@ -173,8 +162,7 @@ export class AdminAnimeService {
   // Delete anime (via server to bypass RLS)
   static async deleteAnime(animeId: string): Promise<boolean> {
     try {
-      const res = await fetch(`${API_BASE}/api/admin/anime/${animeId}`, { method: 'DELETE' })
-      const json = await res.json()
+      const json = await apiClient.delete<{ success: boolean; error?: string }>(`/api/admin/anime/${animeId}`)
       return json.success === true
     } catch (err) {
       console.error('Error deleting anime:', err)
@@ -200,7 +188,7 @@ export class AdminAnimeService {
       }
 
       // Sort episodes by episode number
-      const sortedEpisodes = data.episodes?.sort((a: any, b: any) => 
+      const sortedEpisodes = data.episodes?.sort((a: any, b: any) =>
         a.episode_number - b.episode_number
       ) || []
 
@@ -218,12 +206,7 @@ export class AdminAnimeService {
   // Create episode (via server to bypass RLS)
   static async createEpisode(episodeData: CreateEpisodeData): Promise<Episode | null> {
     try {
-      const res = await fetch(`${API_BASE}/api/admin/episodes`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(episodeData)
-      })
-      const json = await res.json()
+      const json = await apiClient.post<{ success: boolean; data: Episode; error?: string }>('/api/admin/episodes', episodeData)
       if (!json.success) throw new Error(json.error || 'Failed to create episode')
       return json.data
     } catch (err) {
@@ -235,12 +218,7 @@ export class AdminAnimeService {
   // Update episode (via server to bypass RLS)
   static async updateEpisode(episodeId: string, updates: UpdateEpisodeData): Promise<Episode | null> {
     try {
-      const res = await fetch(`${API_BASE}/api/admin/episodes/${episodeId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updates)
-      })
-      const json = await res.json()
+      const json = await apiClient.put<{ success: boolean; data: Episode; error?: string }>(`/api/admin/episodes/${episodeId}`, updates)
       if (!json.success) throw new Error(json.error || 'Failed to update episode')
       return json.data
     } catch (err) {
@@ -252,8 +230,7 @@ export class AdminAnimeService {
   // Delete episode (via server to bypass RLS)
   static async deleteEpisode(episodeId: string): Promise<boolean> {
     try {
-      const res = await fetch(`${API_BASE}/api/admin/episodes/${episodeId}`, { method: 'DELETE' })
-      const json = await res.json()
+      const json = await apiClient.delete<{ success: boolean; error?: string }>(`/api/admin/episodes/${episodeId}`)
       return json.success === true
     } catch (err) {
       console.error('Error deleting episode:', err)
@@ -264,12 +241,7 @@ export class AdminAnimeService {
   // Bulk delete anime (via server to bypass RLS)
   static async bulkDeleteAnime(animeIds: string[]): Promise<boolean> {
     try {
-      const res = await fetch(`${API_BASE}/api/admin/anime/bulk-delete`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids: animeIds })
-      })
-      const json = await res.json()
+      const json = await apiClient.post<{ success: boolean; error?: string }>('/api/admin/anime/bulk-delete', { ids: animeIds })
       return json.success === true
     } catch (err) {
       console.error('Error bulk deleting anime:', err)

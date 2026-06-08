@@ -1,5 +1,4 @@
-// Browser-compatible interfaces and types for HiAnime scraper
-// The actual scraping logic is in the server-side script
+import { apiClient, apiFetchRaw } from '../../utils/api/client';
 
 export interface ScrapeResult {
   success: boolean;
@@ -33,8 +32,6 @@ export interface BatchScrapeResult {
 
 // Browser-compatible service that calls the server-side scraper
 export class HiAnimeScraperService {
-  private static readonly API_BASE_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
-
   /**
    * Scrape a single episode from HiAnime.do via backend API
    */
@@ -51,26 +48,12 @@ export class HiAnimeScraperService {
     try {
       console.log(`🎬 Scraping episode ${episodeNumber} for "${animeTitle}" (ID: ${animeId})`);
 
-      const response = await fetch(`${this.API_BASE_URL}/api/scrape-episode`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          animeTitle,
-          animeId,
-          episodeNumber,
-          options
-        })
+      return await apiClient.post('/api/scrape-episode', {
+        animeTitle,
+        animeId,
+        episodeNumber,
+        options
       });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `Server error: ${response.status}`);
-      }
-
-      const result = await response.json();
-      return result;
     } catch (error) {
       console.error('Error calling scraper API:', error);
       return {
@@ -122,26 +105,13 @@ export class HiAnimeScraperService {
     try {
       console.log(`🎬 Scraping all episodes for "${animeTitle}"`);
 
-      const response = await fetch(`${this.API_BASE_URL}/api/scrape-all-episodes`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          animeTitle,
-          animeId: options.animeId,
-          maxEpisodes: options.maxEpisodes || 20,
-          timeout: options.timeout || 60000,
-          retries: options.retries || 2
-        })
+      return await apiClient.post('/api/scrape-all-episodes', {
+        animeTitle,
+        animeId: options.animeId,
+        maxEpisodes: options.maxEpisodes || 20,
+        timeout: options.timeout || 60000,
+        retries: options.retries || 2
       });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `Server error: ${response.status}`);
-      }
-
-      return await response.json();
     } catch (error) {
       console.error('Error calling scrape all episodes API:', error);
       return {
@@ -172,23 +142,10 @@ export class HiAnimeScraperService {
     try {
       console.log(`💾 Adding episode ${episodeData.number} to database for anime ${animeId}`);
 
-      const response = await fetch(`${this.API_BASE_URL}/api/add-scraped-episode`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          animeId,
-          episodeData
-        })
+      return await apiClient.post('/api/add-scraped-episode', {
+        animeId,
+        episodeData
       });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `Server error: ${response.status}`);
-      }
-
-      return await response.json();
     } catch (error) {
       console.error('Error adding scraped episode:', error);
       return {
@@ -216,26 +173,12 @@ export class HiAnimeScraperService {
     try {
       console.log(`🎬 Batch scraping ${episodeNumbers.length} episodes for "${animeTitle}"`);
 
-      const response = await fetch(`${this.API_BASE_URL}/api/batch-scrape-episodes`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          animeTitle,
-          animeId,
-          episodeNumbers,
-          options
-        })
+      return await apiClient.post('/api/batch-scrape-episodes', {
+        animeTitle,
+        animeId,
+        episodeNumbers,
+        options
       });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `Server error: ${response.status}`);
-      }
-
-      const data = await response.json();
-      return data;
     } catch (error) {
       console.error('Error in batch scraping:', error);
       return {
@@ -281,16 +224,10 @@ export class HiAnimeScraperService {
     } = {}
   ): Promise<void> {
     return new Promise((resolve, reject) => {
-      const url = `${this.API_BASE_URL}/api/batch-scrape-episodes-stream`;
+      console.log('🌐 Fetching batch scrape progress stream...');
       
-      console.log('🌐 Fetching:', url);
-      console.log('📦 Request body:', { animeTitle, animeId, episodeNumbers, options });
-      
-      fetch(url, {
+      apiFetchRaw('/api/batch-scrape-episodes-stream', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({
           animeTitle,
           animeId,
@@ -298,8 +235,6 @@ export class HiAnimeScraperService {
           options
         })
       }).then(response => {
-        console.log('📡 Response status:', response.status, response.statusText);
-        
         if (!response.ok) {
           throw new Error(`Server error: ${response.status}`);
         }
@@ -322,14 +257,12 @@ export class HiAnimeScraperService {
             }
 
             const chunk = decoder.decode(value, { stream: true });
-            console.log('📦 Received chunk:', chunk);
             const lines = chunk.split('\n\n');
 
             for (const line of lines) {
               if (line.startsWith('data: ')) {
                 try {
                   const data = JSON.parse(line.slice(6));
-                  console.log('✨ Parsed SSE data:', data);
                   onProgress(data);
                   
                   if (data.type === 'complete') {
@@ -375,13 +308,7 @@ export class HiAnimeScraperService {
     animeId?: string
   ): Promise<{ success: boolean; slug?: string; episodeUrl?: string; error?: string }> {
     try {
-      const response = await fetch(`${this.API_BASE_URL}/api/resolve-slug`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ animeTitle, animeId }),
-      });
-
-      return await response.json();
+      return await apiClient.post('/api/resolve-slug', { animeTitle, animeId });
     } catch (error) {
       return {
         success: false,
@@ -410,13 +337,7 @@ export class HiAnimeScraperService {
     }>;
   }> {
     try {
-      const response = await fetch(`${this.API_BASE_URL}/api/batch-resolve-slugs`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ animeList }),
-      });
-
-      return await response.json();
+      return await apiClient.post('/api/batch-resolve-slugs', { animeList });
     } catch (error) {
       return {
         success: false,

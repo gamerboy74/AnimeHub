@@ -1,6 +1,8 @@
 import * as cheerio from "cheerio";
 import axios from "axios";
-import { getBrowser, enqueue, supabase, cacheGet, cacheSet } from "../index.js";
+import { getBrowser, enqueue } from "../services/queue.js";
+import { supabase } from "../config/supabase.js";
+import { cacheGet, cacheSet } from "../services/cache.js";
 import { extractSeasonNumber } from "../utils/seasonExtractor.js";
 
 export function normalizeDuration(val) {

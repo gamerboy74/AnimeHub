@@ -16,7 +16,7 @@ import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const STATE_PATH = join(__dirname, "cf-state.json");
+const STATE_PATH = join(__dirname, "..", "..", "server", "cf-state.json");
 
 async function extractClearanceCookies() {
   console.log("🔌 Connecting to your running Chrome browser via CDP on port 9222...");

@@ -1,5 +1,4 @@
-// Large Anime Scraper Service
-// Handles chunked scraping for anime with many episodes (like One Piece with 1146 episodes)
+import { apiClient } from '../../utils/api/client';
 
 export interface LargeScrapeProgress {
   id: string;
@@ -37,8 +36,6 @@ export interface ChunkScrapeResult {
 }
 
 export class LargeAnimeScraperService {
-  private static readonly API_BASE_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
-
   /**
    * Start a large anime scraping job
    */
@@ -59,25 +56,12 @@ export class LargeAnimeScraperService {
     try {
       console.log(`🎬 Starting large scrape: ${animeTitle} (${totalEpisodes} episodes)`);
 
-      const response = await fetch(`${this.API_BASE_URL}/api/start-large-scrape`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          animeId,
-          animeTitle,
-          totalEpisodes,
-          chunkSize
-        })
+      return await apiClient.post('/api/start-large-scrape', {
+        animeId,
+        animeTitle,
+        totalEpisodes,
+        chunkSize
       });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `Server error: ${response.status}`);
-      }
-
-      return await response.json();
     } catch (error) {
       console.error('Error starting large scrape:', error);
       return {
@@ -96,14 +80,7 @@ export class LargeAnimeScraperService {
     error?: string;
   }> {
     try {
-      const response = await fetch(`${this.API_BASE_URL}/api/scraping-progress/${animeId}`);
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `Server error: ${response.status}`);
-      }
-
-      const data = await response.json();
+      const data = await apiClient.get(`/api/scraping-progress/${animeId}`);
       return {
         success: true,
         progress: data.progress
@@ -131,27 +108,14 @@ export class LargeAnimeScraperService {
     try {
       console.log(`📺 Scraping chunk ${chunkNumber} for ${animeTitle}`);
 
-      const response = await fetch(`${this.API_BASE_URL}/api/scrape-chunk`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          animeId,
-          animeTitle,
-          chunkNumber,
-          progressId,
-          totalEpisodes,
-          chunkSize
-        })
+      return await apiClient.post('/api/scrape-chunk', {
+        animeId,
+        animeTitle,
+        chunkNumber,
+        progressId,
+        totalEpisodes,
+        chunkSize
       });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `Server error: ${response.status}`);
-      }
-
-      return await response.json();
     } catch (error) {
       console.error('Error scraping chunk:', error);
       return {
@@ -283,3 +247,4 @@ export class LargeAnimeScraperService {
     };
   }
 }
+

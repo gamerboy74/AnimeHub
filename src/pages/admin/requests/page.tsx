@@ -301,7 +301,7 @@ export default function AdminRequestsPage() {
                 </div>
                 <span className="font-semibold text-slate-800">{actionMessage}</span>
               </div>
-              <button 
+              <button
                 onClick={() => setActionMessage(null)}
                 className="text-slate-400 hover:text-slate-600 transition-colors"
               >
@@ -403,11 +403,10 @@ export default function AdminRequestsPage() {
                       <button
                         key={request.id}
                         onClick={() => setSelectedRequestId(request.id)}
-                        className={`group w-full text-left rounded-xl border p-4 transition-all duration-200 shadow-sm ${
-                          isSelected
+                        className={`group w-full text-left rounded-xl border p-4 transition-all duration-200 shadow-sm ${isSelected
                             ? 'border-teal-500 bg-teal-50/50 shadow-md ring-2 ring-teal-500/10'
                             : 'border-slate-100 bg-white hover:border-slate-200 hover:shadow-md'
-                        }`}
+                          }`}
                       >
                         <div className="flex items-center justify-between mb-2">
                           <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border tracking-wider uppercase ${getStatusStyles(request.status)}`}>
@@ -560,7 +559,7 @@ export default function AdminRequestsPage() {
                                   loading="lazy"
                                 />
                                 <div className="absolute inset-0 bg-gradient-to-t from-slate-900 via-slate-900/30 to-transparent" />
-                                
+
                                 <div className="absolute top-3 left-3 flex gap-2">
                                   <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-teal-500 text-white shadow-sm tracking-wider uppercase">
                                     Jikan / MAL

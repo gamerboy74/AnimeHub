@@ -1,4 +1,5 @@
-import { getBrowser, supabase } from "../index.js";
+import { getBrowser } from "../services/queue.js";
+import { supabase } from "../config/supabase.js";
 import { extractSeasonNumber } from "../utils/seasonExtractor.js";
 
 export function decodeHtmlEntities(str) {
@@ -18,7 +19,7 @@ export function getCoreTitle(title) {
   return decoded
     .toLowerCase()
     .replace(/(?:season\s*\d+|s\d+|\d+(?:nd|rd|th|st)?\s*season|\d+(?:nd|rd|th|st)?\s*sseason)/gi, "")
-    .replace(/\b(?:movie|film|ova|ona|special|part)\b\s*\d*/gi, "")
+    .replace(/\b(?:the\s+|a\s+|an\s+)?(?:movie|film|ova|ona|special|part)\b\s*\d*/gi, "")
     .replace(/\b(?:i{1,3}|iv|v|vi{1,3}|ix|x)\b\s*$/i, "")
     .replace(/\b\d+\b\s*$/gi, "")
     .replace(/\b(?:dub|sub|uncensored|uncut|tv|dual[- ]audio|uncut)\b/g, " ")
@@ -31,7 +32,7 @@ export function getCoreTitle(title) {
 function verifyEpisodeNumberInUrl(loadedUrl, requestedEpisode) {
   try {
     const url = new URL(loadedUrl);
-    
+
     // Check if redirected to home page or completely different section
     if (url.pathname === "/" || url.pathname === "") {
       return false; // Mismatch!
@@ -45,7 +46,7 @@ function verifyEpisodeNumberInUrl(loadedUrl, requestedEpisode) {
         return false; // Mismatch!
       }
     }
-    
+
     // Check path suffix (e.g. /ep-10 or -episode-10 or /episode/10)
     const pathname = url.pathname.toLowerCase();
     const pathPatterns = [
@@ -71,7 +72,7 @@ function verifyEpisodeNumberInUrl(loadedUrl, requestedEpisode) {
         return false;
       }
     }
-  } catch (e) {}
+  } catch (e) { }
   return true;
 }
 
@@ -98,15 +99,17 @@ export class AnimeSugeScraperService {
     const titleVariants = new Set();
     titleVariants.add(title);
 
+    let animeType = null;
     if (dbAnimeId) {
       try {
         const { data: animeRecord } = await supabase
           .from("anime")
-          .select("title, title_romaji, title_japanese, title_synonyms")
+          .select("title, title_romaji, title_japanese, title_synonyms, type")
           .eq("id", dbAnimeId)
           .maybeSingle();
 
         if (animeRecord) {
+          animeType = animeRecord.type;
           if (animeRecord.title) titleVariants.add(animeRecord.title);
           if (animeRecord.title_romaji) titleVariants.add(animeRecord.title_romaji);
           if (animeRecord.title_synonyms && Array.isArray(animeRecord.title_synonyms)) {
@@ -127,7 +130,7 @@ export class AnimeSugeScraperService {
 
     // Build unique search keywords to try, starting with the original title
     const searchKeywords = [...titleVariants];
-    
+
     let lastError = null;
     let finalMatch = null;
 
@@ -227,8 +230,25 @@ export class AnimeSugeScraperService {
             if (isCoreMatch) {
               const lenRatio = Math.min(textClean.length, targetClean.length) / Math.max(textClean.length, targetClean.length || 1);
               const containsBonus = (textClean.includes(targetClean) || targetClean.includes(textClean)) ? 0.05 : 0;
-              const score = lenRatio + containsBonus;
-              console.log(`🎯 CORE match with variant "${variant}": "${link.text}" -> ${link.href} (score: ${score.toFixed(2)})`);
+
+              // Calculate mismatch penalty for special terms (specials, ova, movie, specials, etc.)
+              let penalty = 0;
+              const specialTerms = ['special', 'specials', 'ova', 'ona', 'movie', 'film', 'spinoff', 'spin-off'];
+              for (const term of specialTerms) {
+                const hasWord = (str, word) => new RegExp(`\\b${word}\\b`, 'i').test(str);
+                
+                // If database record confirms the type is a movie, don't penalize movie/film mismatch
+                if ((term === 'movie' || term === 'film') && animeType === 'movie') {
+                  continue;
+                }
+                
+                if (hasWord(decodedVariant, term) !== hasWord(decodedText, term)) {
+                  penalty += 0.4;
+                }
+              }
+
+              const score = Math.max(0, lenRatio + containsBonus - penalty);
+              console.log(`🎯 CORE match with variant "${variant}": "${link.text}" -> ${link.href} (score: ${score.toFixed(2)}${penalty > 0 ? `, penalty: -${penalty.toFixed(2)}` : ''})`);
               if (score > coreMatchScore) {
                 coreMatch = link.href;
                 coreMatchScore = score;
@@ -236,28 +256,46 @@ export class AnimeSugeScraperService {
             }
 
             // 4. Token overlap match (e.g. "Koutetsujou no Kabaneri Soushuuhen Zenpen" vs "Koutetsujou no Kabaneri Movie 1")
-            if (!exactMatch && !reorderMatch && !coreMatch) {
+            if (!exactMatch && !reorderMatch && (coreMatchScore < 0.65)) {
               const getTokens = (s) =>
                 s.toLowerCase()
-                 .replace(/[^a-z0-9\s]/g, "")
-                 .split(/\s+/)
-                 .filter(Boolean);
-              
+                  .replace(/[^a-z0-9\s]/g, "")
+                  .split(/\s+/)
+                  .filter(Boolean);
+
               const tokens1 = getTokens(decodedVariant);
               const tokens2 = getTokens(decodedText);
-              
+
               if (tokens1.length > 0 && tokens2.length > 0) {
                 const set2 = new Set(tokens2);
                 const intersection = tokens1.filter(t => set2.has(t));
                 const maxLen = Math.max(tokens1.length, tokens2.length);
                 const overlapScore = intersection.length / maxLen;
-                
+
+                // Calculate mismatch penalty for special terms
+                let penalty = 0;
+                const specialTerms = ['special', 'specials', 'ova', 'ona', 'movie', 'film', 'spinoff', 'spin-off'];
+                for (const term of specialTerms) {
+                  const hasWord = (str, word) => new RegExp(`\\b${word}\\b`, 'i').test(str);
+                  
+                  // If database record confirms the type is a movie, don't penalize movie/film mismatch
+                  if ((term === 'movie' || term === 'film') && animeType === 'movie') {
+                    continue;
+                  }
+                  
+                  if (hasWord(decodedVariant, term) !== hasWord(decodedText, term)) {
+                    penalty += 0.4;
+                  }
+                }
+
+                const score = Math.max(0, overlapScore - penalty);
+
                 // If overlap score is high (>= 0.65), count as a match!
-                if (overlapScore >= 0.65) {
-                  console.log(`🎯 TOKEN OVERLAP match with variant "${variant}": "${link.text}" -> ${link.href} (score: ${overlapScore.toFixed(2)})`);
-                  if (overlapScore > coreMatchScore) {
+                if (score >= 0.65) {
+                  console.log(`🎯 TOKEN OVERLAP match with variant "${variant}": "${link.text}" -> ${link.href} (score: ${score.toFixed(2)}${penalty > 0 ? `, penalty: -${penalty.toFixed(2)}` : ''})`);
+                  if (score > coreMatchScore) {
                     coreMatch = link.href;
-                    coreMatchScore = overlapScore;
+                    coreMatchScore = score;
                   }
                 }
               }
@@ -361,7 +399,7 @@ export class AnimeSugeScraperService {
         await page.addInitScript(() => {
           try {
             window.open = () => null;
-          } catch (e) {}
+          } catch (e) { }
         });
 
         // Capture all AJAX /ajax/server?get= responses
@@ -376,7 +414,7 @@ export class AnimeSugeScraperService {
                   capturedUrlsQueue.push(json.result.url);
                 }
               }
-            } catch (_) {}
+            } catch (_) { }
           }
         });
 
@@ -539,7 +577,7 @@ export class AnimeSugeScraperService {
       } catch (error) {
         lastError = error;
         console.error(`❌ AnimeSuge attempt ${attempt}/${retries} failed: ${error.message}`);
-        if (context) await context.close().catch(() => {});
+        if (context) await context.close().catch(() => { });
         if (attempt < retries) {
           console.log(`⏳ Retrying in 3s...`);
           await new Promise((r) => setTimeout(r, 3000));

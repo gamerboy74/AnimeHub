@@ -20,12 +20,12 @@ export default function AdminAnalytics() {
       try {
         setLoading(true);
         setError(null);
-        
+
         const [analytics, adminStats] = await Promise.all([
           AdminService.getAnalyticsData(timeRange),
           AdminService.getAdminStats()
         ]);
-        
+
         setAnalyticsData(analytics);
         setStats({
           totalUsers: adminStats.totalUsers,
@@ -45,9 +45,9 @@ export default function AdminAnalytics() {
   }, [timeRange]);
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', { 
-      month: 'short', 
-      day: 'numeric' 
+    return new Date(dateString).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric'
     });
   };
 
@@ -55,7 +55,7 @@ export default function AdminAnalytics() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
       {/* Background Pattern */}
       <div className="absolute inset-0 bg-[url('data:image/svg+xml,%3Csvg%20width%3D%2260%22%20height%3D%2260%22%20viewBox%3D%220%200%2060%2060%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%3E%3Cg%20fill%3D%22none%22%20fill-rule%3D%22evenodd%22%3E%3Cg%20fill%3D%22%239C92AC%22%20fill-opacity%3D%220.05%22%3E%3Ccircle%20cx%3D%2230%22%20cy%3D%2230%22%20r%3D%222%22/%3E%3C/g%3E%3C/g%3E%3C/svg%3E')] opacity-40"></div>
-      
+
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -70,8 +70,8 @@ export default function AdminAnalytics() {
                 <i className="ri-line-chart-line text-white text-xl"></i>
               </div>
               <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-              Analytics Dashboard
-            </h1>
+                Analytics Dashboard
+              </h1>
             </div>
             <p className="text-slate-600 text-lg">Comprehensive insights into your platform performance</p>
           </div>
@@ -230,10 +230,10 @@ export default function AdminAnalytics() {
                             <span className="text-sm font-bold text-slate-800">{item.users}</span>
                           </div>
                           <div className="w-full bg-slate-200 rounded-full h-3">
-                            <div 
-                              className="bg-gradient-to-r from-blue-500 to-blue-600 h-3 rounded-full transition-all duration-500" 
-                              style={{ 
-                                width: `${Math.min(100, (item.users / Math.max(...analyticsData.userGrowth.map(g => g.users))) * 100)}%` 
+                            <div
+                              className="bg-gradient-to-r from-blue-500 to-blue-600 h-3 rounded-full transition-all duration-500"
+                              style={{
+                                width: `${Math.min(100, (item.users / Math.max(...analyticsData.userGrowth.map(g => g.users))) * 100)}%`
                               }}
                             ></div>
                           </div>
@@ -267,22 +267,21 @@ export default function AdminAnalytics() {
                       {analyticsData.animeViews.slice(0, 5).map((item, index) => (
                         <div key={index} className="flex items-center justify-between p-3 bg-slate-50/50 rounded-xl">
                           <div className="flex items-center space-x-3">
-                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold ${
-                              index === 0 ? 'bg-gradient-to-r from-yellow-400 to-yellow-600 text-white' :
-                              index === 1 ? 'bg-gradient-to-r from-gray-400 to-gray-600 text-white' :
-                              index === 2 ? 'bg-gradient-to-r from-orange-400 to-orange-600 text-white' :
-                              'bg-slate-200 text-slate-600'
-                            }`}>
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold ${index === 0 ? 'bg-gradient-to-r from-yellow-400 to-yellow-600 text-white' :
+                                index === 1 ? 'bg-gradient-to-r from-gray-400 to-gray-600 text-white' :
+                                  index === 2 ? 'bg-gradient-to-r from-orange-400 to-orange-600 text-white' :
+                                    'bg-slate-200 text-slate-600'
+                              }`}>
                               {index + 1}
                             </div>
                             <span className="text-sm font-medium text-slate-700 truncate max-w-32">{item.anime}</span>
                           </div>
                           <div className="flex items-center space-x-3">
                             <div className="w-20 bg-slate-200 rounded-full h-2">
-                              <div 
-                                className="bg-gradient-to-r from-green-500 to-green-600 h-2 rounded-full transition-all duration-500" 
-                                style={{ 
-                                  width: `${Math.min(100, (item.views / Math.max(...analyticsData.animeViews.map(a => a.views))) * 100)}%` 
+                              <div
+                                className="bg-gradient-to-r from-green-500 to-green-600 h-2 rounded-full transition-all duration-500"
+                                style={{
+                                  width: `${Math.min(100, (item.views / Math.max(...analyticsData.animeViews.map(a => a.views))) * 100)}%`
                                 }}
                               ></div>
                             </div>
@@ -322,10 +321,10 @@ export default function AdminAnalytics() {
                             <span className="text-sm font-bold text-slate-800">{item.count}</span>
                           </div>
                           <div className="w-full bg-slate-200 rounded-full h-2">
-                            <div 
-                              className="bg-gradient-to-r from-purple-500 to-purple-600 h-2 rounded-full transition-all duration-500" 
-                              style={{ 
-                                width: `${Math.min(100, (item.count / Math.max(...analyticsData.popularGenres.map(g => g.count))) * 100)}%` 
+                            <div
+                              className="bg-gradient-to-r from-purple-500 to-purple-600 h-2 rounded-full transition-all duration-500"
+                              style={{
+                                width: `${Math.min(100, (item.count / Math.max(...analyticsData.popularGenres.map(g => g.count))) * 100)}%`
                               }}
                             ></div>
                           </div>
@@ -362,12 +361,11 @@ export default function AdminAnalytics() {
                           <span className="text-sm font-bold text-slate-800">{item.percentage}%</span>
                         </div>
                         <div className="w-full bg-slate-200 rounded-full h-3">
-                          <div 
-                            className={`h-3 rounded-full transition-all duration-500 ${
-                              index === 0 ? 'bg-gradient-to-r from-blue-500 to-blue-600' : 
-                              index === 1 ? 'bg-gradient-to-r from-green-500 to-green-600' : 
-                              'bg-gradient-to-r from-orange-500 to-orange-600'
-                            }`}
+                          <div
+                            className={`h-3 rounded-full transition-all duration-500 ${index === 0 ? 'bg-gradient-to-r from-blue-500 to-blue-600' :
+                                index === 1 ? 'bg-gradient-to-r from-green-500 to-green-600' :
+                                  'bg-gradient-to-r from-orange-500 to-orange-600'
+                              }`}
                             style={{ width: `${item.percentage}%` }}
                           ></div>
                         </div>

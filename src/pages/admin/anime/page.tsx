@@ -1460,8 +1460,8 @@ This action cannot be undone.`,
                       onClick={() => fetchAnime(pageNumber)}
                       disabled={currentPage === pageNumber || loading}
                       className={`min-w-[44px] h-11 rounded-xl font-medium transition-all duration-200 ${currentPage === pageNumber
-                          ? 'bg-gradient-to-br from-blue-600 to-blue-700 text-white shadow-lg scale-110'
-                          : 'bg-slate-100 text-slate-700 hover:bg-blue-50 hover:text-blue-600'
+                        ? 'bg-gradient-to-br from-blue-600 to-blue-700 text-white shadow-lg scale-110'
+                        : 'bg-slate-100 text-slate-700 hover:bg-blue-50 hover:text-blue-600'
                         }`}
                     >
                       {pageNumber}
@@ -1646,8 +1646,8 @@ This action cannot be undone.`,
                           <button
                             onClick={() => handleCopyId(selectedAnimeForModal.id)}
                             className={`p-1 rounded-md transition-all duration-200 flex items-center justify-center ${copiedId
-                                ? 'bg-emerald-100 text-emerald-700 shadow-sm'
-                                : 'bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-700 shadow-sm'
+                              ? 'bg-emerald-100 text-emerald-700 shadow-sm'
+                              : 'bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-700 shadow-sm'
                               }`}
                             title="Copy Anime ID"
                           >
@@ -1767,7 +1767,7 @@ This action cannot be undone.`,
                               >
                                 <span>←</span> Previous
                               </button>
-                              
+
                               {Array.from({ length: totalEpisodePages }, (_, i) => i + 1).map(pageNumber => {
                                 const showPage =
                                   pageNumber === 1 ||
@@ -1792,11 +1792,10 @@ This action cannot be undone.`,
                                   <button
                                     key={pageNumber}
                                     onClick={() => setEpisodePage(pageNumber)}
-                                    className={`w-8 h-8 rounded-lg text-xs font-semibold flex items-center justify-center transition-all ${
-                                      safeEpisodePage === pageNumber
+                                    className={`w-8 h-8 rounded-lg text-xs font-semibold flex items-center justify-center transition-all ${safeEpisodePage === pageNumber
                                         ? 'bg-blue-600 text-white shadow-md'
                                         : 'bg-white hover:bg-slate-50 border border-slate-200 text-slate-700'
-                                    }`}
+                                      }`}
                                   >
                                     {pageNumber}
                                   </button>
@@ -1941,10 +1940,10 @@ This action cannot be undone.`,
           >
             <div
               className={`absolute inset-0 transition-all duration-500 bg-gradient-to-br ${activeScraperTab === '9anime'
-                  ? 'from-indigo-600/85 via-purple-600/85 to-pink-500/80'
-                  : activeScraperTab === 'animesuge'
-                    ? 'from-violet-600/85 via-indigo-600/85 to-purple-500/80'
-                    : 'from-rose-600/85 via-red-600/85 to-amber-500/80'
+                ? 'from-indigo-600/85 via-purple-600/85 to-pink-500/80'
+                : activeScraperTab === 'animesuge'
+                  ? 'from-violet-600/85 via-indigo-600/85 to-purple-500/80'
+                  : 'from-rose-600/85 via-red-600/85 to-amber-500/80'
                 }`}
             />
             <div className="absolute inset-0 opacity-25 bg-[radial-gradient(circle_at_bottom_right,_#fff7,_#ffffff00_45%)]" />
@@ -1969,8 +1968,8 @@ This action cannot be undone.`,
                 <button
                   onClick={() => setActiveScraperTab('9anime')}
                   className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-300 flex items-center gap-1.5 ${activeScraperTab === '9anime'
-                      ? 'bg-white text-indigo-700 shadow-md scale-105'
-                      : 'text-white/80 hover:text-white hover:bg-white/10'
+                    ? 'bg-white text-indigo-700 shadow-md scale-105'
+                    : 'text-white/80 hover:text-white hover:bg-white/10'
                     }`}
                 >
                   <i className="ri-tv-line"></i>
@@ -1979,8 +1978,8 @@ This action cannot be undone.`,
                 <button
                   onClick={() => setActiveScraperTab('reanime')}
                   className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-300 flex items-center gap-1.5 ${activeScraperTab === 'reanime'
-                      ? 'bg-white text-rose-700 shadow-md scale-105'
-                      : 'text-white/80 hover:text-white hover:bg-white/10'
+                    ? 'bg-white text-rose-700 shadow-md scale-105'
+                    : 'text-white/80 hover:text-white hover:bg-white/10'
                     }`}
                 >
                   <i className="ri-fire-line"></i>
@@ -1989,8 +1988,8 @@ This action cannot be undone.`,
                 <button
                   onClick={() => setActiveScraperTab('sanjianime')}
                   className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-300 flex items-center gap-1.5 ${activeScraperTab === 'sanjianime'
-                      ? 'bg-white text-cyan-700 shadow-md scale-105'
-                      : 'text-white/80 hover:text-white hover:bg-white/10'
+                    ? 'bg-white text-cyan-700 shadow-md scale-105'
+                    : 'text-white/80 hover:text-white hover:bg-white/10'
                     }`}
                 >
                   <i className="ri-play-circle-line"></i>
@@ -1999,8 +1998,8 @@ This action cannot be undone.`,
                 <button
                   onClick={() => setActiveScraperTab('animesuge')}
                   className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-300 flex items-center gap-1.5 ${activeScraperTab === 'animesuge'
-                      ? 'bg-white text-violet-700 shadow-md scale-105'
-                      : 'text-white/80 hover:text-white hover:bg-white/10'
+                    ? 'bg-white text-violet-700 shadow-md scale-105'
+                    : 'text-white/80 hover:text-white hover:bg-white/10'
                     }`}
                 >
                   <i className="ri-vidicon-line"></i>

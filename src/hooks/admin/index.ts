@@ -32,7 +32,7 @@ export function useAdmin() {
     isAdmin,
     loading,
     error: null,
-    refetch: async () => {} // driven automatically by auth context
+    refetch: async () => { } // driven automatically by auth context
   }
 }
 
@@ -44,7 +44,7 @@ export function useAdminStats() {
   const fetchStats = useCallback(async (forceRefresh = false) => {
     const now = Date.now()
     const isExpired = now - adminCache.lastFetch.stats > CACHE_DURATION
-    
+
     // Use cache if available and not expired, unless force refresh
     if (adminCache.stats && !isExpired && !forceRefresh) {
       setStats(adminCache.stats)
@@ -55,19 +55,19 @@ export function useAdminStats() {
     try {
       setLoading(true)
       setError(null)
-      
+
       // Add timeout to prevent infinite loading
-      const timeoutPromise = new Promise((_, reject) => 
+      const timeoutPromise = new Promise((_, reject) =>
         setTimeout(() => reject(new Error('Request timeout')), 10000)
       )
-      
+
       const dataPromise = AdminService.getAdminStats()
       const data = await Promise.race([dataPromise, timeoutPromise]) as AdminStats
-      
+
       // Update cache
       adminCache.stats = data
       adminCache.lastFetch.stats = now
-      
+
       setStats(data)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch admin stats')
@@ -166,7 +166,7 @@ export function useSystemHealth() {
   const fetchHealth = useCallback(async (forceRefresh = false) => {
     const now = Date.now()
     const isExpired = now - adminCache.lastFetch.health > CACHE_DURATION
-    
+
     // Use cache if available and not expired, unless force refresh
     if (adminCache.health && !isExpired && !forceRefresh) {
       setHealth(adminCache.health)
@@ -177,19 +177,19 @@ export function useSystemHealth() {
     try {
       setLoading(true)
       setError(null)
-      
+
       // Add timeout to prevent infinite loading
-      const timeoutPromise = new Promise((_, reject) => 
+      const timeoutPromise = new Promise((_, reject) =>
         setTimeout(() => reject(new Error('Request timeout')), 8000)
       )
-      
+
       const dataPromise = AdminService.getSystemHealth()
       const data = await Promise.race([dataPromise, timeoutPromise]) as SystemHealth
-      
+
       // Update cache
       adminCache.health = data
       adminCache.lastFetch.health = now
-      
+
       setHealth(data)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch system health')
@@ -210,7 +210,7 @@ export function useSystemHealth() {
 
   useEffect(() => {
     fetchHealth()
-    
+
     // Auto-refresh every 30 seconds
     const interval = setInterval(() => fetchHealth(true), 30000)
     return () => clearInterval(interval)
@@ -232,7 +232,7 @@ export function useRecentActivity(limit: number = 10) {
   const fetchActivities = useCallback(async (forceRefresh = false) => {
     const now = Date.now()
     const isExpired = now - adminCache.lastFetch.activities > CACHE_DURATION
-    
+
     // Use cache if available and not expired, unless force refresh
     if (adminCache.activities && !isExpired && !forceRefresh) {
       setActivities(adminCache.activities)
@@ -243,19 +243,19 @@ export function useRecentActivity(limit: number = 10) {
     try {
       setLoading(true)
       setError(null)
-      
+
       // Add timeout to prevent infinite loading
-      const timeoutPromise = new Promise((_, reject) => 
+      const timeoutPromise = new Promise((_, reject) =>
         setTimeout(() => reject(new Error('Request timeout')), 8000)
       )
-      
+
       const dataPromise = AdminService.getRecentActivity(limit)
       const data = await Promise.race([dataPromise, timeoutPromise]) as any[]
-      
+
       // Update cache
       adminCache.activities = data
       adminCache.lastFetch.activities = now
-      
+
       setActivities(data)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch recent activity')
@@ -269,7 +269,7 @@ export function useRecentActivity(limit: number = 10) {
 
   useEffect(() => {
     fetchActivities()
-    
+
     // Auto-refresh every 60 seconds
     const interval = setInterval(() => fetchActivities(true), 60000)
     return () => clearInterval(interval)

@@ -102,7 +102,7 @@ export default function AdminSettings() {
     try {
       if (showLoading) setLoadingScrapers(true);
       const API_BASE = import.meta.env.DEV ? '' : (import.meta.env.VITE_BACKEND_URL || '');
-      
+
       // 1. Fetch scraper configs (Only on initial load or explicitly asked, never on background poll)
       if (showLoading && !savingRef.current.scrapers) {
         const resConfig = await fetch(`${API_BASE}/api/scheduler/scrapers`);
@@ -350,10 +350,10 @@ export default function AdminSettings() {
       setSaving(true);
       setError(null);
       setSuccess(null);
-      
+
       await AdminService.updateAdminSettings(settings);
       setSuccess('Settings saved successfully!');
-      
+
       // Clear success message after 3 seconds
       setTimeout(() => setSuccess(null), 3000);
     } catch (err) {
@@ -388,7 +388,7 @@ export default function AdminSettings() {
     <div className="relative min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 text-slate-800 font-sans overflow-x-hidden">
       {/* Background Pattern */}
       <div className="absolute inset-0 bg-[url('data:image/svg+xml,%3Csvg%20width%3D%2260%22%20height%3D%2260%22%20viewBox%3D%220%200%2060%2060%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%3E%3Cg%20fill%3D%22none%22%20fill-rule%3D%22evenodd%22%3E%3Cg%20fill%3D%22%239C92AC%22%20fill-opacity%3D%220.05%22%3E%3Ccircle%20cx%3D%2230%22%20cy%3D%2230%22%20r%3D%222%22/%3E%3C/g%3E%3C/g%3E%3C/svg%3E')] opacity-40 pointer-events-none"></div>
-      
+
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -417,11 +417,10 @@ export default function AdminSettings() {
               <button
                 onClick={handleSaveSettings}
                 disabled={saving}
-                className={`px-6 py-3 rounded-xl font-medium transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 flex items-center space-x-2 ${
-                  saving 
-                    ? 'bg-slate-400 text-white cursor-not-allowed' 
+                className={`px-6 py-3 rounded-xl font-medium transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 flex items-center space-x-2 ${saving
+                    ? 'bg-slate-400 text-white cursor-not-allowed'
                     : 'bg-gradient-to-r from-blue-600 to-blue-700 text-white hover:from-blue-700 hover:to-blue-800'
-                }`}
+                  }`}
               >
                 {saving ? (
                   <>
@@ -440,11 +439,10 @@ export default function AdminSettings() {
               <button
                 onClick={() => handleSaveScrapers()}
                 disabled={savingScrapers}
-                className={`px-6 py-3 rounded-xl font-medium transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 flex items-center space-x-2 ${
-                  savingScrapers
+                className={`px-6 py-3 rounded-xl font-medium transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 flex items-center space-x-2 ${savingScrapers
                     ? 'bg-slate-400 text-white cursor-not-allowed'
                     : 'bg-gradient-to-r from-blue-600 to-blue-700 text-white hover:from-blue-700 hover:to-blue-800'
-                }`}
+                  }`}
               >
                 {savingScrapers ? (
                   <>
@@ -506,15 +504,13 @@ export default function AdminSettings() {
                   <button
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id as any)}
-                    className={`flex items-center gap-3.5 px-4 py-3 rounded-xl transition-all duration-200 text-left w-auto lg:w-full relative flex-shrink-0 lg:flex-shrink snap-start ${
-                      isActive
+                    className={`flex items-center gap-3.5 px-4 py-3 rounded-xl transition-all duration-200 text-left w-auto lg:w-full relative flex-shrink-0 lg:flex-shrink snap-start ${isActive
                         ? 'bg-gradient-to-r from-blue-600/10 to-indigo-600/10 text-blue-600 shadow-sm border-l-4 border-blue-600'
                         : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50 border-l-4 border-transparent'
-                    }`}
+                      }`}
                   >
-                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 transition-all ${
-                      isActive ? 'bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-md' : 'bg-slate-100 text-slate-500'
-                    }`}>
+                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 transition-all ${isActive ? 'bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-md' : 'bg-slate-100 text-slate-500'
+                      }`}>
                       <i className={`${tab.icon} text-base`}></i>
                     </div>
                     <div className="min-w-[130px] lg:min-w-0 flex-1">
@@ -550,7 +546,7 @@ export default function AdminSettings() {
                       <p className="text-xs text-slate-500">Manage basic site information, metadata, and operational modes.</p>
                     </div>
                   </div>
-                  
+
                   {/* Site Name */}
                   <div>
                     <label htmlFor="site_name" className="block text-sm font-semibold text-slate-700 mb-2">
@@ -643,7 +639,7 @@ export default function AdminSettings() {
                       <p className="text-xs text-slate-500">Configure size thresholds, mime-types, and constraints for attachments.</p>
                     </div>
                   </div>
-                  
+
                   {/* Max File Size */}
                   <div>
                     <label htmlFor="max_file_size" className="block text-sm font-semibold text-slate-700 mb-2">
@@ -709,7 +705,7 @@ export default function AdminSettings() {
                       <p className="text-xs text-slate-500">Toggle premium behaviors, analytical trackers, and integration pathways.</p>
                     </div>
                   </div>
-                  
+
                   {[
                     {
                       id: 'email_notifications',
@@ -781,7 +777,7 @@ export default function AdminSettings() {
                       <p className="text-xs text-slate-500">Tune platform performance thresholds, cache duration, and store rules.</p>
                     </div>
                   </div>
-                  
+
                   {/* Cache Enabled */}
                   <div className="flex items-center justify-between p-4 bg-slate-50/50 rounded-xl border border-slate-100">
                     <div>
@@ -848,7 +844,7 @@ export default function AdminSettings() {
                         <p className="text-xs text-slate-500">Configure enabled scrapers, order of execution, timeouts, and delays.</p>
                       </div>
                     </div>
-                    
+
                     <div className="flex items-center gap-1.5 text-[10px] text-slate-500 font-mono bg-slate-50 px-3 py-1 rounded-full border border-slate-200 w-fit">
                       <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping"></span>
                       <span>Active Pipeline Core</span>
@@ -879,13 +875,12 @@ export default function AdminSettings() {
                           type="button"
                           onClick={handleForceRunScheduler}
                           disabled={runningManualCheck || !globalSwitch}
-                          className={`px-4 py-2 rounded-xl border text-xs font-bold transition-all duration-200 flex items-center gap-1.5 shadow-sm ${
-                            runningManualCheck
+                          className={`px-4 py-2 rounded-xl border text-xs font-bold transition-all duration-200 flex items-center gap-1.5 shadow-sm ${runningManualCheck
                               ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
                               : !globalSwitch
-                              ? 'bg-slate-50 text-slate-400 border-slate-200/50 cursor-not-allowed'
-                              : 'bg-white hover:bg-blue-50 text-blue-600 hover:text-blue-700 border-blue-200 hover:border-blue-300'
-                          }`}
+                                ? 'bg-slate-50 text-slate-400 border-slate-200/50 cursor-not-allowed'
+                                : 'bg-white hover:bg-blue-50 text-blue-600 hover:text-blue-700 border-blue-200 hover:border-blue-300'
+                            }`}
                           title="Scan DB and enqueue missing episodes now"
                         >
                           {runningManualCheck ? (
@@ -915,7 +910,7 @@ export default function AdminSettings() {
                     </div>
 
                     {/* Stats HUD Panel */}
-                    <div className="p-5 bg-slate-50/50 rounded-2xl border border-slate-200/80 flex flex-row items-center justify-between gap-4 shadow-sm">
+                    <div className="p-5 bg-slate-50/50 rounded-2xl border border-slate-200/80 flex flex-col justify-between gap-3 shadow-sm">
                       <div>
                         <h4 className="text-[10px] font-bold tracking-widest text-slate-500 uppercase">System Telemetry</h4>
                         <div className="flex items-baseline gap-1 mt-2">
@@ -934,10 +929,11 @@ export default function AdminSettings() {
                         type="button"
                         onClick={handleResetMetrics}
                         id="reset-pipeline-metrics"
-                        className="w-10 h-10 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-center text-slate-500 hover:text-slate-800 transition-all hover:scale-105 active:scale-95 shadow-sm"
-                        title="Reset Metrics & Logs"
+                        className="w-full py-1.5 bg-white hover:bg-rose-50 border border-rose-200 rounded-xl flex items-center justify-center gap-1.5 text-[10px] font-extrabold text-rose-600 hover:text-rose-700 transition-all shadow-sm hover:scale-[1.02] active:scale-[0.98]"
+                        title="Clear Cooldowns, Reset Stats & Purge Logs"
                       >
-                        <i className="ri-refresh-line text-lg"></i>
+                        <i className="ri-refresh-line text-xs"></i>
+                        <span>Reset Cooldowns & Cache</span>
                       </button>
                     </div>
 
@@ -1033,7 +1029,7 @@ export default function AdminSettings() {
                             const stats = scraperStats[scraper.id] || { successRate: 100, success: 0, failure: 0, avgResponseTime: 0 };
                             const successRate = stats.successRate ?? 100;
                             const avgMs = stats.avgResponseTime || 0;
-                            
+
                             return (
                               <motion.div
                                 layout
@@ -1042,11 +1038,10 @@ export default function AdminSettings() {
                                 onDragStart={(e: any) => handleDragStart(e, index)}
                                 onDragOver={(e: any) => handleDragOver(e, index)}
                                 onDrop={(e: any) => handleDrop(e, index)}
-                                className={`flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 rounded-xl border transition-all duration-300 relative group cursor-grab active:cursor-grabbing ${
-                                  scraper.enabled
+                                className={`flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 rounded-xl border transition-all duration-300 relative group cursor-grab active:cursor-grabbing ${scraper.enabled
                                     ? 'bg-white border-slate-200 shadow-sm hover:shadow-md hover:border-blue-300'
                                     : 'bg-slate-50/70 border-slate-200/40 opacity-60'
-                                }`}
+                                  }`}
                               >
                                 {/* Left details */}
                                 <div className="flex items-center gap-3.5 min-w-0 flex-1 w-full md:w-auto">
@@ -1074,20 +1069,18 @@ export default function AdminSettings() {
                                       {/* success badge & mini-bar */}
                                       <div className="flex items-center gap-2">
                                         <div className="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden border border-slate-200 flex-shrink-0">
-                                          <div 
-                                            className={`h-full rounded-full transition-all duration-500 ${
-                                              successRate >= 80 ? 'bg-gradient-to-r from-emerald-500 to-green-400' :
-                                              successRate >= 50 ? 'bg-gradient-to-r from-amber-500 to-orange-400' :
-                                              'bg-gradient-to-r from-rose-500 to-red-400'
-                                            }`}
+                                          <div
+                                            className={`h-full rounded-full transition-all duration-500 ${successRate >= 80 ? 'bg-gradient-to-r from-emerald-500 to-green-400' :
+                                                successRate >= 50 ? 'bg-gradient-to-r from-amber-500 to-orange-400' :
+                                                  'bg-gradient-to-r from-rose-500 to-red-400'
+                                              }`}
                                             style={{ width: `${successRate}%` }}
                                           ></div>
                                         </div>
-                                        <span className={`text-[10px] font-black font-mono tracking-wide ${
-                                          successRate >= 80 ? 'text-emerald-600' :
-                                          successRate >= 50 ? 'text-amber-600' :
-                                          'text-rose-600'
-                                        }`}>
+                                        <span className={`text-[10px] font-black font-mono tracking-wide ${successRate >= 80 ? 'text-emerald-600' :
+                                            successRate >= 50 ? 'text-amber-600' :
+                                              'text-rose-600'
+                                          }`}>
                                           {successRate}%
                                         </span>
                                       </div>
@@ -1184,7 +1177,7 @@ export default function AdminSettings() {
                               const timeStr = new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
                               const isWarning = log.level === 'warn' || log.level === 'error';
                               const isSuccess = log.level === 'success';
-                              
+
                               return (
                                 <div key={idx} className="flex gap-2 items-start py-1 border-b border-slate-100 last:border-0 hover:bg-slate-100/50 px-1.5 rounded transition-colors group">
                                   <span className="text-slate-400 flex-shrink-0 font-bold select-none">[{timeStr}]</span>
@@ -1313,8 +1306,8 @@ export default function AdminSettings() {
                       </div>
                     </div>
                   )}
-         </motion.div>
-        )}
+                </motion.div>
+              )}
             </AnimatePresence>
           </div>
         </div>

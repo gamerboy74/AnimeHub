@@ -427,20 +427,54 @@ export class AnimeImporterService {
     }
   }
 
+  // Helper to check duplicate anime by MAL ID or case-insensitive titles (title, title_english, title_romaji, title_japanese)
+  static async checkDuplicateAnime(animeData: Partial<Anime>): Promise<any | null> {
+    try {
+      // 1. Check by MAL ID if present
+      const malId = (animeData as any).mal_id
+      if (malId) {
+        const { data } = await supabase
+          .from('anime')
+          .select('id, title, mal_id')
+          .eq('mal_id', malId)
+          .maybeSingle()
+        if (data) return data
+      }
+
+      // 2. Check by titles
+      const titles = [
+        animeData.title,
+        animeData.title_english,
+        animeData.title_romaji,
+        animeData.title_japanese
+      ].filter((t): t is string => Boolean(t && t.trim()))
+
+      if (titles.length > 0) {
+        const queries = [
+          supabase.from('anime').select('id, title').in('title', titles),
+          supabase.from('anime').select('id, title').in('title_english', titles),
+          supabase.from('anime').select('id, title').in('title_romaji', titles),
+          supabase.from('anime').select('id, title').in('title_japanese', titles)
+        ]
+        
+        const results = await Promise.all(queries)
+        for (const { data } of results) {
+          if (data && data.length > 0) {
+            return data[0]
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Error checking duplicate anime:', err)
+    }
+    return null
+  }
+
   // Import anime from external API
   static async importAnime(animeData: Partial<Anime>, options?: { skipAutoScrape?: boolean }): Promise<Anime | null> {
     try {
-      // Check for duplicates by title (use maybeSingle to handle no results gracefully)
-      const { data: existingAnime, error: duplicateError } = await supabase
-        .from('anime')
-        .select('id, title')
-        .ilike('title', animeData.title || '')
-        .maybeSingle()
-
-      // If there's an error checking for duplicates, log it but continue
-      if (duplicateError) {
-        console.warn('Error checking for duplicates:', duplicateError.message)
-      }
+      // Check for duplicates by title or MAL ID
+      const existingAnime = await this.checkDuplicateAnime(animeData)
 
       if (existingAnime) {
         console.log(`Anime "${animeData.title}" already exists, skipping import`)
@@ -606,7 +640,7 @@ export class AnimeImporterService {
     created = missingNums.length
     total = expectedTotal
     skipped = existingSet.size
-    console.log(`✅ ${animeTitle}: created ${created} stubs (episodes ${missingNums[0]}-${missingNums[missingNums.length - 1]})`)
+    console.log(`✅ ${animeTitle}: created ${created} stubs (episodes ${missingNums[0]}-${missingNums[missingNums.length - 1]})`);
 
     // ── Step 4 (optional): Enrich titles from Jikan (Non-blocking Background Task) ──
     // Run in background so we don't block the database import thread with Jikan's 1.5s rate-limit delay
@@ -739,11 +773,8 @@ export class AnimeImporterService {
             if (source === 'anilist') {
               // Check for duplicates first
               const title = anime.title?.english || anime.title?.romaji || anime.title?.native || ''
-              const { data: existingAnime } = await supabase
-                .from('anime')
-                .select('id')
-                .ilike('title', title)
-                .maybeSingle()
+              const animeData = this.mapAniListToDatabase(anime)
+              const existingAnime = await this.checkDuplicateAnime(animeData)
 
               if (existingAnime) {
                 return { type: 'duplicate', title: title || 'Unknown' }
@@ -763,12 +794,8 @@ export class AnimeImporterService {
               // Enhance trailer data by checking both sources
               await this.enhanceTrailerData(mappedData)
 
-              // Quick duplicate check (optimized - only check ID)
-              const { data: existingAnime } = await supabase
-                .from('anime')
-                .select('id')
-                .ilike('title', mappedData.title || '')
-                .maybeSingle()
+              // Quick duplicate check (checks MAL ID and titles)
+              const existingAnime = await this.checkDuplicateAnime(mappedData)
 
               if (existingAnime) {
                 return { type: 'duplicate', title: mappedData.title || 'Unknown' }
@@ -1579,7 +1606,7 @@ export class AnimeImporterService {
       }
 
       const recordsToUpsertByName: any[] = []
-      const updatesToRun: Promise<any>[] = []
+      const updatesToRun: PromiseLike<any>[] = []
 
       for (const entry of filtered) {
         try {
@@ -1604,15 +1631,17 @@ export class AnimeImporterService {
           if (existingMatch && existingMatch.name !== characterData.name) {
             // Existing char has better name — just update voice actors if missing
             updatesToRun.push(
-              supabase
-                .from('anime_characters')
-                .update({
-                  voice_actor: characterData.voice_actor,
-                  voice_actor_japanese: characterData.voice_actor_japanese,
-                  image_url: characterData.image_url,
-                })
-                .eq('id', existingMatch.id)
-                .is('voice_actor', null)
+              Promise.resolve(
+                supabase
+                  .from('anime_characters')
+                  .update({
+                    voice_actor: characterData.voice_actor,
+                    voice_actor_japanese: characterData.voice_actor_japanese,
+                    image_url: characterData.image_url,
+                  })
+                  .eq('id', existingMatch.id)
+                  .is('voice_actor', null)
+              )
                 .then(async ({ error }) => {
                   if (error) {
                     // Try without the .is() filter
@@ -1788,7 +1817,7 @@ export class AnimeImporterService {
         }
       }
 
-      const promises: Promise<any>[] = []
+      const promises: PromiseLike<any>[] = []
 
       if (recordsToUpsertByName.length > 0) {
         promises.push(
@@ -2036,11 +2065,7 @@ export class AnimeImporterService {
       const animeData = this.mapAniListToDatabase(anilistData)
       
       // Check for duplicates first
-      const { data: existingAnime } = await supabase
-        .from('anime')
-        .select('id')
-        .ilike('title', animeData.title || '')
-        .maybeSingle()
+      const existingAnime = await this.checkDuplicateAnime(animeData)
 
       let animeId: string
       

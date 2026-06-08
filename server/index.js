@@ -5,8 +5,7 @@ import morgan from "morgan";
 import compression from "compression";
 import dotenv from "dotenv";
 import axios from "axios";
-import { promises as fs } from "fs";
-import { resolve as resolvePath, join, dirname } from "path";
+import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import http from "http";
 import https from "https";
@@ -33,27 +32,10 @@ const __dirname = dirname(__filename);
 // Load .env from project root (one level up from server/)
 dotenv.config({ path: join(__dirname, "..", ".env") });
 
+
 import { supabase } from "./config/supabase.js";
-import {
-  cacheGet,
-  cacheSet,
-  cacheInvalidatePattern,
-  cacheInvalidateAnime,
-  cacheMiddleware
-} from "./services/cache.js";
 
-// Re-export core configurations and services for backward compatibility
-export {
-  supabase,
-  cacheGet,
-  cacheSet,
-  cacheInvalidatePattern,
-  cacheInvalidateAnime,
-  cacheMiddleware
-};
-
-import { enqueue, getBrowser, closeBrowser } from "./services/queue.js";
-export { enqueue, getBrowser, closeBrowser };
+import { closeBrowser } from "./services/queue.js";
 
 import { productionScheduler } from "./services/production-scheduler.js";
 import { connectRedis, disconnectRedis } from "./services/bull-queue.js";
@@ -61,9 +43,10 @@ import { connectRedis, disconnectRedis } from "./services/bull-queue.js";
 // Import modular routes
 import resolverRouter from "./routes/resolver.js";
 import schedulerRouter from "./routes/scheduler.js";
-import scrapersRouter from "./routes/scrapers.js";
+import scrapersRouter from "./routes/scrapers/index.js";
 import animeRouter from "./routes/anime.js";
 import adminRouter from "./routes/admin.js";
+import perfMetricsRouter from "./routes/perfMetrics.js";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -114,47 +97,22 @@ app.use("/api/image-proxy", imageProxyRouter);
 app.use("/api/scrape", rateLimiter.middleware(60_000, 10)); // 10 requests per minute
 
 // Performance metrics collector
-app.post("/api/perf-metrics", async (req, res) => {
-  try {
-    const payload = req.body;
-    const filePath = resolvePath(process.cwd(), "performance-report.json");
-    let existing = [];
-    try {
-      const content = await fs.readFile(filePath, "utf-8");
-      existing = JSON.parse(content);
-      if (!Array.isArray(existing)) existing = [];
-    } catch { }
-    existing.push(payload);
-    await fs.writeFile(filePath, JSON.stringify(existing, null, 2));
-    res.json({ success: true });
-  } catch (e) {
-    console.error("perf-metrics write failed", e);
-    res.status(500).json({ success: false });
-  }
-});
+app.use("/api/perf-metrics", perfMetricsRouter);
 
 // Health check endpoints
 app.get("/health", getHealthHandler());
 app.get("/api/health", getDetailedHealthHandler(supabase, redis));
 
-// Legacy health endpoint
-app.get("/health-old", (req, res) => {
-  res.json({
-    status: "OK",
-    timestamp: new Date().toISOString(),
-    service: "9anime Scraper API",
-  });
-});
 
 // Register Modular Routers
-// NOTE: Public routers (anime, resolver) MUST come before admin-protected routers
-// (scrapers, scheduler) because those apply requireAdmin globally via router.use(),
-// which would intercept and block all requests — including public ones — if registered first.
-app.use(resolverRouter);  // Public: stream resolver endpoints
-app.use(animeRouter);     // Public: /api/anime/* browsing endpoints
-app.use(adminRouter);     // Admin: /api/admin/* management endpoints
-app.use(schedulerRouter); // Admin-only: scheduler requires admin token for all routes
-app.use(scrapersRouter);  // Admin-only: scrapers require admin token for all routes
+// IMPORTANT: Public routers MUST come before admin-protected routers.
+app.use("/api", resolverRouter);          // Public: /api/resolve-*, /api/video-embed, etc.
+app.use("/api/anime", animeRouter);       // Public: /api/anime/* browsing endpoints
+app.use("/api", adminRouter);             // Admin: /api/add-scraped-episode, etc.
+app.use("/api/admin", adminRouter);       // Admin: /api/admin/* CRUD (anime, episodes, requests)
+app.use("/api/scheduler", schedulerRouter); // Admin-only scheduler control
+app.use("/api/admin", schedulerRouter);   // Admin: /api/admin/maintenance/scrape-sequential
+app.use("/api", scrapersRouter);          // Admin-only scraper endpoints
 
 // Error handling middleware (must be after all routes)
 app.use(errorHandler);

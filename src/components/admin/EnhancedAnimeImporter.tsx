@@ -18,6 +18,7 @@ interface SearchResult {
   title_english?: string;
   title_romaji?: string;
   title_japanese?: string;
+  mal_id?: number | null;
   year?: number;
   status?: string;
   type?: string;
@@ -180,31 +181,84 @@ export const EnhancedAnimeImporter: React.FC<EnhancedAnimeImporterProps> = ({ on
     const candidateTitles = Array.from(
       new Set(results.flatMap(anime => getResultTitles(anime)))
     );
+    const candidateMalIds = results
+      .map(anime => anime.mal_id)
+      .filter((id): id is number => Boolean(id));
 
-    if (candidateTitles.length === 0) {
+    if (candidateTitles.length === 0 && candidateMalIds.length === 0) {
       return results;
     }
 
     try {
-      const { data, error } = await supabase
-        .from('anime')
-        .select('title')
-        .in('title', candidateTitles);
-
-      if (error) {
-        console.warn('Could not check existing anime titles:', error.message);
-        return results;
+      const queries = [];
+      
+      if (candidateMalIds.length > 0) {
+        queries.push(
+          supabase
+            .from('anime')
+            .select('title, title_english, title_romaji, title_japanese, mal_id')
+            .in('mal_id', candidateMalIds)
+        );
+      }
+      
+      if (candidateTitles.length > 0) {
+        queries.push(
+          supabase
+            .from('anime')
+            .select('title, title_english, title_romaji, title_japanese, mal_id')
+            .in('title', candidateTitles)
+        );
+        queries.push(
+          supabase
+            .from('anime')
+            .select('title, title_english, title_romaji, title_japanese, mal_id')
+            .in('title_english', candidateTitles)
+        );
+        queries.push(
+          supabase
+            .from('anime')
+            .select('title, title_english, title_romaji, title_japanese, mal_id')
+            .in('title_romaji', candidateTitles)
+        );
+        queries.push(
+          supabase
+            .from('anime')
+            .select('title, title_english, title_romaji, title_japanese, mal_id')
+            .in('title_japanese', candidateTitles)
+        );
       }
 
-      const existingTitles = new Set(
-        (data || [])
-          .map(row => row.title)
-          .filter((value): value is string => Boolean(value))
-          .map(normalizeTitle)
-      );
+      const queryResults = await Promise.all(queries);
+      
+      const existingTitles = new Set<string>();
+      const existingMalIds = new Set<number>();
+
+      queryResults.forEach(({ data, error }) => {
+        if (error) {
+          console.warn('Sub-query in duplicate check failed:', error.message);
+          return;
+        }
+        if (data) {
+          data.forEach((row: any) => {
+            if (row.mal_id) existingMalIds.add(row.mal_id);
+            if (row.title) existingTitles.add(normalizeTitle(row.title));
+            if (row.title_english) existingTitles.add(normalizeTitle(row.title_english));
+            if (row.title_romaji) existingTitles.add(normalizeTitle(row.title_romaji));
+            if (row.title_japanese) existingTitles.add(normalizeTitle(row.title_japanese));
+          });
+        }
+      });
 
       return results.filter(anime => {
-        return !getResultTitles(anime).some(title => existingTitles.has(normalizeTitle(title)));
+        // 1. Match by unique MAL ID if present
+        if (anime.mal_id && existingMalIds.has(anime.mal_id)) {
+          return false;
+        }
+        
+        // 2. Match by titles (case-insensitive)
+        const titles = getResultTitles(anime).map(normalizeTitle);
+        const hasTitleMatch = titles.some(t => existingTitles.has(t));
+        return !hasTitleMatch;
       });
     } catch (error) {
       console.warn('Failed to filter existing anime results:', error);

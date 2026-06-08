@@ -75,6 +75,7 @@
     "scrape-hianime": "node scripts/scrapers/hianimeScraper.js",
     "install-playwright": "npx playwright install chromium",
     "analyze:bundle": "npx vite-bundle-analyzer out",
+    "test": "vitest run",
     "test:performance": "node scripts/utils/performanceTest.js",
     "verify:build": "node scripts/utils/verify-build.js",
     "clean:cache": "rm -rf node_modules/.vite && rm -rf out",

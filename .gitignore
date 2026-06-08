@@ -65,3 +65,6 @@ desktop.ini
 # Misc
 .vercel
 *.pem
+
+# Cloudflare bypass state — contains session tokens, must not be committed
+server/cf-state.json

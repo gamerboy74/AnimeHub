@@ -109,19 +109,48 @@ export async function scrapeAndSaveEpisode(anime, ep) {
     const activeConfigs = configs.filter(c => c.enabled);
     console.log(`🤖 Scraping pipeline: active scrapers in order are: ${activeConfigs.map(c => c.name).join(" -> ")}`);
 
-    let nineAnimeRes = null;
-    let animeSugeRes = null;
-    let reAnimeRes = null;
-    let sanjiAnimeRes = null;
-    let cinevoRes = null;
+    // Pre-clean legacy "not_found" cache entries from database in one go to prevent concurrency conflicts
+    if (anime.scraper_urls) {
+      let needsCleanup = false;
+      const cleanedUrls = { ...anime.scraper_urls };
+      for (const [key, val] of Object.entries(cleanedUrls)) {
+        if (val === "not_found") {
+          delete cleanedUrls[key];
+          needsCleanup = true;
+        }
+      }
+      if (needsCleanup) {
+        try {
+          await supabase.from("anime").update({ scraper_urls: cleanedUrls }).eq("id", anime.id);
+          anime.scraper_urls = cleanedUrls;
+          console.log(`  🧹 Cleaned legacy "not_found" scraper URLs from database for anime ${anime.id}`);
+        } catch (err) {
+          console.warn("  ⚠️ Failed to pre-clean scraper_urls:", err.message);
+        }
+      }
+    }
 
-    for (let i = 0; i < activeConfigs.length; i++) {
-      const config = activeConfigs[i];
+    const newScraperUrlsToCache = {};
+    const scrapeTasks = activeConfigs.map(async (config) => {
       const { id, timeout, delay } = config;
       const startTime = Date.now();
-      const serversBefore = newServers.length;
+      const taskServers = [];
+      let scraperRes = null;
 
-      if (i > 0 && delay > 0) {
+      // Check if this scraper is currently cooling down / circuit-broken
+      const cooldownStatus = await stateManager.isCoolingDown(id);
+      if (cooldownStatus.coolingDown) {
+        const remainingMinutes = Math.ceil(cooldownStatus.resetInMs / 60000);
+        console.log(`    ⏭️ [Pipeline] ${config.name} skipped (cooling down for the next ${remainingMinutes} minutes due to consecutive failures).`);
+        await stateManager.addLog(
+          'info',
+          `⏭️ [Pipeline] ${config.name} skipped (cooling down for the next ${remainingMinutes} minutes due to consecutive failures).`
+        );
+        return { id, success: false, skipped: true, reason: "cooldown", servers: [] };
+      }
+
+      // Stagger task execution slightly by delay to prevent concurrent boot overhead
+      if (delay > 0) {
         await new Promise(r => setTimeout(r, delay));
       }
 
@@ -133,7 +162,7 @@ export async function scrapeAndSaveEpisode(anime, ep) {
             console.log(`    ⏭️ NineAnime skipped (cached as not_found in-memory)`);
           } else {
             console.log(`    [Pipeline] NineAnime checking EP ${ep}...`);
-            nineAnimeRes = await enqueue(() =>
+            scraperRes = await enqueue(() =>
               NineAnimeScraperService.scrapeAnimeEpisode(
                 animeTitle,
                 ep,
@@ -141,10 +170,10 @@ export async function scrapeAndSaveEpisode(anime, ep) {
               ),
               "high"
             );
-            if (nineAnimeRes?.success && nineAnimeRes.streamUrl) {
-              newServers.push({
+            if (scraperRes?.success && scraperRes.streamUrl) {
+              taskServers.push({
                 name: "NineAnime",
-                url: nineAnimeRes.streamUrl,
+                url: scraperRes.streamUrl,
                 lang: "sub"
               });
               console.log(`    ✅ NineAnime found a stream URL`);
@@ -174,20 +203,11 @@ export async function scrapeAndSaveEpisode(anime, ep) {
 
           if (isNotFoundCached) {
             console.log(`    ⏭️ AnimeSuge skipped (cached as not_found in-memory)`);
-          } else if (cachedWatchUrl === "not_found") {
-            // Self-clean database of legacy permanent not_found values
-            try {
-              const merged = { ...(anime.scraper_urls || {}) };
-              delete merged[cacheKey];
-              await supabase.from("anime").update({ scraper_urls: merged }).eq("id", anime.id);
-              anime.scraper_urls = merged;
-              console.log(`    🧹 Cleaned legacy "not_found" AnimeSuge watch URL from database for anime ${anime.id}`);
-            } catch (e) { }
           } else {
             const resolvedUrl = cachedWatchUrl || animeTitle;
             const isFromCache = !!cachedWatchUrl;
 
-            animeSugeRes = await enqueue(() =>
+            scraperRes = await enqueue(() =>
               AnimeSugeScraperService.scrapeAnimeEpisode(resolvedUrl, ep, {
                 timeout: timeout || 45000,
                 retries: 2,
@@ -197,7 +217,7 @@ export async function scrapeAndSaveEpisode(anime, ep) {
             );
 
             // If cache failure retry
-            if ((!animeSugeRes || !animeSugeRes.success) && isFromCache) {
+            if ((!scraperRes || !scraperRes.success) && isFromCache) {
               console.warn(`    ⚠️ Cached AnimeSuge URL failed. Clearing cache and retrying search...`);
               try {
                 const { data: existing } = await supabase
@@ -213,7 +233,7 @@ export async function scrapeAndSaveEpisode(anime, ep) {
                 console.warn("    ⚠️ Failed to clear AnimeSuge cache on error:", err.message);
               }
 
-              animeSugeRes = await enqueue(() =>
+              scraperRes = await enqueue(() =>
                 AnimeSugeScraperService.scrapeAnimeEpisode(animeTitle, ep, {
                   timeout: timeout || 45000,
                   retries: 2,
@@ -223,38 +243,35 @@ export async function scrapeAndSaveEpisode(anime, ep) {
               );
             }
 
-            if (animeSugeRes?.success) {
-              const scrapeLang = animeSugeRes.episodeData?.lang || "sub";
-              const list = (animeSugeRes.episodeData?.sources || []).map((source) => ({
+            if (scraperRes?.success) {
+              const scrapeLang = scraperRes.episodeData?.lang || "sub";
+              const list = (scraperRes.episodeData?.sources || []).map((source) => ({
                 name: source.label || "AnimeSuge Server",
-                url: source.iframeUrl || animeSugeRes.streamUrl,
+                url: source.iframeUrl || scraperRes.streamUrl,
                 lang: (source.lang || scrapeLang).toLowerCase(),
               }));
-              if (list.length === 0 && animeSugeRes.streamUrl) {
+              if (list.length === 0 && scraperRes.streamUrl) {
                 list.push({
                   name: "AnimeSuge active",
-                  url: animeSugeRes.streamUrl,
+                  url: scraperRes.streamUrl,
                   lang: scrapeLang.toLowerCase(),
                 });
               }
               if (list.length > 0) {
-                newServers.push(...list);
+                taskServers.push(...list);
                 console.log(`    ✅ AnimeSuge found ${list.length} stream URL(s)`);
               } else {
                 console.log(`    ❌ AnimeSuge did not find a stream URL`);
               }
 
               // Cache watch URL if found and successful
-              if (animeSugeRes.watchUrl) {
+              if (scraperRes.watchUrl) {
                 try {
-                  const urlObj = new URL(animeSugeRes.watchUrl);
+                  const urlObj = new URL(scraperRes.watchUrl);
                   urlObj.pathname = urlObj.pathname.replace(/\/ep-\d+$/i, "");
                   const baseWatchUrl = urlObj.toString();
                   if (anime.scraper_urls?.[cacheKey] !== baseWatchUrl) {
-                    const merged = { ...(anime.scraper_urls || {}), [cacheKey]: baseWatchUrl };
-                    await supabase.from("anime").update({ scraper_urls: merged }).eq("id", anime.id);
-                    anime.scraper_urls = merged;
-                    console.log(`    💾 AnimeSuge watch URL cached: ${baseWatchUrl}`);
+                    newScraperUrlsToCache[cacheKey] = baseWatchUrl;
                   }
                 } catch (e) {
                   console.warn("    ⚠️ AnimeSuge cache save failed:", e.message);
@@ -262,7 +279,7 @@ export async function scrapeAndSaveEpisode(anime, ep) {
               }
             } else {
               console.log(`    ❌ AnimeSuge did not succeed`);
-              const errorMsg = animeSugeRes?.error || "";
+              const errorMsg = scraperRes?.error || "";
               if (
                 ep === 1 ||
                 errorMsg.includes("Could not find a secure search result") ||
@@ -291,20 +308,11 @@ export async function scrapeAndSaveEpisode(anime, ep) {
 
           if (isNotFoundCached) {
             console.log(`    ⏭️ Re:ANIME skipped (cached as not_found in-memory)`);
-          } else if (cachedWatchUrl === "not_found") {
-            // Self-clean database of legacy permanent not_found values
-            try {
-              const merged = { ...(anime.scraper_urls || {}) };
-              delete merged[cacheKey];
-              await supabase.from("anime").update({ scraper_urls: merged }).eq("id", anime.id);
-              anime.scraper_urls = merged;
-              console.log(`    🧹 Cleaned legacy "not_found" Re:ANIME watch URL from database for anime ${anime.id}`);
-            } catch (e) { }
           } else {
             const resolvedUrl = cachedWatchUrl || animeTitle;
             const isFromCache = !!cachedWatchUrl;
 
-            reAnimeRes = await enqueue(() =>
+            scraperRes = await enqueue(() =>
               ReAnimeScraperService.scrapeAnimeEpisode(resolvedUrl, ep, {
                 timeout: timeout || 40000,
                 retries: 2,
@@ -314,7 +322,7 @@ export async function scrapeAndSaveEpisode(anime, ep) {
             );
 
             // If cache failure retry
-            if ((!reAnimeRes || !reAnimeRes.success) && isFromCache) {
+            if ((!scraperRes || !scraperRes.success) && isFromCache) {
               console.warn(`    ⚠️ Cached Re:ANIME URL failed. Clearing cache and retrying search...`);
               try {
                 const { data: existing } = await supabase
@@ -330,7 +338,7 @@ export async function scrapeAndSaveEpisode(anime, ep) {
                 console.warn("    ⚠️ Failed to clear Re:ANIME cache on error:", err.message);
               }
 
-              reAnimeRes = await enqueue(() =>
+              scraperRes = await enqueue(() =>
                 ReAnimeScraperService.scrapeAnimeEpisode(animeTitle, ep, {
                   timeout: timeout || 40000,
                   retries: 2,
@@ -340,39 +348,36 @@ export async function scrapeAndSaveEpisode(anime, ep) {
               );
             }
 
-            if (reAnimeRes?.success) {
-              const scrapeLang = reAnimeRes.episodeData?.lang || "sub";
-              const list = (reAnimeRes.episodeData?.sources || []).map(s => ({
+            if (scraperRes?.success) {
+              const scrapeLang = scraperRes.episodeData?.lang || "sub";
+              const list = (scraperRes.episodeData?.sources || []).map(s => ({
                 name: s.label || "Re:ANIME Server",
-                url: s.iframeUrl || reAnimeRes.streamUrl,
+                url: s.iframeUrl || scraperRes.streamUrl,
                 lang: s.lang || scrapeLang
               }));
-              if (list.length === 0 && reAnimeRes.streamUrl) {
+              if (list.length === 0 && scraperRes.streamUrl) {
                 list.push({
                   name: "Re:ANIME active",
-                  url: reAnimeRes.streamUrl,
+                  url: scraperRes.streamUrl,
                   lang: scrapeLang
                 });
               }
               if (list.length > 0) {
-                newServers.push(...list);
+                taskServers.push(...list);
                 console.log(`    ✅ Re:ANIME found ${list.length} stream URL(s)`);
               } else {
                 console.log(`    ❌ Re:ANIME did not find a stream URL`);
               }
 
               // Cache watch URL if found and successful
-              if (reAnimeRes.watchUrl) {
+              if (scraperRes.watchUrl) {
                 try {
-                  const watchBase = new URL(reAnimeRes.watchUrl);
+                  const watchBase = new URL(scraperRes.watchUrl);
                   watchBase.searchParams.delete("ep");
                   watchBase.searchParams.delete("lang");
                   const baseWatchUrl = watchBase.toString();
                   if (anime.scraper_urls?.[cacheKey] !== baseWatchUrl) {
-                    const merged = { ...(anime.scraper_urls || {}), [cacheKey]: baseWatchUrl };
-                    await supabase.from("anime").update({ scraper_urls: merged }).eq("id", anime.id);
-                    anime.scraper_urls = merged;
-                    console.log(`    💾 Re:ANIME watch URL cached: ${baseWatchUrl}`);
+                    newScraperUrlsToCache[cacheKey] = baseWatchUrl;
                   }
                 } catch (e) {
                   console.warn("    ⚠️ Re:ANIME cache save failed:", e.message);
@@ -380,12 +385,14 @@ export async function scrapeAndSaveEpisode(anime, ep) {
               }
             } else {
               console.log(`    ❌ Re:ANIME did not succeed`);
-              const errorMsg = reAnimeRes?.error || "";
+              const errorMsg = scraperRes?.error || "";
               if (
                 ep === 1 ||
                 errorMsg.includes("Could not find a secure search result") ||
                 errorMsg.includes("No results found") ||
-                errorMsg.toLowerCase().includes("cloudflare turnstile")
+                errorMsg.toLowerCase().includes("cloudflare turnstile") ||
+                errorMsg.includes("No streaming servers") ||
+                errorMsg.includes("No video player sources")
               ) {
                 try {
                   await cacheSet(`notfound:reanime:${anime.id}`, true, 3600000); // 1 hour TTL
@@ -410,30 +417,21 @@ export async function scrapeAndSaveEpisode(anime, ep) {
 
           if (isNotFoundCached) {
             console.log(`    ⏭️ SanjiAnime skipped (cached as not_found in-memory)`);
-          } else if (cachedWatchUrl === "not_found") {
-            // Self-clean database of legacy permanent not_found values
-            try {
-              const merged = { ...(anime.scraper_urls || {}) };
-              delete merged[cacheKey];
-              await supabase.from("anime").update({ scraper_urls: merged }).eq("id", anime.id);
-              anime.scraper_urls = merged;
-              console.log(`    🧹 Cleaned legacy "not_found" SanjiAnime watch URL from database for anime ${anime.id}`);
-            } catch (e) { }
           } else {
             const resolvedUrl = cachedWatchUrl || animeTitle;
             const isFromCache = !!cachedWatchUrl;
 
-            sanjiAnimeRes = await enqueue(() =>
+            scraperRes = await enqueue(() =>
               SanjiAnimeScraperService.scrapeAnimeEpisode(resolvedUrl, ep, {
                 timeout: timeout || 40000,
                 retries: 2,
                 dbAnimeId: anime.id
               }),
               "high"
-            );
+              );
 
             // If cache failure retry
-            if ((!sanjiAnimeRes || !sanjiAnimeRes.success) && isFromCache) {
+            if ((!scraperRes || !scraperRes.success) && isFromCache) {
               console.warn(`    ⚠️ Cached SanjiAnime URL failed. Clearing cache and retrying search...`);
               try {
                 const { data: existing } = await supabase
@@ -449,7 +447,7 @@ export async function scrapeAndSaveEpisode(anime, ep) {
                 console.warn("    ⚠️ Failed to clear SanjiAnime cache on error:", err.message);
               }
 
-              sanjiAnimeRes = await enqueue(() =>
+              scraperRes = await enqueue(() =>
                 SanjiAnimeScraperService.scrapeAnimeEpisode(animeTitle, ep, {
                   timeout: timeout || 40000,
                   retries: 2,
@@ -459,35 +457,32 @@ export async function scrapeAndSaveEpisode(anime, ep) {
               );
             }
 
-            if (sanjiAnimeRes?.success) {
-              const scrapeLang = sanjiAnimeRes.episodeData?.lang || "unknown";
-              const list = (sanjiAnimeRes.episodeData?.sources || []).map((source) => ({
+            if (scraperRes?.success) {
+              const scrapeLang = scraperRes.episodeData?.lang || "unknown";
+              const list = (scraperRes.episodeData?.sources || []).map((source) => ({
                 name: source.label || "Sanji Anime Server",
-                url: source.playableUrl || source.iframeUrl || source.url || sanjiAnimeRes.streamUrl,
+                url: source.playableUrl || source.iframeUrl || source.url || scraperRes.streamUrl,
                 lang: (source.lang || scrapeLang).toLowerCase(),
               }));
-              if (list.length === 0 && sanjiAnimeRes.streamUrl) {
+              if (list.length === 0 && scraperRes.streamUrl) {
                 list.push({
                   name: "Sanji Anime active",
-                  url: sanjiAnimeRes.streamUrl,
+                  url: scraperRes.streamUrl,
                   lang: scrapeLang.toLowerCase(),
                 });
               }
               if (list.length > 0) {
-                newServers.push(...list);
+                taskServers.push(...list);
                 console.log(`    ⚠️ SanjiAnime found ${list.length} stream URL(s)`);
               } else {
                 console.log(`    ❌ SanjiAnime did not find a stream URL`);
               }
 
               // Cache watch URL if found and successful
-              if (sanjiAnimeRes.watchUrl) {
+              if (scraperRes.watchUrl) {
                 try {
-                  if (anime.scraper_urls?.[cacheKey] !== sanjiAnimeRes.watchUrl) {
-                    const merged = { ...(anime.scraper_urls || {}), [cacheKey]: sanjiAnimeRes.watchUrl };
-                    await supabase.from("anime").update({ scraper_urls: merged }).eq("id", anime.id);
-                    anime.scraper_urls = merged;
-                    console.log(`    💾 Sanji Anime watch URL cached: ${sanjiAnimeRes.watchUrl}`);
+                  if (anime.scraper_urls?.[cacheKey] !== scraperRes.watchUrl) {
+                    newScraperUrlsToCache[cacheKey] = scraperRes.watchUrl;
                   }
                 } catch (e) {
                   console.warn("    ⚠️ Sanji Anime cache save failed:", e.message);
@@ -495,7 +490,7 @@ export async function scrapeAndSaveEpisode(anime, ep) {
               }
             } else {
               console.log(`    ❌ SanjiAnime did not succeed`);
-              const errorMsg = sanjiAnimeRes?.error || "";
+              const errorMsg = scraperRes?.error || "";
               if (
                 ep === 1 ||
                 errorMsg.includes("Could not find a secure search result") ||
@@ -524,20 +519,11 @@ export async function scrapeAndSaveEpisode(anime, ep) {
 
           if (isNotFoundCached) {
             console.log(`    ⏭️ Cinevo skipped (cached as not_found in-memory)`);
-          } else if (cachedWatchUrl === "not_found") {
-            // Self-clean database of legacy permanent not_found values
-            try {
-              const merged = { ...(anime.scraper_urls || {}) };
-              delete merged[cacheKey];
-              await supabase.from("anime").update({ scraper_urls: merged }).eq("id", anime.id);
-              anime.scraper_urls = merged;
-              console.log(`    🧹 Cleaned legacy "not_found" Cinevo watch URL from database for anime ${anime.id}`);
-            } catch (e) { }
           } else {
             const resolvedUrl = cachedWatchUrl || animeTitle;
             const isFromCache = !!cachedWatchUrl;
 
-            cinevoRes = await enqueue(() =>
+            scraperRes = await enqueue(() =>
               CinevoScraperService.scrapeAnimeEpisode(resolvedUrl, ep, {
                 timeout: timeout || 45000,
                 retries: 2,
@@ -547,7 +533,7 @@ export async function scrapeAndSaveEpisode(anime, ep) {
             );
 
             // If cache failure retry
-            if ((!cinevoRes || !cinevoRes.success) && isFromCache) {
+            if ((!scraperRes || !scraperRes.success) && isFromCache) {
               console.warn(`    ⚠️ Cached Cinevo URL failed. Clearing cache and retrying search...`);
               try {
                 const { data: existing } = await supabase
@@ -563,7 +549,7 @@ export async function scrapeAndSaveEpisode(anime, ep) {
                 console.warn("    ⚠️ Failed to clear Cinevo cache on error:", err.message);
               }
 
-              cinevoRes = await enqueue(() =>
+              scraperRes = await enqueue(() =>
                 CinevoScraperService.scrapeAnimeEpisode(animeTitle, ep, {
                   timeout: timeout || 45000,
                   retries: 2,
@@ -573,39 +559,36 @@ export async function scrapeAndSaveEpisode(anime, ep) {
               );
             }
 
-            if (cinevoRes?.success) {
-              const scrapeLang = cinevoRes.episodeData?.lang || "sub";
-              const list = (cinevoRes.episodeData?.sources || []).map((source) => ({
+            if (scraperRes?.success) {
+              const scrapeLang = scraperRes.episodeData?.lang || "sub";
+              const list = (scraperRes.episodeData?.sources || []).map((source) => ({
                 name: source.label ? `Cinevo - ${source.label}` : "Cinevo Server",
-                url: source.playableUrl || source.iframeUrl || source.url || cinevoRes.streamUrl,
+                url: source.playableUrl || source.iframeUrl || source.url || scraperRes.streamUrl,
                 lang: (source.lang || scrapeLang).toLowerCase(),
               }));
-              if (list.length === 0 && cinevoRes.streamUrl) {
+              if (list.length === 0 && scraperRes.streamUrl) {
                 list.push({
                   name: "Cinevo active",
-                  url: cinevoRes.streamUrl,
+                  url: scraperRes.streamUrl,
                   lang: scrapeLang.toLowerCase(),
                 });
               }
               if (list.length > 0) {
-                newServers.push(...list);
+                taskServers.push(...list);
                 console.log(`    ✅ Cinevo found ${list.length} stream URL(s)`);
               } else {
                 console.log(`    ❌ Cinevo did not find a stream URL`);
               }
 
               // Cache watch URL if found and successful
-              if (cinevoRes.watchUrl) {
+              if (scraperRes.watchUrl) {
                 try {
-                  const watchBase = new URL(cinevoRes.watchUrl);
+                  const watchBase = new URL(scraperRes.watchUrl);
                   watchBase.searchParams.delete("ep");
                   watchBase.searchParams.delete("season");
                   const baseWatchUrl = watchBase.toString();
                   if (anime.scraper_urls?.[cacheKey] !== baseWatchUrl) {
-                    const merged = { ...(anime.scraper_urls || {}), [cacheKey]: baseWatchUrl };
-                    await supabase.from("anime").update({ scraper_urls: merged }).eq("id", anime.id);
-                    anime.scraper_urls = merged;
-                    console.log(`    💾 Cinevo watch URL cached: ${baseWatchUrl}`);
+                    newScraperUrlsToCache[cacheKey] = baseWatchUrl;
                   }
                 } catch (e) {
                   console.warn("    ⚠️ Cinevo cache save failed:", e.message);
@@ -613,7 +596,7 @@ export async function scrapeAndSaveEpisode(anime, ep) {
               }
             } else {
               console.log(`    ❌ Cinevo did not succeed`);
-              const errorMsg = cinevoRes?.error || "";
+              const errorMsg = scraperRes?.error || "";
               if (
                 ep === 1 ||
                 errorMsg.includes("Could not find a secure search result") ||
@@ -635,17 +618,10 @@ export async function scrapeAndSaveEpisode(anime, ep) {
 
       // Record telemetry metrics and logs
       const elapsed = Date.now() - startTime;
-      let scraperRes = null;
-      if (id === "nineanime") scraperRes = nineAnimeRes;
-      else if (id === "animesuge") scraperRes = animeSugeRes;
-      else if (id === "reanime") scraperRes = reAnimeRes;
-      else if (id === "sanjianime") scraperRes = sanjiAnimeRes;
-      else if (id === "cinevo") scraperRes = cinevoRes;
-
       if (scraperRes) {
         let success = false;
         let error = null;
-        if (scraperRes.success && (scraperRes.streamUrl || newServers.length > serversBefore)) {
+        if (scraperRes.success && (scraperRes.streamUrl || taskServers.length > 0)) {
           success = true;
         } else {
           error = scraperRes.error || "No stream found";
@@ -653,9 +629,8 @@ export async function scrapeAndSaveEpisode(anime, ep) {
 
         if (success) {
           await stateManager.recordScraperSuccess(id, elapsed);
-          const addedServers = newServers.slice(serversBefore);
-          const hasSub = addedServers.some(s => s.lang === 'sub');
-          const hasDub = addedServers.some(s => s.lang === 'dub');
+          const hasSub = taskServers.some(s => s.lang === 'sub');
+          const hasDub = taskServers.some(s => s.lang === 'dub');
           let langStr = '';
           if (hasSub && hasDub) langStr = ' (Sub/Dub)';
           else if (hasSub) langStr = ' (Sub)';
@@ -679,6 +654,34 @@ export async function scrapeAndSaveEpisode(anime, ep) {
             );
           }
         }
+      }
+
+      return { id, success: scraperRes?.success, servers: taskServers };
+    });
+
+    // Run all tasks in parallel
+    const taskResults = await Promise.all(scrapeTasks);
+
+    // Aggregate found servers from all completed scraper tasks
+    for (const taskRes of taskResults) {
+      if (taskRes && taskRes.servers) {
+        newServers.push(...taskRes.servers);
+      }
+    }
+
+    // Consolidated database write for all resolved watch URLs to prevent concurrency race conditions
+    if (Object.keys(newScraperUrlsToCache).length > 0) {
+      try {
+        const currentCache = anime.scraper_urls || {};
+        const mergedCache = { ...currentCache, ...newScraperUrlsToCache };
+        await supabase
+          .from("anime")
+          .update({ scraper_urls: mergedCache })
+          .eq("id", anime.id);
+        anime.scraper_urls = mergedCache;
+        console.log(`    💾 Saved all resolved scraper watch URLs concurrently to database!`);
+      } catch (dbErr) {
+        console.warn(`    ⚠️ Failed to update consolidated scraper_urls:`, dbErr.message);
       }
     }
 

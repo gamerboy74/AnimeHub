@@ -64,7 +64,18 @@ episodeQueue.on('completed', (job) => {
 });
 
 episodeQueue.on('failed', (job, err) => {
-  console.warn(`❌ Episode job ${job.id} failed (attempt ${job.attemptsMade}/3): ${err.message}`);
+  const isExhausted = job.attemptsMade >= job.opts.attempts;
+
+  if (isExhausted) {
+    // --- Dead letter alert: this job will NOT be retried again ---
+    // Log loudly so it's obvious in prod that a scrape has permanently failed.
+    console.error(
+      `📬 DEAD LETTER — Episode job ${job.id} exhausted all ${job.opts.attempts} attempts and will NOT retry.` +
+      ` | anime=${job.data.animeId} EP${job.data.episodeNumber} | Last error: ${err.message}`
+    );
+  } else {
+    console.warn(`❌ Episode job ${job.id} failed (attempt ${job.attemptsMade}/${job.opts.attempts}): ${err.message}`);
+  }
 });
 
 episodeQueue.on('error', (err) => {

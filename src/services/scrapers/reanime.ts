@@ -1,5 +1,4 @@
-// Browser-compatible Re:ANIME scraper wrapper.
-// The actual scraping logic lives in the backend API and uses Playwright to click server buttons.
+import { apiClient, apiFetchRaw } from '../../utils/api/client';
 
 export interface ReAnimeServerSource {
   label: string;
@@ -23,8 +22,6 @@ export interface ReAnimeScrapeResult {
 }
 
 export class ReAnimeScraperService {
-  private static readonly API_BASE_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
-
   /**
    * Resolve a Re:ANIME anime/watch URL to the active player iframe + all server variants.
    */
@@ -41,24 +38,11 @@ export class ReAnimeScraperService {
     try {
       console.log(`🎬 Scraping Re:ANIME for "${url}" (episode ${episodeNumber})`);
 
-      const response = await fetch(`${this.API_BASE_URL}/api/scrape-reanime-episode`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          url,
-          episodeNumber,
-          options,
-        }),
+      return await apiClient.post('/api/scrape-reanime-episode', {
+        url,
+        episodeNumber,
+        options,
       });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Server error: ${response.status}`);
-      }
-
-      return await response.json();
     } catch (error) {
       console.error('Error calling Re:ANIME scraper API:', error);
       return {
@@ -109,10 +93,6 @@ export class ReAnimeScraperService {
   }> {
     try {
       console.log(`🎬 Batch scraping ${episodeNumbers.length} episodes for "${animeTitle}"`);
-      // Since it's easier to loop on the server, we will use a non-streaming endpoint or stream here
-      // But for simple batch we can call it. We will fall back to server-side batch stream if available.
-      // Let's call the stream version but block until complete or implement basic loop here.
-      // Actually, we can just hit the stream endpoint and accumulate the results!
       const results: ReAnimeScrapeResult[] = [];
       let successCount = 0;
       let errorCount = 0;
@@ -200,15 +180,10 @@ export class ReAnimeScraperService {
     } = {}
   ): Promise<void> {
     return new Promise((resolve, reject) => {
-      const url = `${this.API_BASE_URL}/api/batch-scrape-reanime-episodes-stream`;
+      console.log('🌐 Fetching Re:ANIME batch stream...');
 
-      console.log('🌐 Fetching Re:ANIME batch stream:', url);
-
-      fetch(url, {
+      apiFetchRaw('/api/batch-scrape-reanime-episodes-stream', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({
           animeTitle,
           animeId,
@@ -271,3 +246,4 @@ export class ReAnimeScraperService {
     });
   }
 }
+

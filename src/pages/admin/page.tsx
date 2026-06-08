@@ -1,20 +1,22 @@
-
+import { Suspense, lazy } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import DashboardStats from './components/DashboardStats';
-import RecentActivity from './components/RecentActivity';
-import QuickActions from './components/QuickActions';
-import SystemHealth from './components/SystemHealth';
-import EpisodeScheduler from './components/EpisodeScheduler';
 import { useAdminStats, useRecentActivity, useSystemHealth } from '../../hooks/admin';
 import { sessionManager } from '../../utils/session/manager';
 import { usePerformanceMetrics } from '../../components/common/PerformanceMonitor';
 import { useServiceWorker } from '../../utils/cache/serviceWorker';
 
+// Lazy-load sub-components to isolate heavy charting and scheduling packages from the main dashboard shell
+const DashboardStats = lazy(() => import('./components/DashboardStats'));
+const RecentActivity = lazy(() => import('./components/RecentActivity'));
+const QuickActions = lazy(() => import('./components/QuickActions'));
+const SystemHealth = lazy(() => import('./components/SystemHealth'));
+const EpisodeScheduler = lazy(() => import('./components/EpisodeScheduler'));
+
 export default function AdminDashboard() {
   const navigate = useNavigate();
-  const refreshSession = sessionManager.forceRefresh;
-  const isSessionValid = sessionManager.isSessionValid;
+  const refreshSession = () => sessionManager.forceRefresh();
+  const isSessionValid = () => sessionManager.isSessionValid();
   const { stats: adminStats, refetch: refetchStats } = useAdminStats();
   const { activities, refetch: refetchActivities } = useRecentActivity();
   const { health, refetch: refetchHealth } = useSystemHealth();
@@ -109,7 +111,9 @@ export default function AdminDashboard() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
           >
-            <DashboardStats data={adminStats} />
+            <Suspense fallback={<div className="h-32 bg-slate-100/60 animate-pulse rounded-2xl border border-slate-200"></div>}>
+              <DashboardStats data={adminStats} />
+            </Suspense>
           </motion.div>
 
           {/* Main Content Grid */}
@@ -121,7 +125,9 @@ export default function AdminDashboard() {
               transition={{ delay: 0.2 }}
               className="lg:col-span-2"
             >
-              <RecentActivity activities={activities} />
+              <Suspense fallback={<div className="h-96 bg-slate-100/60 animate-pulse rounded-2xl border border-slate-200"></div>}>
+                <RecentActivity activities={activities} />
+              </Suspense>
             </motion.div>
 
             {/* Quick Actions & System Health */}
@@ -131,9 +137,15 @@ export default function AdminDashboard() {
               transition={{ delay: 0.3 }}
               className="space-y-8"
             >
-              <QuickActions onAction={handleQuickAction} />
-              <SystemHealth health={health} />
-              <EpisodeScheduler />
+              <Suspense fallback={<div className="h-48 bg-slate-100/60 animate-pulse rounded-2xl border border-slate-200"></div>}>
+                <QuickActions onAction={handleQuickAction} />
+              </Suspense>
+              <Suspense fallback={<div className="h-48 bg-slate-100/60 animate-pulse rounded-2xl border border-slate-200"></div>}>
+                <SystemHealth health={health} />
+              </Suspense>
+              <Suspense fallback={<div className="h-48 bg-slate-100/60 animate-pulse rounded-2xl border border-slate-200"></div>}>
+                <EpisodeScheduler />
+              </Suspense>
             </motion.div>
           </div>
 

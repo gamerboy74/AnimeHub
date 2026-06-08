@@ -1,4 +1,6 @@
 import { supabase } from '../../lib/database/supabase'
+import { apiClient } from '../../utils/api/client'
+
 
 export interface AdminStats {
   totalUsers: number
@@ -517,23 +519,8 @@ export class AdminService {
 
   static async updateAnimeRequestStatus(requestId: string, status: AnimeRequest['status']): Promise<boolean> {
     try {
-      const API_BASE = import.meta.env.DEV ? '' : (import.meta.env.VITE_BACKEND_URL || '')
-      const response = await fetch(`${API_BASE}/api/admin/anime-requests/${requestId}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ status }),
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(errorData.error || 'Failed to update anime request status')
-      }
-
-      const result = await response.json()
+      const result = await apiClient.put<{ success: boolean; error?: string }>(`/api/admin/anime-requests/${requestId}`, { status })
       if (!result.success) throw new Error(result.error || 'Failed to update anime request status')
-
       return true
     } catch (error) {
       console.error('Error updating anime request status:', error)

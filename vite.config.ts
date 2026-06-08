@@ -126,11 +126,6 @@ export default defineConfig({
             return 'vendor';
           }
           
-          // Admin components (lazy loaded)
-          if (id.includes('/admin/')) {
-            return 'admin';
-          }
-          
           // Player components (lazy loaded)
           if (id.includes('/player/')) {
             return 'player';

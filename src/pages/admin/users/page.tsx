@@ -21,7 +21,7 @@ export default function AdminUsersPage() {
     try {
       setLoading(true);
       setError(null);
-      
+
       const result = await AdminService.getAllUsers(page, 20);
       setUsers(result.users);
       setTotalUsers(result.total);
@@ -43,10 +43,10 @@ export default function AdminUsersPage() {
       setUpdatingUser(userId);
       setError(null);
       setSuccessMessage(null);
-      
+
       await AdminService.updateUserRole(userId, newRole);
       await fetchUsers(currentPage);
-      
+
       setSuccessMessage(`User role updated to ${newRole} successfully!`);
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err) {
@@ -62,10 +62,10 @@ export default function AdminUsersPage() {
       setUpdatingUser(userId);
       setError(null);
       setSuccessMessage(null);
-      
+
       await AdminService.updateUserSubscription(userId, newSubscription);
       await fetchUsers(currentPage);
-      
+
       setSuccessMessage(`User subscription updated to ${newSubscription} successfully!`);
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err) {
@@ -82,10 +82,10 @@ export default function AdminUsersPage() {
         setUpdatingUser(userId);
         setError(null);
         setSuccessMessage(null);
-        
+
         await AdminService.deleteUser(userId);
         await fetchUsers(currentPage);
-        
+
         setSuccessMessage(`User "${username}" deleted successfully!`);
         setTimeout(() => setSuccessMessage(null), 3000);
       } catch (err) {
@@ -110,10 +110,10 @@ export default function AdminUsersPage() {
   const filteredUsers = users.filter(user => {
     const matchesRole = filterRole === 'all' || user.role === filterRole;
     const matchesSubscription = filterSubscription === 'all' || user.subscription_type === filterSubscription;
-    const matchesSearch = searchTerm === '' || 
+    const matchesSearch = searchTerm === '' ||
       user.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
       user.email.toLowerCase().includes(searchTerm.toLowerCase());
-    
+
     return matchesRole && matchesSubscription && matchesSearch;
   });
 
@@ -153,7 +153,7 @@ export default function AdminUsersPage() {
     }
   };
 
-    return (
+  return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Header */}
@@ -180,8 +180,8 @@ export default function AdminUsersPage() {
                 <p className="text-sm font-medium text-slate-500">Total Users</p>
                 <p className="text-2xl font-bold text-slate-900">{totalUsers}</p>
               </div>
-        </div>
-      </div>
+            </div>
+          </div>
 
           <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg p-6 border border-white/20">
             <div className="flex items-center">
@@ -200,7 +200,7 @@ export default function AdminUsersPage() {
           </div>
 
           <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg p-6 border border-white/20">
-              <div className="flex items-center">
+            <div className="flex items-center">
               <div className="flex-shrink-0">
                 <div className="w-10 h-10 bg-amber-100 rounded-xl flex items-center justify-center">
                   <i className="ri-vip-crown-line text-amber-600 text-xl"></i>
@@ -242,7 +242,7 @@ export default function AdminUsersPage() {
               </div>
             </div>
           )}
-          
+
           {successMessage && (
             <div className="bg-emerald-50 border-l-4 border-emerald-500 text-emerald-700 px-4 py-3 rounded-r-xl mb-4">
               <div className="flex items-center gap-2">
@@ -251,7 +251,7 @@ export default function AdminUsersPage() {
               </div>
             </div>
           )}
-          
+
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             {/* Search */}
             <div className="md:col-span-2">
@@ -315,7 +315,7 @@ export default function AdminUsersPage() {
           <div className="space-y-4">
             {filteredUsers.map((user) => (
               <motion.div
-                      key={user.id}
+                key={user.id}
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg border border-white/20 p-6 hover:shadow-xl transition-all duration-300"
@@ -324,24 +324,24 @@ export default function AdminUsersPage() {
                   <div className="flex items-center space-x-4">
                     {/* Avatar */}
                     <div className="flex-shrink-0">
-                            {user.avatar_url ? (
-                              <img
-                                className="h-16 w-16 rounded-full object-cover border-2 border-gray-200"
-                                src={user.avatar_url}
-                                alt={user.username}
-                                width={64}
-                                height={64}
-                                loading="lazy"
-                                decoding="async"
-                              />
-                            ) : (
+                      {user.avatar_url ? (
+                        <img
+                          className="h-16 w-16 rounded-full object-cover border-2 border-gray-200"
+                          src={user.avatar_url}
+                          alt={user.username}
+                          width={64}
+                          height={64}
+                          loading="lazy"
+                          decoding="async"
+                        />
+                      ) : (
                         <div className="h-16 w-16 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center border-2 border-gray-200">
                           <span className="text-white text-2xl font-bold">
                             {user.username.charAt(0).toUpperCase()}
                           </span>
-                              </div>
-                            )}
-                          </div>
+                        </div>
+                      )}
+                    </div>
 
                     {/* User Info */}
                     <div className="flex-1">
@@ -354,29 +354,29 @@ export default function AdminUsersPage() {
                           {getSubscriptionIcon(user.subscription_type)} {user.subscription_type}
                         </span>
                       </div>
-                      
+
                       <p className="text-slate-500 mb-3">{user.email}</p>
-                      
+
                       <div className="flex items-center space-x-6 text-sm text-slate-500">
                         <div className="flex items-center space-x-1">
                           <i className="ri-calendar-line"></i>
                           <span>Joined {new Date(user.created_at).toLocaleDateString()}</span>
-                            </div>
-                        
+                        </div>
+
                         <div className="flex items-center space-x-1">
                           <i className="ri-time-line"></i>
                           <span>
-                            {user.total_watch_time && user.total_watch_time > 0 
+                            {user.total_watch_time && user.total_watch_time > 0
                               ? `${Math.round(user.total_watch_time / 3600)}h watched`
                               : 'No watch time'
                             }
                           </span>
                         </div>
-                        
+
                         <div className="flex items-center space-x-1">
                           <i className="ri-movie-2-line"></i>
                           <span>
-                            {user.anime_watched && user.anime_watched > 0 
+                            {user.anime_watched && user.anime_watched > 0
                               ? `${user.anime_watched} anime`
                               : 'No anime watched'
                             }
@@ -400,16 +400,16 @@ export default function AdminUsersPage() {
                         </div>
                       ) : (
                         <div className="flex items-center space-x-2">
-                        <select
-                          value={user.role}
-                          onChange={(e) => handleRoleChange(user.id, e.target.value as any)}
+                          <select
+                            value={user.role}
+                            onChange={(e) => handleRoleChange(user.id, e.target.value as any)}
                             disabled={updatingUser === user.id}
                             className="px-3 py-1 border border-slate-200 rounded-xl text-sm focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50"
-                        >
-                          <option value="user">User</option>
-                          <option value="moderator">Moderator</option>
+                          >
+                            <option value="user">User</option>
+                            <option value="moderator">Moderator</option>
                             <option value="admin" disabled>Admin (Database Only)</option>
-                        </select>
+                          </select>
                           {updatingUser === user.id && (
                             <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
                           )}
@@ -435,11 +435,11 @@ export default function AdminUsersPage() {
                           <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
                         )}
                       </div>
-                        </div>
+                    </div>
 
                     {/* Action Buttons */}
                     <div className="flex space-x-2">
-                      <button 
+                      <button
                         onClick={() => handleViewProfile(user)}
                         className="px-4 py-2 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all text-sm shadow-sm hover:shadow-md"
                       >
@@ -467,7 +467,7 @@ export default function AdminUsersPage() {
                 </div>
               </motion.div>
             ))}
-            
+
             {filteredUsers.length === 0 && (
               <div className="text-center py-12">
                 <i className="ri-user-line text-slate-300 text-6xl mb-4"></i>
@@ -480,10 +480,10 @@ export default function AdminUsersPage() {
                 </p>
               </div>
             )}
-            </div>
+          </div>
         )}
 
-            {/* Pagination */}
+        {/* Pagination */}
         {totalUsers > 20 && (
           <div className="mt-8 flex justify-center">
             <div className="flex space-x-2">
@@ -491,20 +491,20 @@ export default function AdminUsersPage() {
                 onClick={() => fetchUsers(currentPage - 1)}
                 disabled={currentPage === 1}
                 className="px-4 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl font-medium hover:shadow-lg disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-                >
-                  Previous
+              >
+                Previous
               </button>
-              
+
               <span className="px-4 py-2 text-slate-700 font-medium">
                 Page {currentPage} of {Math.ceil(totalUsers / 20)}
-                </span>
-              
+              </span>
+
               <button
                 onClick={() => fetchUsers(currentPage + 1)}
                 disabled={currentPage >= Math.ceil(totalUsers / 20)}
                 className="px-4 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl font-medium hover:shadow-lg disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-                >
-                  Next
+              >
+                Next
               </button>
             </div>
           </div>
@@ -567,35 +567,35 @@ export default function AdminUsersPage() {
                       {getSubscriptionIcon(selectedUser.subscription_type)} {selectedUser.subscription_type}
                     </span>
                   </div>
-                  
+
                   <p className="text-white/80 text-lg mb-4 drop-shadow-sm">{selectedUser.email}</p>
-                  
+
                   <div className="grid grid-cols-2 gap-4 text-sm">
                     <div className="flex items-center space-x-2 bg-white/10 backdrop-blur-sm rounded-lg p-3 border border-white/10">
                       <i className="ri-calendar-line text-white/70"></i>
                       <span className="text-white/90">Joined {new Date(selectedUser.created_at).toLocaleDateString()}</span>
                     </div>
-                    
+
                     <div className="flex items-center space-x-2 bg-white/10 backdrop-blur-sm rounded-lg p-3 border border-white/10">
                       <i className="ri-time-line text-white/70"></i>
                       <span className="text-white/90">
-                        {selectedUser.total_watch_time && selectedUser.total_watch_time > 0 
+                        {selectedUser.total_watch_time && selectedUser.total_watch_time > 0
                           ? `${Math.round(selectedUser.total_watch_time / 3600)}h watched`
                           : 'No watch time recorded'
                         }
                       </span>
                     </div>
-                    
+
                     <div className="flex items-center space-x-2 bg-white/10 backdrop-blur-sm rounded-lg p-3 border border-white/10">
                       <i className="ri-movie-2-line text-white/70"></i>
                       <span className="text-white/90">
-                        {selectedUser.anime_watched && selectedUser.anime_watched > 0 
+                        {selectedUser.anime_watched && selectedUser.anime_watched > 0
                           ? `${selectedUser.anime_watched} anime watched`
                           : 'No anime watched yet'
                         }
                       </span>
                     </div>
-                    
+
                     <div className="flex items-center space-x-2 bg-white/10 backdrop-blur-sm rounded-lg p-3 border border-white/10">
                       <i className="ri-hashtag text-white/70"></i>
                       <span className="font-mono text-xs text-white/90">{selectedUser.id}</span>
@@ -615,7 +615,7 @@ export default function AdminUsersPage() {
                         value={selectedUser.role}
                         onChange={(e) => {
                           handleRoleChange(selectedUser.id, e.target.value as any);
-                          setSelectedUser({...selectedUser, role: e.target.value as any});
+                          setSelectedUser({ ...selectedUser, role: e.target.value as any });
                         }}
                         disabled={updatingUser === selectedUser.id}
                         className="w-full px-3 py-2 bg-white/10 backdrop-blur-sm border border-white/20 rounded-lg text-white placeholder-white/50 focus:ring-2 focus:ring-white/30 focus:border-white/30 disabled:opacity-50"
@@ -626,14 +626,14 @@ export default function AdminUsersPage() {
                       </select>
                     </div>
                   )}
-                  
+
                   <div className="space-y-2">
                     <label className="block text-sm font-medium text-white/80">Change Subscription</label>
                     <select
                       value={selectedUser.subscription_type}
                       onChange={(e) => {
                         handleSubscriptionChange(selectedUser.id, e.target.value as any);
-                        setSelectedUser({...selectedUser, subscription_type: e.target.value as any});
+                        setSelectedUser({ ...selectedUser, subscription_type: e.target.value as any });
                       }}
                       disabled={updatingUser === selectedUser.id}
                       className="w-full px-3 py-2 bg-white/10 backdrop-blur-sm border border-white/20 rounded-lg text-white placeholder-white/50 focus:ring-2 focus:ring-white/30 focus:border-white/30 disabled:opacity-50"
@@ -643,7 +643,7 @@ export default function AdminUsersPage() {
                       <option value="vip" className="bg-gray-800 text-white">VIP</option>
                     </select>
                   </div>
-                  
+
                   <div className="space-y-2">
                     <label className="block text-sm font-medium text-white/80">Actions</label>
                     <div className="flex space-x-2">
@@ -669,7 +669,7 @@ export default function AdminUsersPage() {
                   </div>
                 </div>
               </div>
-          </div>
+            </div>
           </motion.div>
         </div>
       )}

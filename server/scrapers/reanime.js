@@ -1,6 +1,7 @@
-import { getBrowser } from "../index.js";
+import { getBrowser } from "../services/queue.js";
 import { extractSeasonNumber } from "../utils/seasonExtractor.js";
 import fs from "fs";
+import { spawn } from "child_process";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { chromium } from "playwright-extra";
@@ -107,8 +108,11 @@ export class ReAnimeScraperService {
       animeUrl = normalizedUrl;
     } else {
       // It's a title! Search for it on Re:ANIME
-      console.log(`🔍 Searching Re:ANIME for title: "${inputUrl}"`);
-      await page.goto(this.BASE_URL, { waitUntil: "domcontentloaded", timeout: 30000 });
+      try {
+        await page.goto(this.BASE_URL, { waitUntil: "commit", timeout: 20000 });
+      } catch (gotoErr) {
+        console.warn("⚠️ Home page navigation warning (ignored):", gotoErr.message);
+      }
       await page.waitForTimeout(3000); // Wait for Cloudflare/Turnstile
 
       // Check for Cloudflare Turnstile block
@@ -185,12 +189,27 @@ export class ReAnimeScraperService {
 
       await searchInput.click();
       await searchInput.fill("");
-      await searchInput.type(inputUrl, { delay: 100 });
+      // Clean search term to strip apostrophes and special characters which often break exact-match search indexes
+      const cleanSearchTerm = inputUrl
+        .replace(/['’`‘"”]/g, "") // strip apostrophes and quotes entirely
+        .replace(/[:\-–—]/g, " ") // replace colons and dashes with spaces
+        .replace(/\s+/g, " ")     // normalize multiple spaces
+        .trim();
+      
+      console.log(`⌨️ Typing cleaned search query: "${cleanSearchTerm}"`);
+      await searchInput.type(cleanSearchTerm, { delay: 100 });
       await page.waitForTimeout(500);
       await searchInput.press("Enter");
 
-      console.log("⏳ Waiting for search results...");
-      await page.waitForTimeout(5000);
+      console.log("⏳ Waiting for search results to load...");
+      try {
+        // Wait dynamically up to 6 seconds for any anime/watch link to appear
+        await page.waitForSelector('a[href*="/anime/"], a[href*="/watch/"]', { timeout: 6000 });
+        console.log("✅ Search results loaded dynamically!");
+      } catch (e) {
+        console.log("⚠️ Search results took too long to load dynamically. Proceeding anyway...");
+        await page.waitForTimeout(1000);
+      }
 
       // Extract all links
       const links = await page.$$eval('a', el => el.map(a => ({
@@ -240,9 +259,20 @@ export class ReAnimeScraperService {
           const lenRatio = Math.min(textClean.length, targetClean.length) / Math.max(textClean.length, targetClean.length || 1);
           const containsBonus = (textClean.includes(targetClean) || targetClean.includes(textClean)) ? 0.05 : 0;
           const cleanBonus = isCleanMatch ? 0.1 : 0;
-          const score = lenRatio + containsBonus + cleanBonus;
+          
+          // Calculate mismatch penalty for special terms (specials, ova, movie, specials, etc.)
+          let penalty = 0;
+          const specialTerms = ['special', 'specials', 'ova', 'ona', 'movie', 'film', 'spinoff', 'spin-off'];
+          for (const term of specialTerms) {
+            const hasWord = (str, word) => new RegExp(`\\b${word}\\b`, 'i').test(str);
+            if (hasWord(inputUrl, term) !== hasWord(titleLine, term)) {
+              penalty += 0.4;
+            }
+          }
+
+          const score = Math.max(0, lenRatio + containsBonus + cleanBonus - penalty);
           const truncatedTitle = titleLine.length > 60 ? titleLine.slice(0, 57) + "..." : titleLine;
-          console.log(`🎯 Candidate match: "${truncatedTitle}" -> ${link.href} (score: ${score.toFixed(2)})`);
+          console.log(`🎯 Candidate match: "${truncatedTitle}" -> ${link.href} (score: ${score.toFixed(2)}${penalty > 0 ? `, penalty: -${penalty.toFixed(2)}` : ''})`);
           if (score > bestScore) {
             matchedLink = link.href;
             bestScore = score;
@@ -274,7 +304,11 @@ export class ReAnimeScraperService {
     // If we got here, we have an animeUrl (like /anime/...)
     // Navigate to the anime detail page to get the watch URL
     console.log(`🌐 Navigating to anime detail page to resolve watch URL: ${animeUrl}`);
-    await page.goto(animeUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+    try {
+      await page.goto(animeUrl, { waitUntil: "commit", timeout: 20000 });
+    } catch (gotoErr) {
+      console.warn("⚠️ Anime detail page navigation warning (ignored):", gotoErr.message);
+    }
     await page.waitForTimeout(3000);
 
     // Look for a link containing /watch/
@@ -317,12 +351,44 @@ export class ReAnimeScraperService {
         isCDP = true;
         console.log("✅ Connected successfully to Chrome via CDP!");
       } catch (cdpErr) {
-        console.log("⚠️ CDP connection failed (Chrome is likely not running on port 9222). Falling back to headful browser launch...");
-        browser = await chromium.launch({
-          headless: false,
-          channel: "chrome",
-          args: ["--no-sandbox", "--disable-setuid-sandbox"]
-        });
+        console.log("⚠️ CDP connection failed (Chrome is likely not running on port 9222). Trying to auto-launch Chrome with dev profile...");
+        try {
+          const chromePaths = [
+            "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+            "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+            process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, "Google/Chrome/Application/chrome.exe") : "",
+            process.env.PROGRAMFILES ? join(process.env.PROGRAMFILES, "Google/Chrome/Application/chrome.exe") : "",
+            process.env["PROGRAMFILES(X86)"] ? join(process.env["PROGRAMFILES(X86)"], "Google/Chrome/Application/chrome.exe") : ""
+          ].filter(Boolean);
+          const chromePath = chromePaths.find(p => p && fs.existsSync(p));
+          if (chromePath) {
+            console.log(`🚀 Found Google Chrome at: ${chromePath}. Launching process...`);
+            const chromeProcess = spawn(chromePath, [
+              "--remote-debugging-port=9222",
+              "--user-data-dir=C:\\Users\\gboy3\\chrome-dev-profile"
+            ], {
+              detached: true,
+              stdio: "ignore"
+            });
+            chromeProcess.unref();
+            
+            // Wait 4 seconds for Chrome to start up and open port 9222
+            await new Promise(r => setTimeout(r, 4000));
+            
+            browser = await chromium.connectOverCDP("http://127.0.0.1:9222");
+            isCDP = true;
+            console.log("✅ Connected successfully to auto-launched Chrome via CDP!");
+          } else {
+            throw new Error("Google Chrome executable not found in standard Windows paths");
+          }
+        } catch (autoLaunchErr) {
+          console.log(`⚠️ Auto-launch failed: ${autoLaunchErr.message}. Falling back to standard headful browser launch...`);
+          browser = await chromium.launch({
+            headless: false,
+            channel: "chrome",
+            args: ["--no-sandbox", "--disable-setuid-sandbox"]
+          });
+        }
       }
       
       let context;
@@ -407,53 +473,73 @@ export class ReAnimeScraperService {
     for (let attempt = 1; attempt <= retries; attempt++) {
       let browser;
       let context;
+      let page;
+      let isCDP = false;
+      let activeUserAgent = this.USER_AGENT;
 
       try {
+        // Always launch the standard headless browser for background scraping by default.
+        // We only trigger headful browser CDP connection when manual solve / verification is actually requested.
+        console.log("🚀 Initializing standard headless background browser...");
         browser = await getBrowser();
+        isCDP = false;
+
         if (!browser) {
           throw new Error("Failed to initialize browser");
         }
 
         const statePath = join(dirname(fileURLToPath(import.meta.url)), "..", "cf-state.json");
-        const hasState = fs.existsSync(statePath);
-        let loadedState = undefined;
-        let activeUserAgent = this.USER_AGENT;
 
-        if (hasState) {
-          try {
-            const raw = fs.readFileSync(statePath, "utf-8");
-            const parsed = JSON.parse(raw);
-            if (parsed.storageState && parsed.userAgent) {
-              console.log("💾 Loading combined Cloudflare clearance session and matching User-Agent...");
-              loadedState = parsed.storageState;
-              activeUserAgent = parsed.userAgent;
-            } else if (parsed.cookies || parsed.origins) {
-              console.log("💾 Loading standard Playwright storageState from cf-state.json");
-              loadedState = parsed;
-            }
-          } catch (e) {
-            console.error("⚠️ Failed to parse cf-state.json:", e.message);
+        if (isCDP) {
+          const contexts = browser.contexts();
+          if (contexts.length === 0) {
+            throw new Error("No active browser contexts found in the running Chrome instance.");
           }
+          context = contexts[0];
+          // Open a new page/tab in the existing Chrome instance so we don't interfere with other tabs
+          page = await context.newPage();
+          
+          // Get the active user agent from the real Chrome page
+          activeUserAgent = await page.evaluate(() => navigator.userAgent).catch(() => this.USER_AGENT);
+        } else {
+          const hasState = fs.existsSync(statePath);
+          let loadedState = undefined;
+
+          if (hasState) {
+            try {
+              const raw = fs.readFileSync(statePath, "utf-8");
+              const parsed = JSON.parse(raw);
+              if (parsed.storageState && parsed.userAgent) {
+                console.log("💾 Loading combined Cloudflare clearance session and matching User-Agent...");
+                loadedState = parsed.storageState;
+                activeUserAgent = parsed.userAgent;
+              } else if (parsed.cookies || parsed.origins) {
+                console.log("💾 Loading standard Playwright storageState from cf-state.json");
+                loadedState = parsed;
+              }
+            } catch (e) {
+              console.error("⚠️ Failed to parse cf-state.json:", e.message);
+            }
+          }
+
+          context = await browser.newContext({
+            storageState: loadedState,
+            userAgent: activeUserAgent,
+            viewport: { width: 1280, height: 720 },
+            bypassCSP: true,
+            javaScriptEnabled: true,
+            extraHTTPHeaders: {
+              Accept:
+                "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+              "Accept-Language": "en-US,en;q=0.5",
+              "Accept-Encoding": "gzip, deflate",
+              DNT: "1",
+              Connection: "keep-alive",
+              "Upgrade-Insecure-Requests": "1",
+            },
+          });
+          page = await context.newPage();
         }
-
-        context = await browser.newContext({
-          storageState: loadedState,
-          userAgent: activeUserAgent,
-          viewport: { width: 1280, height: 720 },
-          bypassCSP: true,
-          javaScriptEnabled: true,
-          extraHTTPHeaders: {
-            Accept:
-              "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.5",
-            "Accept-Encoding": "gzip, deflate",
-            DNT: "1",
-            Connection: "keep-alive",
-            "Upgrade-Insecure-Requests": "1",
-          },
-        });
-
-        const page = await context.newPage();
         
         // Proactively block popups/ads by overriding window.open
         await page.addInitScript(() => {
@@ -467,10 +553,14 @@ export class ReAnimeScraperService {
         console.log(`🔗 Resolved Re:ANIME watch URL: ${watchUrl}`);
 
         // Navigate to the watch page
-        await page.goto(watchUrl, {
-          waitUntil: "domcontentloaded",
-          timeout,
-        });
+        try {
+          await page.goto(watchUrl, {
+            waitUntil: "commit",
+            timeout: 20000,
+          });
+        } catch (gotoErr) {
+          console.warn("⚠️ Watch page navigation warning (ignored):", gotoErr.message);
+        }
 
         await page.waitForTimeout(4000);
 
@@ -641,7 +731,11 @@ export class ReAnimeScraperService {
           }
         }
 
-        await context.close();
+        if (isCDP) {
+          await page.close().catch(() => {});
+        } else {
+          await context.close().catch(() => {});
+        }
 
         return {
           success: true,
@@ -661,7 +755,9 @@ export class ReAnimeScraperService {
         lastError = error;
         console.error(`❌ Re:ANIME scrape attempt ${attempt} failed:`, error.message);
 
-        if (context) {
+        if (isCDP && page) {
+          await page.close().catch(() => {});
+        } else if (context) {
           await context.close().catch(() => {});
         }
 

@@ -5,6 +5,7 @@ import { productionScheduler } from "../services/production-scheduler.js";
 import { episodeQueue, redisClient } from "../services/bull-queue.js";
 import stateManager from "../services/state-manager.js";
 import { getScraperConfigs, saveScraperConfigs } from "../utils/scraper-config.js";
+import { cacheInvalidatePattern } from "../services/cache.js";
 
 import { requireAdmin } from "../middleware/auth.js";
 
@@ -12,7 +13,7 @@ const router = express.Router();
 router.use(requireAdmin);
 
 // ─── Production Scheduler API endpoints ───────────────────────────────────────────
-router.get('/api/scheduler/status', async (req, res) => {
+router.get('/status', async (req, res) => {
   try {
     if (!redisClient.isOpen) {
       return res.json({
@@ -51,7 +52,7 @@ router.get('/api/scheduler/status', async (req, res) => {
   }
 });
 
-router.post('/api/scheduler/run', async (req, res) => {
+router.post('/run', async (req, res) => {
   try {
     if (!redisClient.isOpen) {
       return res.status(503).json({ success: false, error: 'Redis is offline. Cannot trigger scheduler queue.' });
@@ -72,7 +73,7 @@ router.post('/api/scheduler/run', async (req, res) => {
   }
 });
 
-router.post('/api/scheduler/toggle', (req, res) => {
+router.post('/toggle', (req, res) => {
   const { enabled } = req.body;
   if (typeof enabled !== 'boolean') {
     return res.status(400).json({ success: false, error: 'enabled must be boolean' });
@@ -88,7 +89,7 @@ router.post('/api/scheduler/toggle', (req, res) => {
   res.json({ success: true, enabled: productionScheduler.enabled });
 });
 
-router.get('/api/scheduler/queue/stats', async (req, res) => {
+router.get('/queue/stats', async (req, res) => {
   try {
     if (!redisClient.isOpen) {
       return res.json({
@@ -112,7 +113,7 @@ router.get('/api/scheduler/queue/stats', async (req, res) => {
   }
 });
 
-router.get('/api/scheduler/rate-limit', async (req, res) => {
+router.get('/rate-limit', async (req, res) => {
   try {
     if (!redisClient.isOpen) {
       return res.json({
@@ -138,19 +139,16 @@ router.get('/api/scheduler/rate-limit', async (req, res) => {
   }
 });
 
-router.post('/api/scheduler/reset-rate-limit', async (req, res) => {
+router.post('/reset-rate-limit', async (req, res) => {
   try {
-    if (!redisClient.isOpen) {
-      return res.status(503).json({ success: false, error: 'Redis is offline. Cannot reset rate limit.' });
-    }
     await stateManager.resetRateLimit();
-    res.json({ success: true, message: 'Rate limit reset' });
+    res.json({ success: true, message: 'Rate limit reset successfully!' });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-router.get('/api/scheduler/logs', async (req, res) => {
+router.get('/logs', async (req, res) => {
   try {
     if (!redisClient.isOpen) {
       return res.json({
@@ -170,22 +168,27 @@ router.get('/api/scheduler/logs', async (req, res) => {
   }
 });
 
-router.post('/api/scheduler/reset-metrics', async (req, res) => {
+router.post('/reset-metrics', async (req, res) => {
   try {
-    if (!redisClient.isOpen) {
-      return res.status(503).json({ success: false, error: 'Redis is offline. Cannot reset metrics.' });
-    }
     await stateManager.clearScraperStats();
     await stateManager.clearLogs();
-    await stateManager.addLog('info', 'Pipeline metrics and system logs reset by admin.');
-    res.json({ success: true, message: 'Pipeline metrics reset successfully!' });
+    
+    // Clear the in-memory notfound scraper cache
+    try {
+      cacheInvalidatePattern('notfound:');
+    } catch (err) {
+      console.warn('⚠️ In-memory notfound cache clear failed:', err.message);
+    }
+
+    await stateManager.addLog('info', 'Pipeline metrics, system logs, and scraper cooldown caches reset by admin.');
+    res.json({ success: true, message: 'Pipeline metrics, scraper cooldowns, and in-memory caches reset successfully!' });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
 // Scrapers dynamic pipeline configuration
-router.get('/api/scheduler/scrapers', async (req, res) => {
+router.get('/scrapers', async (req, res) => {
   try {
     const configs = await getScraperConfigs();
     res.json({ success: true, scrapers: configs });
@@ -194,7 +197,7 @@ router.get('/api/scheduler/scrapers', async (req, res) => {
   }
 });
 
-router.post('/api/scheduler/scrapers', async (req, res) => {
+router.post('/scrapers', async (req, res) => {
   try {
     const { scrapers } = req.body;
     if (!scrapers) {
@@ -207,8 +210,8 @@ router.post('/api/scheduler/scrapers', async (req, res) => {
   }
 });
 
-// Manual sequential scrape endpoint for Admin Maintenance
-router.post("/api/admin/maintenance/scrape-sequential", async (req, res) => {
+// Manual sequential scrape (Admin Maintenance)
+router.post("/maintenance/scrape-sequential", async (req, res) => {
   try {
     const { animeId, episodeNumber } = req.body;
     if (!animeId || !episodeNumber) {

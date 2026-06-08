@@ -1,4 +1,5 @@
-import { getBrowser, supabase } from "../index.js";
+import { getBrowser } from "../services/queue.js";
+import { supabase } from "../config/supabase.js";
 import { extractSeasonNumber } from "../utils/seasonExtractor.js";
 
 // ─────────────────────────────────────────────────────────────────────────────

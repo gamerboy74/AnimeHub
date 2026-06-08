@@ -1,5 +1,4 @@
-// Browser-compatible AnimeSuge scraper wrapper.
-// The actual scraping logic lives in the backend API and uses Playwright to click server buttons.
+import { apiClient, apiFetchRaw } from '../../utils/api/client';
 
 export interface AnimeSugeServerSource {
   label: string;
@@ -23,8 +22,6 @@ export interface AnimeSugeScrapeResult {
 }
 
 export class AnimeSugeScraperService {
-  private static readonly API_BASE_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
-
   /**
    * Resolve an AnimeSuge anime/watch URL to the active player iframe + all server variants.
    */
@@ -42,24 +39,11 @@ export class AnimeSugeScraperService {
     try {
       console.log(`🎬 Scraping AnimeSuge for "${url}" (episode ${episodeNumber})`);
 
-      const response = await fetch(`${this.API_BASE_URL}/api/scrape-animesuge-episode`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          url,
-          episodeNumber,
-          options,
-        }),
+      return await apiClient.post('/api/scrape-animesuge-episode', {
+        url,
+        episodeNumber,
+        options,
       });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Server error: ${response.status}`);
-      }
-
-      return await response.json();
     } catch (error) {
       console.error('Error calling AnimeSuge scraper API:', error);
       return {
@@ -68,8 +52,6 @@ export class AnimeSugeScraperService {
       };
     }
   }
-
-
 
   /**
    * Batch scrape multiple episodes from AnimeSuge
@@ -189,15 +171,10 @@ export class AnimeSugeScraperService {
     } = {}
   ): Promise<void> {
     return new Promise((resolve, reject) => {
-      const url = `${this.API_BASE_URL}/api/batch-scrape-animesuge-episodes-stream`;
+      console.log('🌐 Fetching AnimeSuge batch stream...');
 
-      console.log('🌐 Fetching AnimeSuge batch stream:', url);
-
-      fetch(url, {
+      apiFetchRaw('/api/batch-scrape-animesuge-episodes-stream', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({
           animeTitle,
           animeId,
@@ -260,3 +237,4 @@ export class AnimeSugeScraperService {
     });
   }
 }
+

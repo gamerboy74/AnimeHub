@@ -26,6 +26,7 @@ window.fetch = async function (input, init) {
     url.includes('/api/admin') ||
     url.includes('/api/scheduler') ||
     url.includes('/api/scrape') ||
+    url.includes('/api/batch-scrape') ||
     url.includes('/api/add-scraped-episode') ||
     url.includes('/api/start-large-scrape') ||
     url.includes('/api/scraping-progress');

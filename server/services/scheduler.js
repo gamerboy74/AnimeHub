@@ -2,10 +2,11 @@ import axios from "axios";
 import { fileURLToPath } from "url";
 import { resolve as resolvePath, dirname } from "path";
 import { promises as fs } from "fs";
-import { supabase } from "./config/supabase.js";
-import { scrapeAndSaveEpisode } from "./scrapers/manager.js";
+import { supabase } from "../config/supabase.js";
+import { scrapeAndSaveEpisode } from "../scrapers/manager.js";
+import { isEpisodeReleased } from "../utils/aniListScheduler.js";
 
-export { isGenericTitle, isGenericDescription, mergeVideoServers } from "./scrapers/manager.js";
+export { isGenericTitle, isGenericDescription, mergeVideoServers } from "../scrapers/manager.js";
 
 /* =========================================================================
  *  Helper Functions & State Persistence
@@ -13,7 +14,7 @@ export { isGenericTitle, isGenericDescription, mergeVideoServers } from "./scrap
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const STATE_FILE_PATH = resolvePath(__dirname, "config", "scheduler_state.json");
+const STATE_FILE_PATH = resolvePath(__dirname, "..", "config", "scheduler_state.json");
 
 async function ensureDir(filePath) {
   const dir = dirname(filePath);
@@ -303,6 +304,15 @@ export class EpisodeScheduler {
         break;
       }
 
+      // Smart AniList Airing check for ongoing shows
+      if (anime.status === 'ongoing') {
+        const airingStatus = await isEpisodeReleased(anime, ep);
+        if (!airingStatus.released) {
+          console.log(`  ⏳ "${animeTitle}" EP ${ep}: ${airingStatus.reason}`);
+          break; // Skip subsequent episodes since they are not released yet
+        }
+      }
+
       try {
         const scrapeRes = await scrapeAndSaveEpisode(anime, ep);
         if (scrapeRes.success) {
@@ -328,6 +338,42 @@ export class EpisodeScheduler {
         break;
       }
     }
+  }
+
+  /**
+   * Run background scraping immediately for a newly added anime
+   */
+  runScrapeForAnimeInBackground(anime) {
+    console.log(`🚀 Immediate background scraping started for newly added anime: "${anime.title_english || anime.title}"`);
+    
+    // Run in background without blocking
+    (async () => {
+      const results = { checked: 0, found: 0, failed: 0, skipped: 0, details: [] };
+      const startEp = 1;
+      const endEp = anime.status === 'ongoing' ? 2 : (anime.total_episodes || 12);
+
+      let ep = startEp;
+      while (ep <= endEp) {
+        if (this.scrapedThisHour >= this.rateLimit) {
+          console.warn(`⚠️ Rate limit reached, skipping further immediate scraping for EP ${ep}`);
+          break;
+        }
+
+        // Smart AniList Airing Check
+        if (anime.status === 'ongoing') {
+          const airingStatus = await isEpisodeReleased(anime, ep);
+          if (!airingStatus.released) {
+            console.log(`  ⏳ Scrape skipped for newly added "${anime.title_english || anime.title}" EP ${ep}: ${airingStatus.reason}`);
+            break; 
+          }
+        }
+
+        await this.checkAndScrape(anime, results);
+        ep++;
+        await new Promise(r => setTimeout(r, 4000));
+      }
+      console.log(`✅ Immediate background scraping done for "${anime.title}": resolved ${results.found} episodes.`);
+    })().catch(err => console.error("❌ Failed immediate scraping:", err.message));
   }
 
   getStatus() {

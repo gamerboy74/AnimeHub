@@ -3,16 +3,18 @@ import axios from "axios";
 import { supabase } from "../config/supabase.js";
 import { cacheGet, cacheSet, cacheInvalidateAnime, cacheMiddleware } from "../services/cache.js";
 import { NineAnimeScraperService } from "../scrapers/nineanime.js";
-import { formatDuration } from "../scheduler.js";
+import { formatDuration, episodeScheduler } from "../services/scheduler.js";
+import { productionScheduler } from "../services/production-scheduler.js";
+import { redisClient } from "../services/bull-queue.js";
 import { requireAdmin } from "../middleware/auth.js";
 
 const router = express.Router();
 
-// Secure all /api/admin/* endpoints
-router.use("/api/admin", requireAdmin);
+// Secure all routes in this router
+router.use(requireAdmin);
 
-// Add scraped episode to database endpoint
-router.post("/api/add-scraped-episode", requireAdmin, async (req, res) => {
+// Add scraped episode to database
+router.post("/add-scraped-episode", async (req, res) => {
   try {
     console.log("💾 API: Adding scraped episode to database...");
 
@@ -137,7 +139,7 @@ router.post("/api/add-scraped-episode", requireAdmin, async (req, res) => {
 });
 
 // Create anime
-router.post("/api/admin/anime", async (req, res) => {
+router.post("/anime", async (req, res) => {
   try {
     const { data, error } = await supabase
       .from("anime")
@@ -145,6 +147,24 @@ router.post("/api/admin/anime", async (req, res) => {
       .select()
       .single();
     if (error) throw error;
+
+    // Trigger immediate background scraping of episodes for newly added anime
+    try {
+      if (productionScheduler.enabled) {
+        if (redisClient.isOpen) {
+          productionScheduler.enqueueAnimeEpisodes(data).catch(err => 
+            console.error("Immediate production enqueuing failed:", err.message)
+          );
+        } else {
+          episodeScheduler.runScrapeForAnimeInBackground(data);
+        }
+      } else {
+        episodeScheduler.runScrapeForAnimeInBackground(data);
+      }
+    } catch (schedErr) {
+      console.warn("⚠️ Immediate scraping scheduling failed for new anime:", schedErr.message);
+    }
+
     res.json({ success: true, data });
   } catch (error) {
     console.error("❌ Admin create anime error:", error.message);
@@ -153,7 +173,7 @@ router.post("/api/admin/anime", async (req, res) => {
 });
 
 // Update anime
-router.put("/api/admin/anime/:id", async (req, res) => {
+router.put("/anime/:id", async (req, res) => {
   try {
     const { data, error } = await supabase
       .from("anime")
@@ -170,7 +190,7 @@ router.put("/api/admin/anime/:id", async (req, res) => {
 });
 
 // Delete anime
-router.delete("/api/admin/anime/:id", async (req, res) => {
+router.delete("/anime/:id", async (req, res) => {
   try {
     const { error } = await supabase
       .from("anime")
@@ -185,7 +205,7 @@ router.delete("/api/admin/anime/:id", async (req, res) => {
 });
 
 // Bulk delete anime
-router.post("/api/admin/anime/bulk-delete", async (req, res) => {
+router.post("/anime/bulk-delete", async (req, res) => {
   try {
     const { ids } = req.body;
     if (!ids?.length) return res.status(400).json({ success: false, error: "ids required" });
@@ -199,7 +219,7 @@ router.post("/api/admin/anime/bulk-delete", async (req, res) => {
 });
 
 // Create episode
-router.post("/api/admin/episodes", async (req, res) => {
+router.post("/episodes", async (req, res) => {
   try {
     const { data, error } = await supabase
       .from("episodes")
@@ -215,7 +235,7 @@ router.post("/api/admin/episodes", async (req, res) => {
 });
 
 // Update episode
-router.put("/api/admin/episodes/:id", async (req, res) => {
+router.put("/episodes/:id", async (req, res) => {
   try {
     const { data, error } = await supabase
       .from("episodes")
@@ -232,7 +252,7 @@ router.put("/api/admin/episodes/:id", async (req, res) => {
 });
 
 // Delete episode
-router.delete("/api/admin/episodes/:id", async (req, res) => {
+router.delete("/episodes/:id", async (req, res) => {
   try {
     const { error } = await supabase
       .from("episodes")
@@ -247,7 +267,7 @@ router.delete("/api/admin/episodes/:id", async (req, res) => {
 });
 
 // Update anime request status
-router.put("/api/admin/anime-requests/:id", async (req, res) => {
+router.put("/anime-requests/:id", async (req, res) => {
   try {
     const { status } = req.body;
     if (!status) return res.status(400).json({ success: false, error: "status required" });
@@ -266,7 +286,7 @@ router.put("/api/admin/anime-requests/:id", async (req, res) => {
 });
 
 // Start large anime scraping job
-router.post("/api/start-large-scrape", requireAdmin, async (req, res) => {
+router.post("/start-large-scrape", async (req, res) => {
   try {
     console.log("🎬 API: Starting large anime scraping job...");
 
@@ -353,7 +373,7 @@ router.post("/api/start-large-scrape", requireAdmin, async (req, res) => {
 
 // Get scraping progress
 router.get(
-  "/api/scraping-progress/:animeId",
+  "/scraping-progress/:animeId",
   requireAdmin,
   cacheMiddleware(3_000),
   async (req, res) => {
@@ -424,7 +444,7 @@ router.get(
 );
 
 // Scrape a single chunk
-router.post("/api/scrape-chunk", requireAdmin, async (req, res) => {
+router.post("/scrape-chunk", requireAdmin, async (req, res) => {
   try {
     console.log("🎬 API: Scraping chunk...");
 

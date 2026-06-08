@@ -20,7 +20,7 @@ export default function AdminReports() {
     try {
       setLoading(true);
       setError(null);
-      
+
       const result = await AdminService.getContentReports(1, 50);
       setReports(result.reports);
     } catch (err) {
@@ -89,7 +89,7 @@ export default function AdminReports() {
     setShowConfirmationDialog(true);
   };
 
-  const filteredReports = reports.filter(report => 
+  const filteredReports = reports.filter(report =>
     filterStatus === 'all' || report.status === filterStatus
   );
 
@@ -143,7 +143,7 @@ export default function AdminReports() {
             {error}
           </div>
         )}
-        
+
         {successMessage && (
           <div className="bg-emerald-50 border-l-4 border-emerald-500 text-emerald-700 px-4 py-3 rounded-xl mb-4 flex items-center gap-2">
             <i className="ri-check-line text-emerald-500"></i>
@@ -221,41 +221,37 @@ export default function AdminReports() {
           <div className="flex flex-wrap gap-4">
             <button
               onClick={() => setFilterStatus('all')}
-              className={`px-4 py-2 rounded-lg font-medium backdrop-blur-sm border transition-all duration-300 ${
-                filterStatus === 'all'
+              className={`px-4 py-2 rounded-lg font-medium backdrop-blur-sm border transition-all duration-300 ${filterStatus === 'all'
                   ? 'bg-blue-600/90 text-white border-blue-500/20 shadow-lg'
                   : 'bg-white/60 text-slate-700 border-white/30 hover:bg-white/80 hover:shadow-lg'
-              }`}
+                }`}
             >
               All Reports
             </button>
             <button
               onClick={() => setFilterStatus('pending')}
-              className={`px-4 py-2 rounded-lg font-medium backdrop-blur-sm border transition-all duration-300 ${
-                filterStatus === 'pending'
+              className={`px-4 py-2 rounded-lg font-medium backdrop-blur-sm border transition-all duration-300 ${filterStatus === 'pending'
                   ? 'bg-yellow-600/90 text-white border-yellow-500/20 shadow-lg'
                   : 'bg-white/60 text-slate-700 border-white/30 hover:bg-white/80 hover:shadow-lg'
-              }`}
+                }`}
             >
               Pending
             </button>
             <button
               onClick={() => setFilterStatus('investigating')}
-              className={`px-4 py-2 rounded-lg font-medium backdrop-blur-sm border transition-all duration-300 ${
-                filterStatus === 'investigating'
+              className={`px-4 py-2 rounded-lg font-medium backdrop-blur-sm border transition-all duration-300 ${filterStatus === 'investigating'
                   ? 'bg-blue-600/90 text-white border-blue-500/20 shadow-lg'
                   : 'bg-white/60 text-slate-700 border-white/30 hover:bg-white/80 hover:shadow-lg'
-              }`}
+                }`}
             >
               Investigating
             </button>
             <button
               onClick={() => setFilterStatus('resolved')}
-              className={`px-4 py-2 rounded-lg font-medium backdrop-blur-sm border transition-all duration-300 ${
-                filterStatus === 'resolved'
+              className={`px-4 py-2 rounded-lg font-medium backdrop-blur-sm border transition-all duration-300 ${filterStatus === 'resolved'
                   ? 'bg-green-600/90 text-white border-green-500/20 shadow-lg'
                   : 'bg-white/60 text-slate-700 border-white/30 hover:bg-white/80 hover:shadow-lg'
-              }`}
+                }`}
             >
               Resolved
             </button>
@@ -287,43 +283,41 @@ export default function AdminReports() {
                         <p className="text-sm text-slate-500">ID: {report.id.slice(0, 8)}...</p>
                       </div>
                     </div>
-                    
+
                     <p className="text-slate-700 mb-4">{report.description}</p>
-                    
+
                     <div className="flex items-center space-x-4 text-sm">
                       <div className="flex items-center space-x-1">
                         <span>{getStatusIcon(report.status)}</span>
-                        <span className={`px-3 py-1 rounded-full text-xs font-medium backdrop-blur-sm border ${
-                          report.status === 'pending' ? 'bg-yellow-200/90 text-yellow-900 border-yellow-300/60' :
-                          report.status === 'investigating' ? 'bg-blue-200/90 text-blue-900 border-blue-300/60' :
-                          report.status === 'resolved' ? 'bg-green-200/90 text-green-900 border-green-300/60' :
-                          'bg-gray-200/90 text-gray-900 border-gray-300/60'
-                        }`}>
+                        <span className={`px-3 py-1 rounded-full text-xs font-medium backdrop-blur-sm border ${report.status === 'pending' ? 'bg-yellow-200/90 text-yellow-900 border-yellow-300/60' :
+                            report.status === 'investigating' ? 'bg-blue-200/90 text-blue-900 border-blue-300/60' :
+                              report.status === 'resolved' ? 'bg-green-200/90 text-green-900 border-green-300/60' :
+                                'bg-gray-200/90 text-gray-900 border-gray-300/60'
+                          }`}>
                           {report.status}
                         </span>
                       </div>
-                      
+
                       <div className="flex items-center space-x-1">
                         <span>{getPriorityIcon(report.priority)}</span>
-                        <span className={`px-3 py-1 rounded-full text-xs font-medium backdrop-blur-sm border ${
-                          report.priority === 'high' ? 'bg-red-200/90 text-red-900 border-red-300/60' :
-                          report.priority === 'medium' ? 'bg-orange-200/90 text-orange-900 border-orange-300/60' :
-                          'bg-gray-200/90 text-gray-900 border-gray-300/60'
-                        }`}>
+                        <span className={`px-3 py-1 rounded-full text-xs font-medium backdrop-blur-sm border ${report.priority === 'high' ? 'bg-red-200/90 text-red-900 border-red-300/60' :
+                            report.priority === 'medium' ? 'bg-orange-200/90 text-orange-900 border-orange-300/60' :
+                              'bg-gray-200/90 text-gray-900 border-gray-300/60'
+                          }`}>
                           {report.priority}
                         </span>
                       </div>
-                      
+
                       <span className="text-slate-500">
                         Reported by: {report.reported_by}
                       </span>
-                      
+
                       <span className="text-slate-500">
                         {new Date(report.created_at).toLocaleDateString()}
                       </span>
                     </div>
                   </div>
-                  
+
                   <div className="flex flex-col space-y-2 ml-6">
                     {report.status === 'pending' && (
                       <button
@@ -334,7 +328,7 @@ export default function AdminReports() {
                         {updatingReport === report.id ? 'Updating...' : 'Start Investigation'}
                       </button>
                     )}
-                    
+
                     {report.status === 'investigating' && (
                       <div className="flex space-x-2">
                         <button
@@ -353,8 +347,8 @@ export default function AdminReports() {
                         </button>
                       </div>
                     )}
-                    
-                    <button 
+
+                    <button
                       onClick={() => handleViewReportDetails(report)}
                       className="px-4 py-2 bg-white/60 backdrop-blur-sm border border-white/30 text-slate-700 rounded-lg hover:bg-white/80 hover:shadow-lg transition-all duration-300"
                     >
@@ -364,7 +358,7 @@ export default function AdminReports() {
                 </div>
               </motion.div>
             ))}
-            
+
             {filteredReports.length === 0 && (
               <div className="text-center py-12">
                 <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
@@ -372,8 +366,8 @@ export default function AdminReports() {
                 </div>
                 <h3 className="text-lg font-medium text-slate-900 mb-2">No reports found</h3>
                 <p className="text-slate-500">
-                  {filterStatus === 'all' 
-                    ? 'There are no content reports to display.' 
+                  {filterStatus === 'all'
+                    ? 'There are no content reports to display.'
                     : `No reports with status "${filterStatus}" found.`
                   }
                 </p>
@@ -420,62 +414,60 @@ export default function AdminReports() {
                     <div className="flex-1">
                       <div className="flex items-center space-x-3 mb-3">
                         <h3 className="text-3xl font-bold text-white drop-shadow-lg">{selectedReport.title}</h3>
-                        <span className={`px-3 py-1 rounded-full text-sm font-medium backdrop-blur-sm border ${
-                          selectedReport.status === 'pending' ? 'bg-yellow-500/30 text-yellow-200 border-yellow-500/50' :
-                          selectedReport.status === 'investigating' ? 'bg-blue-500/30 text-blue-200 border-blue-500/50' :
-                          selectedReport.status === 'resolved' ? 'bg-green-500/30 text-green-200 border-green-500/50' :
-                          'bg-gray-500/30 text-gray-200 border-gray-500/50'
-                        }`}>
+                        <span className={`px-3 py-1 rounded-full text-sm font-medium backdrop-blur-sm border ${selectedReport.status === 'pending' ? 'bg-yellow-500/30 text-yellow-200 border-yellow-500/50' :
+                            selectedReport.status === 'investigating' ? 'bg-blue-500/30 text-blue-200 border-blue-500/50' :
+                              selectedReport.status === 'resolved' ? 'bg-green-500/30 text-green-200 border-green-500/50' :
+                                'bg-gray-500/30 text-gray-200 border-gray-500/50'
+                          }`}>
                           {getStatusIcon(selectedReport.status)} {selectedReport.status}
                         </span>
                       </div>
-                      
+
                       <p className="text-white/95 text-lg mb-4 drop-shadow-sm">
                         {selectedReport.description || 'No description available'}
                       </p>
-                      
+
                       <div className="grid grid-cols-2 gap-4 text-sm">
                         <div className="flex items-center space-x-2 bg-white/15 backdrop-blur-sm rounded-lg p-3 border border-white/20">
                           <i className="ri-hashtag text-white/90"></i>
                           <span className="text-white font-mono text-xs">{selectedReport.id}</span>
                         </div>
-                        
+
                         <div className="flex items-center space-x-2 bg-white/15 backdrop-blur-sm rounded-lg p-3 border border-white/20">
                           <i className="ri-file-list-line text-white/90"></i>
                           <span className="text-white capitalize">{selectedReport.report_type?.replace('_', ' ') || 'Unknown'}</span>
                         </div>
-                        
+
                         <div className="flex items-center space-x-2 bg-white/15 backdrop-blur-sm rounded-lg p-3 border border-white/20">
                           <i className="ri-alert-line text-white/90"></i>
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                            selectedReport.priority === 'high' ? 'bg-red-500/30 text-red-300' :
-                            selectedReport.priority === 'medium' ? 'bg-orange-500/30 text-orange-300' :
-                            'bg-gray-500/30 text-gray-300'
-                          }`}>
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${selectedReport.priority === 'high' ? 'bg-red-500/30 text-red-300' :
+                              selectedReport.priority === 'medium' ? 'bg-orange-500/30 text-orange-300' :
+                                'bg-gray-500/30 text-gray-300'
+                            }`}>
                             {getPriorityIcon(selectedReport.priority)} {selectedReport.priority}
                           </span>
                         </div>
-                        
+
                         <div className="flex items-center space-x-2 bg-white/15 backdrop-blur-sm rounded-lg p-3 border border-white/20">
                           <i className="ri-user-line text-white/90"></i>
                           <span className="text-white">{selectedReport.reported_by}</span>
                         </div>
-                        
+
                         <div className="flex items-center space-x-2 bg-white/15 backdrop-blur-sm rounded-lg p-3 border border-white/20">
                           <i className="ri-calendar-line text-white/90"></i>
                           <span className="text-white">{new Date(selectedReport.created_at).toLocaleDateString()}</span>
                         </div>
-                        
+
                         <div className="flex items-center space-x-2 bg-white/15 backdrop-blur-sm rounded-lg p-3 border border-white/20">
                           <i className="ri-refresh-line text-white/90"></i>
                           <span className="text-white">{new Date(selectedReport.updated_at).toLocaleDateString()}</span>
                         </div>
-                        
+
                         <div className="flex items-center space-x-2 bg-white/15 backdrop-blur-sm rounded-lg p-3 border border-white/20">
                           <i className="ri-focus-3-line text-white/90"></i>
                           <span className="text-white capitalize">{selectedReport.content_type}</span>
                         </div>
-                        
+
                         <div className="flex items-center space-x-2 bg-white/15 backdrop-blur-sm rounded-lg p-3 border border-white/20">
                           <i className="ri-link text-white/90"></i>
                           <span className="text-white font-mono text-xs">{selectedReport.content_id}</span>
@@ -502,7 +494,7 @@ export default function AdminReports() {
                           <option value="dismissed" className="bg-gray-800 text-white">Dismissed</option>
                         </select>
                       </div>
-                      
+
                       <div className="space-y-2">
                         <label className="block text-sm font-medium text-white">Actions</label>
                         <div className="flex space-x-2">
@@ -526,7 +518,7 @@ export default function AdminReports() {
         <ConfirmationDialog
           isOpen={showConfirmationDialog}
           onClose={() => setShowConfirmationDialog(false)}
-          onConfirm={confirmationConfig?.onConfirm || (() => {})}
+          onConfirm={confirmationConfig?.onConfirm || (() => { })}
           title={confirmationConfig?.title || ''}
           message={confirmationConfig?.message || ''}
           confirmText={confirmationConfig?.confirmText || 'Confirm'}

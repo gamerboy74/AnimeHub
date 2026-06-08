@@ -1,7 +1,7 @@
 // Optimized Auth Actions Context - Separated from AuthContext
 // Reduces re-renders by isolating auth actions
 
-import React, { createContext, useContext, useCallback, useMemo } from 'react';
+import { createContext, useContext, useCallback, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { sessionManager } from '../../utils/session/manager';
 
@@ -54,7 +54,7 @@ export function AuthActionsProvider({ children }: AuthActionsProviderProps) {
   }, []);
 
   const refreshSession = useCallback(async () => {
-    await sessionManager.refreshSession();
+    await sessionManager.forceRefresh();
   }, []);
 
   const isSessionValid = useCallback(() => {

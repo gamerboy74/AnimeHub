@@ -22,18 +22,16 @@ class SessionManager {
     lastChecked: 0,
     isInitialized: false
   }
-  
+
   private listeners: Set<(state: SessionState) => void> = new Set()
   private authChangeListeners: Set<(user: User | null) => void> = new Set()
   private refreshTimeout: NodeJS.Timeout | null = null
   private authSubscription: Subscription | null = null
-  // private readonly REFRESH_INTERVAL = 5 * 60 * 1000 // 5 minutes - disabled
-  private readonly SESSION_TIMEOUT = 30 * 60 * 1000 // 30 minutes
 
   private constructor() {
     this.initialize()
-    
-    // Add a timeout to prevent infinite loading
+
+    // Safety net: if initialize() hangs for any reason, unblock the UI after 10s
     setTimeout(() => {
       if (this.state.loading) {
         console.warn('SessionManager: Loading timeout reached, forcing loading to false')
@@ -41,7 +39,7 @@ class SessionManager {
         this.state.isInitialized = true
         this.notifyListeners()
       }
-    }, 10000) // 10 second timeout
+    }, 10000)
   }
 
   static getInstance(): SessionManager {
@@ -54,8 +52,7 @@ class SessionManager {
   private async initialize() {
     try {
       console.log('SessionManager: Initializing...')
-      
-      // Check if Supabase is configured
+
       if (!isSupabaseConfigured) {
         console.warn('Supabase not configured, running in demo mode')
         this.state.loading = false
@@ -67,70 +64,57 @@ class SessionManager {
         return
       }
 
-      console.log('Supabase is configured, checking for stored session...')
-
-      // Check for existing session in localStorage
-      const storedSession = this.getStoredSession()
-      if (storedSession) {
-        console.log('Found stored session:', storedSession.user ? 'user exists' : 'no user')
-        this.state.user = storedSession.user
-        this.state.lastChecked = storedSession.lastChecked
-        this.state.isInitialized = true
-        
-        // Verify session is still valid
-        if (Date.now() - storedSession.lastChecked < this.SESSION_TIMEOUT) {
-          console.log('Stored session is still valid, setting loading to false')
-          this.state.loading = false
-          this.state.isInitialized = true
-          this.notifyListeners()
-          // this.startRefreshTimer() // Disabled to prevent loading issues
-          return
-        } else {
-          console.log('Stored session expired, refreshing...')
-        }
-      }
-
-      // Get fresh session from Supabase
-      console.log('Getting fresh session from Supabase...')
+      // Trust Supabase's own session store. Supabase persists and auto-refreshes tokens itself.
+      // We just ask for the current active session on startup.
       await this.refreshSession()
+
     } catch (error) {
       console.error('Session initialization failed:', error)
+      // On init error, don't clear the user profile; they might still have a valid token
+      // in Supabase's internal state. Let onAuthStateChange handle reconciliation.
       this.state.error = error instanceof Error ? error.message : 'Session initialization failed'
       this.state.loading = false
       this.state.isInitialized = true
-      this.state.lastChecked = Date.now()
       this.notifyListeners()
     }
 
-    // Listen for Supabase auth state changes (login, logout, token refresh, OAuth callback)
+    // listen for auth state changes on Supabase (login, logout, token refresh, OAuth callback)
     if (isSupabaseConfigured) {
       const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
         console.log('SessionManager: Auth state changed:', event)
-        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-          if (session?.user) {
+
+        if (session?.user) {
+          const currentId = this.state.user?.id
+          const newId = session.user.id
+
+          // Fetch profile if it's a new login, or profile isn't loaded, or details updated.
+          // For INITIAL_SESSION or TOKEN_REFRESHED, if the user is already loaded, skip redundant fetching.
+          if (!this.state.user || currentId !== newId || event === 'SIGNED_IN' || event === 'USER_UPDATED') {
             try {
               const userProfile = await UserService.getCurrentUser()
-              const previousUser = this.state.user
               this.state.user = userProfile
               this.state.lastChecked = Date.now()
               this.state.loading = false
               this.state.error = null
               this.state.isInitialized = true
-              this.storeSession()
               this.notifyListeners()
-              // Always notify auth change listeners on SIGNED_IN
-              // (the previous ID check raced with refreshSession and skipped notification)
               this.notifyAuthChangeListeners(userProfile)
             } catch (error) {
               console.error('SessionManager: Failed to fetch user profile on auth change:', error)
             }
+          } else {
+            // Already loaded the same user. Just refresh timestamp and ensure loading is complete.
+            this.state.lastChecked = Date.now()
+            this.state.loading = false
+            this.state.isInitialized = true
+            this.notifyListeners()
           }
-        } else if (event === 'SIGNED_OUT') {
+        } else {
+          // Logged out
           this.state.user = null
           this.state.lastChecked = Date.now()
           this.state.loading = false
           this.state.error = null
-          this.clearStoredSession()
           this.clearUserData()
           this.notifyListeners()
           this.notifyAuthChangeListeners(null)
@@ -147,9 +131,7 @@ class SessionManager {
       this.state.error = null
       this.notifyListeners()
 
-      // Check if Supabase is configured
       if (!isSupabaseConfigured) {
-        console.log('Supabase not configured, setting user to null')
         this.state.user = null
         this.state.lastChecked = Date.now()
         this.state.loading = false
@@ -158,76 +140,34 @@ class SessionManager {
         return
       }
 
-      const session = await supabase.auth.getSession()
-      console.log('SessionManager: Got session from Supabase:', session.data.session ? 'session exists' : 'no session')
-      
-      if (session.data.session?.user) {
-        console.log('SessionManager: Getting user profile...')
+      const { data: { session }, error } = await supabase.auth.getSession()
+
+      if (error) {
+        // Network/timeout error — don't log the user out. Their token is likely still valid.
+        console.warn('SessionManager: getSession() error (keeping user logged in):', error.message)
+        this.state.error = error.message
+        return
+      }
+
+      if (session?.user) {
+        console.log('SessionManager: Active session found, loading profile...')
         const userProfile = await UserService.getCurrentUser()
-        console.log('SessionManager: Got user profile:', userProfile ? 'profile exists' : 'no profile')
         this.state.user = userProfile
         this.state.lastChecked = Date.now()
-        this.storeSession()
       } else {
-        console.log('SessionManager: No session, clearing user')
+        // Supabase explicitly says: no session. This is a true logged-out state.
+        console.log('SessionManager: No active session.')
         this.state.user = null
         this.state.lastChecked = Date.now()
-        this.clearStoredSession()
       }
     } catch (error) {
-      console.error('Session refresh failed:', error)
+      // Unexpected error (e.g. network down). Keep user state as-is — don't log out.
+      console.error('Session refresh failed (keeping user logged in):', error)
       this.state.error = error instanceof Error ? error.message : 'Session refresh failed'
-      this.state.user = null
     } finally {
-      console.log('SessionManager: Setting loading to false')
       this.state.loading = false
       this.state.isInitialized = true
       this.notifyListeners()
-    }
-  }
-
-  private startRefreshTimer() {
-    if (this.refreshTimeout) {
-      clearTimeout(this.refreshTimeout)
-    }
-    
-    // Disable automatic refresh for now to prevent loading issues
-    console.log('SessionManager: Auto-refresh disabled to prevent loading issues')
-    // this.refreshTimeout = setTimeout(() => {
-    //   this.refreshSession()
-    //   this.startRefreshTimer()
-    // }, this.REFRESH_INTERVAL)
-  }
-
-  private storeSession() {
-    try {
-      const sessionData = {
-        user: this.state.user,
-        lastChecked: this.state.lastChecked
-      }
-      localStorage.setItem('animehub_session', JSON.stringify(sessionData))
-    } catch (error) {
-      console.warn('Failed to store session:', error)
-    }
-  }
-
-  private getStoredSession(): { user: User | null; lastChecked: number } | null {
-    try {
-      const stored = localStorage.getItem('animehub_session')
-      if (stored) {
-        return JSON.parse(stored)
-      }
-    } catch (error) {
-      console.warn('Failed to parse stored session:', error)
-    }
-    return null
-  }
-
-  private clearStoredSession() {
-    try {
-      localStorage.removeItem('animehub_session')
-    } catch (error) {
-      console.warn('Failed to clear stored session:', error)
     }
   }
 
@@ -246,20 +186,16 @@ class SessionManager {
   }
 
   private notifyListeners() {
-    // Only log when loading state changes to reduce noise
     if (this.state.loading === false) {
       console.log('SessionManager: Loading complete, notifying listeners')
     }
     this.listeners.forEach(listener => listener({ ...this.state }))
   }
 
-  // Public methods
+  // Public methods (always bind context when passing as reference)
   subscribe(listener: (state: SessionState) => void): () => void {
     this.listeners.add(listener)
-    
-    // Immediately notify with current state
     listener({ ...this.state })
-    
     return () => {
       this.listeners.delete(listener)
     }
@@ -271,11 +207,7 @@ class SessionManager {
       this.state.error = null
       this.notifyListeners()
 
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password
-      })
-
+      const { error } = await supabase.auth.signInWithPassword({ email, password })
       if (error) throw error
 
       await this.refreshSession()
@@ -297,13 +229,8 @@ class SessionManager {
       const { error } = await supabase.auth.signUp({
         email,
         password,
-        options: {
-          data: {
-            username: username || email.split('@')[0]
-          }
-        }
+        options: { data: { username: username || email.split('@')[0] } }
       })
-
       if (error) throw error
 
       await this.refreshSession()
@@ -319,16 +246,11 @@ class SessionManager {
   async signInWithGoogle() {
     try {
       this.state.error = null
-
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
-        options: {
-          redirectTo: `${window.location.origin}/auth/callback`
-        }
+        options: { redirectTo: `${window.location.origin}/auth/callback` }
       })
-
       if (error) throw error
-      // Browser redirects away — onAuthStateChange handles the return
     } catch (error) {
       this.state.error = error instanceof Error ? error.message : 'Google sign in failed'
       this.notifyListeners()
@@ -339,16 +261,11 @@ class SessionManager {
   async signInWithGitHub() {
     try {
       this.state.error = null
-
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'github',
-        options: {
-          redirectTo: `${window.location.origin}/auth/callback`
-        }
+        options: { redirectTo: `${window.location.origin}/auth/callback` }
       })
-
       if (error) throw error
-      // Browser redirects away — onAuthStateChange handles the return
     } catch (error) {
       this.state.error = error instanceof Error ? error.message : 'GitHub sign in failed'
       this.notifyListeners()
@@ -367,9 +284,8 @@ class SessionManager {
 
       this.state.user = null
       this.state.lastChecked = Date.now()
-      this.clearStoredSession()
       this.clearUserData()
-      
+
       if (this.refreshTimeout) {
         clearTimeout(this.refreshTimeout)
         this.refreshTimeout = null
@@ -389,11 +305,9 @@ class SessionManager {
   async resetPassword(email: string) {
     try {
       this.state.error = null
-      
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
         redirectTo: `${window.location.origin}/auth/reset-password`
       })
-
       if (error) throw error
     } catch (error) {
       this.state.error = error instanceof Error ? error.message : 'Password reset failed'
@@ -404,11 +318,7 @@ class SessionManager {
   async updatePassword(newPassword: string) {
     try {
       this.state.error = null
-      
-      const { error } = await supabase.auth.updateUser({
-        password: newPassword
-      })
-
+      const { error } = await supabase.auth.updateUser({ password: newPassword })
       if (error) throw error
     } catch (error) {
       this.state.error = error instanceof Error ? error.message : 'Password update failed'
@@ -421,14 +331,30 @@ class SessionManager {
   }
 
   isSessionValid(): boolean {
-    if (!this.state.user) return false
-    return Date.now() - this.state.lastChecked < this.SESSION_TIMEOUT
+    // Session is valid as long as Supabase has an active session.
+    // We no longer enforce a custom time window — Supabase manages expiry & refresh.
+    return !!this.state.user
   }
 
-  // Force refresh session (useful for admin panel)
   async forceRefresh() {
     await this.refreshSession()
-    this.startRefreshTimer()
+  }
+
+  /**
+   * Clean up all listeners and timers.
+   * Call this when the app is unmounting or the session manager is no longer needed.
+   */
+  destroy() {
+    if (this.authSubscription) {
+      this.authSubscription.unsubscribe()
+      this.authSubscription = null
+    }
+    if (this.refreshTimeout) {
+      clearTimeout(this.refreshTimeout)
+      this.refreshTimeout = null
+    }
+    this.listeners.clear()
+    this.authChangeListeners.clear()
   }
 }
 

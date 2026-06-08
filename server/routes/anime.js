@@ -5,7 +5,7 @@ import { cacheMiddleware } from "../services/cache.js";
 const router = express.Router();
 
 // Featured anime (highest rated)
-router.get("/api/anime/featured", cacheMiddleware(120_000), async (req, res) => {
+router.get("/featured", cacheMiddleware(120_000), async (req, res) => {
   try {
     const limit = parseInt(req.query.limit || "5", 10);
     const { data, error } = await supabase
@@ -28,7 +28,7 @@ router.get("/api/anime/featured", cacheMiddleware(120_000), async (req, res) => 
 });
 
 // Trending anime (recently added with good rating)
-router.get("/api/anime/trending", cacheMiddleware(120_000), async (req, res) => {
+router.get("/trending", cacheMiddleware(120_000), async (req, res) => {
   try {
     const limit = parseInt(req.query.limit || "10", 10);
     const thirtyDaysAgo = new Date(
@@ -68,7 +68,7 @@ router.get("/api/anime/trending", cacheMiddleware(120_000), async (req, res) => 
 });
 
 // Popular anime (highest rated)
-router.get("/api/anime/popular", cacheMiddleware(120_000), async (req, res) => {
+router.get("/popular", cacheMiddleware(120_000), async (req, res) => {
   try {
     const limit = parseInt(req.query.limit || "12", 10);
     const { data, error } = await supabase
@@ -91,7 +91,7 @@ router.get("/api/anime/popular", cacheMiddleware(120_000), async (req, res) => {
 });
 
 // Recent anime (newest first)
-router.get("/api/anime/recent", cacheMiddleware(60_000), async (req, res) => {
+router.get("/recent", cacheMiddleware(60_000), async (req, res) => {
   try {
     const limit = parseInt(req.query.limit || "6", 10);
     const { data, error } = await supabase
@@ -114,8 +114,8 @@ router.get("/api/anime/recent", cacheMiddleware(60_000), async (req, res) => {
 
 // Get episodes for an anime
 router.get(
-  "/api/anime/:animeId/episodes",
-  cacheMiddleware(5_000),
+  "/:animeId/episodes",
+  cacheMiddleware(60_000), // 60s — was 5s (too short to be useful)
   async (req, res) => {
     try {
       const { animeId } = req.params;
@@ -179,8 +179,8 @@ function generateFranchisePrefixes(title) {
 
 // Get anime details with complete playable episodes and server sources
 router.get(
-  "/api/anime/:animeId",
-  cacheMiddleware(60_000), // Cache for 1 minute
+  "/:animeId",
+  cacheMiddleware(60_000),
   async (req, res) => {
     try {
       const { animeId } = req.params;
@@ -231,8 +231,8 @@ router.get(
 
 // Get related seasons with highly optimized sequential search to avoid database table scans
 router.get(
-  "/api/anime/:animeId/seasons",
-  cacheMiddleware(7200_000), // Cache for 2 hours (relations rarely change)
+  "/:animeId/seasons",
+  cacheMiddleware(7200_000), // 2 hours — relations rarely change
   async (req, res) => {
     try {
       const { animeId } = req.params;

@@ -3,6 +3,7 @@ import { episodeQueue, redisClient } from './bull-queue.js';
 import stateManager from './state-manager.js';
 import episodeWorker from './episode-worker.js';
 import axios from 'axios';
+import { isEpisodeReleased } from '../utils/aniListScheduler.js';
 
 export class ProductionScheduler {
   constructor() {
@@ -13,6 +14,8 @@ export class ProductionScheduler {
     this.metadataSyncIntervalMs = parseInt(t('SCHEDULER_NEW_ANIME_CHECK_INTERVAL_HOURS', '24')) * 60 * 60 * 1000;
     this.rateLimit = parseInt(t('SCHEDULER_RATE_LIMIT_EPISODES_PER_HOUR', '30'));
     this.minRating = parseFloat(t('SCHEDULER_MIN_ANIME_RATING', '5.0'));
+    // Batch size for paginated DB fetch (avoids loading all anime into memory at once)
+    this.dbBatchSize = parseInt(t('SCHEDULER_DB_BATCH_SIZE', '100'));
 
     this.episodeTimer = null;
     this.metadataTimer = null;
@@ -22,6 +25,11 @@ export class ProductionScheduler {
       metadata: false,
     };
     this.lastRun = {
+      episodes: null,
+      metadata: null,
+    };
+    // Track actual next run time so getStatus() returns correct value
+    this.nextRunAt = {
       episodes: null,
       metadata: null,
     };
@@ -92,6 +100,8 @@ export class ProductionScheduler {
         console.error('❌ Episode checker error:', err.message);
       } finally {
         this.running.episodes = false;
+        // Always update nextRunAt after each run so getStatus() is accurate
+        this.nextRunAt.episodes = new Date(Date.now() + this.episodeCheckIntervalMs).toISOString();
       }
     };
 
@@ -106,6 +116,7 @@ export class ProductionScheduler {
       if (target <= now) target.setDate(target.getDate() + 1);
       const msUntilNext = target - now;
       console.log(`⏰ Next episode check in ${Math.round(msUntilNext / 60000)} minutes`);
+      this.nextRunAt.episodes = target.toISOString();
       this.episodeTimer = setInterval(runCheck, this.episodeCheckIntervalMs);
     }, 30 * 1000);
 
@@ -135,6 +146,8 @@ export class ProductionScheduler {
         console.error('❌ Metadata sync error:', err.message);
       } finally {
         this.running.metadata = false;
+        // Update next run time so getStatus() stays accurate after each run
+        this.nextRunAt.metadata = new Date(Date.now() + this.metadataSyncIntervalMs).toISOString();
       }
     };
 
@@ -146,6 +159,9 @@ export class ProductionScheduler {
     const msUntilTarget = target - now;
 
     console.log(`⏰ Metadata sync scheduled for ${syncHour}:00 (in ${Math.round(msUntilTarget / 60000)} minutes)`);
+
+    // --- FIX: Store the computed target so getStatus() reports it correctly before first run ---
+    this.nextRunAt.metadata = target.toISOString();
 
     setTimeout(() => {
       runSync();
@@ -164,108 +180,122 @@ export class ProductionScheduler {
     }
 
     try {
-      // Get all anime that need episodes
-      const { data: allAnime, error } = await supabase
-        .from('anime')
-        .select('id, title, title_english, status, total_episodes, rating')
-        .order('rating', { ascending: false });
-
-      if (error || !allAnime) {
-        throw new Error(`Database query failed: ${error?.message}`);
-      }
-
-      // Find which episodes already have video URLs and servers
-      const animeIds = allAnime.map((a) => a.id);
-      const { data: existingEpisodes } = await supabase
-        .from('episodes')
-        .select('anime_id, episode_number, video_url, video_servers, created_at')
-        .in('anime_id', animeIds);
-
-      // We want to ensure episodes have a minimum number of servers (e.g. at least 2 servers)
-      // to have backups. If they have fewer, we'll re-scrape them, but only after a cooldown
-      // of 24 hours since the last attempt to avoid spamming.
+      // --- FIX: Paginated DB fetch instead of loading all anime at once ---
+      // Fetches anime in batches of dbBatchSize to avoid memory spikes as library grows.
       const minServers = parseInt(process.env.SCHEDULER_MIN_SERVERS || '2', 10);
-      const cooldownMs = 24 * 60 * 60 * 1000; // 24 hours cooldown
+      const cooldownMs = 24 * 60 * 60 * 1000;
       const nowMs = Date.now();
 
-      const scrapedMap = new Map();
-      for (const ep of existingEpisodes || []) {
-        if (!scrapedMap.has(ep.anime_id)) scrapedMap.set(ep.anime_id, new Set());
-
-        const serversCount = Array.isArray(ep.video_servers) ? ep.video_servers.length : 0;
-        const lastScrapedMs = ep.created_at ? new Date(ep.created_at).getTime() : 0;
-        const isCooldownActive = (nowMs - lastScrapedMs) < cooldownMs;
-
-        // An episode is considered complete and skipped if:
-        // 1. It has a primary video URL AND
-        // 2. Either it meets the min servers target OR it's still in the 24h cooldown period
-        if (ep.video_url && (serversCount >= minServers || isCooldownActive)) {
-          scrapedMap.get(ep.anime_id).add(ep.episode_number);
-        }
-      }
-
-      // Filter anime that need episodes
-      const needsEpisodes = allAnime.filter((a) => {
-        const scrapedEps = scrapedMap.get(a.id) || new Set();
-        if (a.status === 'ongoing') return true;
-        if (scrapedEps.size === 0) return true;
-        if (a.total_episodes && scrapedEps.size < a.total_episodes) return true;
-        return false;
-      });
-
-      console.log(
-        `📋 Found ${needsEpisodes.length} anime needing episodes (${needsEpisodes.filter((a) => a.status === 'ongoing').length} ongoing)`
-      );
-
-      const rateLimitStatus = await stateManager.getRateLimitStatus(this.rateLimit);
-      console.log(`💨 Rate limit: ${rateLimitStatus.used}/${rateLimitStatus.limit} used`);
-
-      if (rateLimitStatus.used >= this.rateLimit) {
-        console.log(`⚠️  Rate limit is already exhausted (${rateLimitStatus.used}/${this.rateLimit}), stopping batch early`);
-        await stateManager.releaseLock();
-        return 0;
-      }
-
       let queued = 0;
-      for (const anime of needsEpisodes) {
-        const scrapedEps = scrapedMap.get(anime.id) || new Set();
-        let startEp = 1;
-        for (let ep = 1; ep <= 1000; ep++) {
-          if (!scrapedEps.has(ep)) {
-            startEp = ep;
-            break;
+      let offset = 0;
+      let hasMore = true;
+
+      while (hasMore) {
+        const { data: animeBatch, error } = await supabase
+          .from('anime')
+          .select('id, title, title_english, status, total_episodes, rating')
+          .order('rating', { ascending: false })
+          .range(offset, offset + this.dbBatchSize - 1);
+
+        if (error) throw new Error(`Database query failed: ${error?.message}`);
+        if (!animeBatch || animeBatch.length === 0) break;
+
+        hasMore = animeBatch.length === this.dbBatchSize;
+        offset += animeBatch.length;
+
+        // Fetch existing episodes only for this batch of anime IDs
+        const batchIds = animeBatch.map((a) => a.id);
+        const { data: existingEpisodes } = await supabase
+          .from('episodes')
+          .select('anime_id, episode_number, video_url, video_servers, created_at')
+          .in('anime_id', batchIds);
+
+        // Build a map: animeId -> Set of fully-scraped episode numbers
+        const scrapedMap = new Map();
+        for (const ep of existingEpisodes || []) {
+          if (!scrapedMap.has(ep.anime_id)) scrapedMap.set(ep.anime_id, new Set());
+          const serversCount = Array.isArray(ep.video_servers) ? ep.video_servers.length : 0;
+          const lastScrapedMs = ep.created_at ? new Date(ep.created_at).getTime() : 0;
+          const isCooldownActive = (nowMs - lastScrapedMs) < cooldownMs;
+          // Episode is "done" if it has a URL AND (enough servers OR still in cooldown)
+          if (ep.video_url && (serversCount >= minServers || isCooldownActive)) {
+            scrapedMap.get(ep.anime_id).add(ep.episode_number);
           }
         }
 
-        // For ongoing anime:
-        // - If we already have scraped episodes, only check the single next one (startEp)
-        // - If we have 0 scraped episodes, check at most startEp + 1 to catch double-episode premiers
-        const endEp = anime.status === 'ongoing'
-          ? (scrapedEps.size > 0 ? startEp : startEp + 1)
-          : (anime.total_episodes || startEp + 10);
+        // Filter this batch down to anime that actually need work
+        const needsEpisodes = animeBatch.filter((a) => {
+          const scrapedEps = scrapedMap.get(a.id) || new Set();
+          if (a.status === 'ongoing') return true;
+          if (scrapedEps.size === 0) return true;
+          if (a.total_episodes && scrapedEps.size < a.total_episodes) return true;
+          return false;
+        });
 
-        for (let ep = startEp; ep <= endEp; ep++) {
-          // Check rate limit before incrementing to avoid over-inflating Redis counter when full
-          const currentUsed = await stateManager.getRateLimitCount();
-          if (currentUsed >= this.rateLimit) {
-            console.log(`⚠️  Rate limit hit (${this.rateLimit}/hr), stopping batch`);
-            await stateManager.releaseLock();
-            return queued;
-          }
-
-          // Increment rate limit counter
-          await stateManager.incrementRateLimit();
-
-          // Enqueue with priority based on rating
-          await episodeQueue.add(
-            { animeId: anime.id, episodeNumber: ep },
-            {
-              priority: Math.round(anime.rating || 0), // Higher rating = higher priority
-              delay: queued * 1000, // Stagger enqueueing by 1s each
-            }
+        if (offset === animeBatch.length) {
+          // Only log on the first batch
+          console.log(
+            `📋 Found ${needsEpisodes.length} anime needing episodes in first batch (${needsEpisodes.filter((a) => a.status === 'ongoing').length} ongoing)`
           );
+        }
 
-          queued++;
+        // Check rate limit status before processing this batch
+        const rateLimitStatus = await stateManager.getRateLimitStatus(this.rateLimit);
+        if (offset === animeBatch.length) {
+          console.log(`💨 Rate limit: ${rateLimitStatus.used}/${rateLimitStatus.limit} used`);
+        }
+        if (rateLimitStatus.used >= this.rateLimit) {
+          console.log(`⚠️  Rate limit is already exhausted (${rateLimitStatus.used}/${this.rateLimit}), stopping batch early`);
+          return queued;
+        }
+
+        for (const anime of needsEpisodes) {
+          const scrapedEps = scrapedMap.get(anime.id) || new Set();
+
+          // --- FIX: Safe max-episode calculation that won't stack-overflow on large Sets ---
+          // Math.max(...Set) uses spread which hits JS call stack limits on very large sets.
+          // Using reduce() is O(n) but safe for any size.
+          const startEp = scrapedEps.size === 0
+            ? 1
+            : [...scrapedEps].reduce((max, n) => (n > max ? n : max), 0) + 1;
+
+          // For ongoing: only check next 1-2 eps; for finished: fill all gaps up to total
+          const endEp = anime.status === 'ongoing'
+            ? (scrapedEps.size > 0 ? startEp : startEp + 1)
+            : (anime.total_episodes || startEp + 10);
+
+          for (let ep = startEp; ep <= endEp; ep++) {
+            // Smart AniList Airing Check
+            if (anime.status === 'ongoing') {
+              const airingStatus = await isEpisodeReleased(anime, ep);
+              if (!airingStatus.released) {
+                console.log(`  ⏳ Enqueue skipped for "${anime.title_english || anime.title}" EP ${ep}: ${airingStatus.reason}`);
+                break;
+              }
+            }
+
+            // --- FIX: Atomic increment-then-check to eliminate the race condition ---
+            // Previously we did: read → check → increment (two round trips, window for races)
+            // Now: increment first, then check — if we went over, decrement and stop.
+            const newCount = await stateManager.incrementRateLimit();
+            if (newCount > this.rateLimit) {
+              // We over-shot the limit — undo that increment and stop
+              await stateManager.decrementRateLimit();
+              console.log(`⚠️  Rate limit hit (${this.rateLimit}/hr), stopping batch`);
+              return queued;
+            }
+
+            // Enqueue with priority based on rating (higher rating = lower Bull priority number = runs first)
+            await episodeQueue.add(
+              { animeId: anime.id, episodeNumber: ep },
+              {
+                priority: Math.round(anime.rating || 0),
+                delay: queued * 1000, // stagger 1s apart
+              }
+            );
+
+            queued++;
+          }
         }
       }
 
@@ -294,12 +324,34 @@ export class ProductionScheduler {
     for (const anime of ongoingAnime) {
       if (!anime.mal_id) continue;
 
+      // --- FIX: Retry Jikan calls with exponential backoff ---
+      // Previously a single Jikan failure (429, timeout) silently skipped the anime.
+      // Now we retry up to 3 times with 2s → 4s → 8s delays before giving up.
+      const MAX_JIKAN_RETRIES = 3;
+      let jikanData = null;
+
+      for (let attempt = 1; attempt <= MAX_JIKAN_RETRIES; attempt++) {
+        try {
+          const res = await axios.get(`https://api.jikan.moe/v4/anime/${anime.mal_id}`, {
+            timeout: 10000, // 10s hard timeout per request
+          });
+          jikanData = res.data?.data;
+          break; // success — exit retry loop
+        } catch (err) {
+          const isLast = attempt === MAX_JIKAN_RETRIES;
+          if (isLast) {
+            console.warn(`  ⚠️  Jikan failed for "${anime.title_english || anime.title}" after ${MAX_JIKAN_RETRIES} attempts: ${err.message}`);
+          } else {
+            const backoffMs = 2000 * Math.pow(2, attempt - 1); // 2s, 4s, 8s
+            console.warn(`  ⚠️  Jikan attempt ${attempt}/${MAX_JIKAN_RETRIES} failed for "${anime.title_english || anime.title}": ${err.message} — retrying in ${backoffMs / 1000}s`);
+            await new Promise((r) => setTimeout(r, backoffMs));
+          }
+        }
+      }
+
+      if (!jikanData) continue;
+
       try {
-        const res = await axios.get(`https://api.jikan.moe/v4/anime/${anime.mal_id}`);
-        const jikanData = res.data?.data;
-
-        if (!jikanData) continue;
-
         const updates = {};
 
         // Map status
@@ -328,14 +380,57 @@ export class ProductionScheduler {
           console.log(`  ✏️  "${anime.title_english || anime.title}": ${JSON.stringify(updates)}`);
         }
 
-        // Be nice to Jikan API (1.5s delay)
+        // Be nice to Jikan API (1.5s delay between successful requests)
         await new Promise((r) => setTimeout(r, 1500));
       } catch (err) {
-        console.warn(`  ⚠️  Failed to sync "${anime.title_english || anime.title}": ${err.message}`);
+        console.warn(`  ⚠️  Failed to apply metadata update for "${anime.title_english || anime.title}": ${err.message}`);
       }
     }
 
     return updated;
+  }
+
+  /**
+   * Enqueue episodes for a newly added anime immediately
+   */
+  async enqueueAnimeEpisodes(anime) {
+    console.log(`🚀 Immediate enqueue triggered for newly added anime: "${anime.title_english || anime.title}"`);
+    
+    const startEp = 1;
+    const endEp = anime.status === 'ongoing' ? 2 : (anime.total_episodes || 12);
+
+    let queued = 0;
+    for (let ep = startEp; ep <= endEp; ep++) {
+      // Smart AniList Airing Check
+      if (anime.status === 'ongoing') {
+        const airingStatus = await isEpisodeReleased(anime, ep);
+        if (!airingStatus.released) {
+          console.log(`  ⏳ Immediate enqueue skipped for newly added "${anime.title_english || anime.title}" EP ${ep}: ${airingStatus.reason}`);
+          break; // Skip subsequent episodes since they are not released yet
+        }
+      }
+
+      // --- FIX: Atomic increment-then-check (same pattern as enqueueNewEpisodes) ---
+      // Old code: getRateLimitCount() → check → incrementRateLimit() had a race window.
+      // New code: increment first, if we overshot decrement and stop.
+      const newCount = await stateManager.incrementRateLimit();
+      if (newCount > this.rateLimit) {
+        await stateManager.decrementRateLimit();
+        console.warn(`⚠️ Rate limit reached, skipping further immediate enqueuing for EP ${ep}`);
+        break;
+      }
+
+      // Enqueue to Bull queue with high priority
+      await episodeQueue.add(
+        { animeId: anime.id, episodeNumber: ep },
+        {
+          priority: 10, // Higher priority for manual/new additions
+          delay: queued * 1000,
+        }
+      );
+      queued++;
+    }
+    console.log(`✅ Immediate enqueuing completed: enqueued ${queued} jobs for "${anime.title}"`);
   }
 
   /**
@@ -360,13 +455,21 @@ export class ProductionScheduler {
     return {
       enabled: this.enabled,
       running: this.running.episodes || this.running.metadata,
-      lastRun: this.lastRun.episodes,
-      nextRun: this.enabled ? new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString() : null, // estimated fallback
+      lastRun: {
+        episodes: this.lastRun.episodes,
+        metadata: this.lastRun.metadata,
+      },
+      nextRun: {
+        // Episodes: use tracked value, fall back to estimated if not yet set
+        episodes: this.nextRunAt.episodes ?? (this.enabled ? new Date(Date.now() + this.episodeCheckIntervalMs).toISOString() : null),
+        // Metadata: use tracked value (set at startup from computed 3AM target)
+        metadata: this.nextRunAt.metadata ?? null,
+      },
       checkIntervalHours: this.episodeCheckIntervalMs / 3600000,
       maxConcurrent: 4,
       rateLimit: rateLimitStatus.limit,
       scrapedThisHour: rateLimitStatus.used,
-      lastResults: null, // safe to be null
+      lastResults: null,
       queue: {
         ...queueCounts,
         stats,

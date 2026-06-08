@@ -1,3 +1,5 @@
+import { apiClient, apiFetchRaw } from '../../utils/api/client';
+
 export interface SanjiAnimeServerSource {
   label: string;
   lang: 'sub' | 'dub' | 'unknown';
@@ -27,8 +29,6 @@ export interface SanjiAnimeScrapeResult {
 }
 
 export class SanjiAnimeScraperService {
-  private static readonly API_BASE_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
-
   private static inferLang(label: string): 'sub' | 'dub' | 'unknown' {
     const normalized = (label || '').toLowerCase();
     if (normalized.includes('dub')) return 'dub';
@@ -52,24 +52,11 @@ export class SanjiAnimeScraperService {
     try {
       console.log(`🎬 Scraping Sanji Anime for "${inputUrl}" (episode ${episodeNumber})`);
 
-      const response = await fetch(`${this.API_BASE_URL}/api/scrape-sanjianime-episode`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          url: inputUrl,
-          episodeNumber,
-          options,
-        }),
+      return await apiClient.post('/api/scrape-sanjianime-episode', {
+        url: inputUrl,
+        episodeNumber,
+        options,
       });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Server error: ${response.status}`);
-      }
-
-      return await response.json();
     } catch (error) {
       console.error('Error calling Sanji Anime scraper API:', error);
       return {
@@ -197,15 +184,10 @@ export class SanjiAnimeScraperService {
     } = {}
   ): Promise<void> {
     return new Promise((resolve, reject) => {
-      const url = `${this.API_BASE_URL}/api/batch-scrape-sanjianime-episodes-stream`;
+      console.log('🌐 Fetching Sanji Anime batch stream...');
 
-      console.log('🌐 Fetching Sanji Anime batch stream:', url);
-
-      fetch(url, {
+      apiFetchRaw('/api/batch-scrape-sanjianime-episodes-stream', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({
           animeTitle,
           animeId,
@@ -280,4 +262,4 @@ export class SanjiAnimeScraperService {
   static inferSourceLang = this.inferLang;
 }
 
-export default SanjiAnimeScraperService;
+export default SanjiAnimeScraperService;
