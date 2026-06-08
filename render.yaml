@@ -3,13 +3,13 @@ services:
     name: animehub-api
     runtime: docker
     plan: free
-    rootDir: server
+    # Dockerfile is at project root, not inside server/
     dockerfilePath: ./Dockerfile
     envVars:
       - key: NODE_ENV
         value: production
       - key: PORT
-        value: 10000
+        value: 3001
       - key: VITE_SUPABASE_URL
         sync: false
       - key: VITE_SUPABASE_ANON_KEY
@@ -18,3 +18,9 @@ services:
         sync: false
       - key: ALLOWED_ORIGINS
         sync: false
+      - key: REDIS_HOST
+        sync: false
+      - key: REDIS_PORT
+        value: "6379"
+      - key: SCRAPER_MAX_CONCURRENCY
+        value: "2"

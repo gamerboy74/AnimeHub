@@ -1,7 +1,7 @@
-# AnimeHub Express Server Dockerfile  
-FROM node:20-alpine
+# AnimeHub Express Server Dockerfile
+FROM node:22-alpine
 
-# Install Chromium and dependencies for Playwright
+# Install Chromium and dependencies for Playwright/stealth scrapers
 RUN apk add --no-cache \
     chromium \
     nss \
@@ -18,22 +18,21 @@ ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
 
 WORKDIR /app
 
-# Copy package files
+# Copy package files first (separate layer — only rebuilds when deps change)
 COPY package*.json ./
 
-# Install dependencies
+# Install ONLY production dependencies
 RUN npm ci --only=production
 
-# Copy application files
+# Copy server source
 COPY server/ ./server/
-COPY .env* ./
 
 # Expose server port
 EXPOSE 3001
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3001/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
+# Health check (uses wget which is already installed via apk)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3001/health || exit 1
 
 # Start server
 CMD ["node", "server/index.js"]

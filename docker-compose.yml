@@ -1,5 +1,5 @@
 services:
-  # Redis Cache (optional but recommended)
+  # Redis Cache — required for Bull job queue
   redis:
     image: redis:7-alpine
     container_name: animehub-redis
@@ -13,7 +13,7 @@ services:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 3s
-      retries: 3
+      retries: 5
     networks:
       - animehub-network
 
@@ -25,12 +25,15 @@ services:
     container_name: animehub-server
     ports:
       - "3001:3001"
+    env_file:
+      - .env                          # Load your real .env for Supabase keys etc.
     environment:
       - NODE_ENV=${NODE_ENV:-development}
       - PORT=3001
-      - VITE_SUPABASE_URL=${VITE_SUPABASE_URL}
-      - VITE_SUPABASE_ANON_KEY=${VITE_SUPABASE_ANON_KEY}
-      - REDIS_URL=redis://redis:6379
+      # Redis — uses service hostname "redis" within the docker network
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      # Scraper tuning
       - SCRAPER_MAX_CONCURRENCY=${SCRAPER_MAX_CONCURRENCY:-2}
       - SCRAPER_BREAKER_THRESHOLD=${SCRAPER_BREAKER_THRESHOLD:-8}
       - SCRAPER_BREAKER_COOLDOWN_MS=${SCRAPER_BREAKER_COOLDOWN_MS:-30000}
@@ -51,9 +54,8 @@ services:
         ]
       interval: 30s
       timeout: 10s
+      start_period: 20s
       retries: 3
-    volumes:
-      - ./server:/app/server:ro
     networks:
       - animehub-network
 
